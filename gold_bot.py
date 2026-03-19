@@ -1,27 +1,30 @@
 """
 Gold Trading Bot per Telegram
-Analizza XAU/USD e invia segnali BUY/SELL con TP, SL e punteggio a stelle
+Analizza XAU/USD e invia segnali BUY/SELL con TP, SL, punteggio e storico
 """
 
 import logging
 import asyncio
+import json
+import os
 from datetime import datetime
-import requests as req
 import pandas as pd
 import ta
+import requests as req
 from telegram import Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ─────────────────────────────────────────────
-# CONFIGURAZIONE — modifica solo questi valori
+# CONFIGURAZIONE
 # ─────────────────────────────────────────────
-import os
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.environ.get("CHAT_ID", "")
+TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
 CHECK_INTERVAL = 3
 ATR_SL_MULT    = 1.5
 ATR_TP_MULT    = 3.0
+HISTORY_FILE   = "signals_history.json"
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -33,15 +36,89 @@ logger = logging.getLogger(__name__)
 last_signal = None
 
 
+# ─────────────────────────────────────────────
+# STORICO SEGNALI
+# ─────────────────────────────────────────────
+
+def load_history() -> list:
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+
+def save_history(history: list):
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def add_signal_to_history(signal: str, price: float, tp: float, sl: float):
+    history = load_history()
+    history.append({
+        "time":   datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "signal": signal,
+        "price":  price,
+        "tp":     tp,
+        "sl":     sl,
+        "result": "pending"
+    })
+    save_history(history)
+
+
+def update_history_results(current_price: float):
+    """Controlla i segnali pending e aggiorna il risultato."""
+    history = load_history()
+    updated = False
+    for entry in history:
+        if entry["result"] != "pending":
+            continue
+        if entry["signal"] == "BUY":
+            if current_price >= entry["tp"]:
+                entry["result"] = "WIN"
+                updated = True
+            elif current_price <= entry["sl"]:
+                entry["result"] = "LOSS"
+                updated = True
+        elif entry["signal"] == "SELL":
+            if current_price <= entry["tp"]:
+                entry["result"] = "WIN"
+                updated = True
+            elif current_price >= entry["sl"]:
+                entry["result"] = "LOSS"
+                updated = True
+    if updated:
+        save_history(history)
+    return history
+
+
+def compute_stats() -> dict:
+    history = load_history()
+    total   = len([h for h in history if h["result"] != "pending"])
+    wins    = len([h for h in history if h["result"] == "WIN"])
+    losses  = len([h for h in history if h["result"] == "LOSS"])
+    pending = len([h for h in history if h["result"] == "pending"])
+    winrate = round((wins / total * 100), 1) if total > 0 else 0
+    return {
+        "total":   total,
+        "wins":    wins,
+        "losses":  losses,
+        "pending": pending,
+        "winrate": winrate
+    }
+
+
+# ─────────────────────────────────────────────
+# DATI E INDICATORI
+# ─────────────────────────────────────────────
+
 def get_gold_data() -> pd.DataFrame:
     """Scarica dati oro XAU/USD da Twelve Data."""
-    API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
     url = "https://api.twelvedata.com/time_series"
     params = {
-        "symbol": "XAU/USD",
-        "interval": "1min",
+        "symbol":     "XAU/USD",
+        "interval":   "1min",
         "outputsize": 500,
-        "apikey": API_KEY
+        "apikey":     TWELVE_API_KEY
     }
     r = req.get(url, params=params, timeout=10)
     data = r.json()
@@ -51,11 +128,10 @@ def get_gold_data() -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df.index = pd.to_datetime(df["datetime"])
     df = df.rename(columns={
-        "open": "Open",
-        "high": "High",
-        "low": "Low",
-        "close": "Close",
-        "volume": "Volume"
+        "open":  "Open",
+        "high":  "High",
+        "low":   "Low",
+        "close": "Close"
     })
     df = df[["Open", "High", "Low", "Close"]].astype(float)
     df["Volume"] = 0
@@ -65,7 +141,6 @@ def get_gold_data() -> pd.DataFrame:
 
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Calcola EMA, RSI, MACD e ATR."""
     df["ema20"] = ta.trend.ema_indicator(df["Close"], window=20)
     df["ema50"] = ta.trend.ema_indicator(df["Close"], window=50)
     df["rsi"]   = ta.momentum.rsi(df["Close"], window=14)
@@ -89,7 +164,6 @@ def stars(score: int) -> str:
 
 
 def analyze(df: pd.DataFrame) -> dict:
-    """Genera il segnale di trading con punteggio a stelle."""
     row   = df.iloc[-1]
     price = round(float(row["Close"]), 2)
     atr   = float(row["atr"])
@@ -102,32 +176,29 @@ def analyze(df: pd.DataFrame) -> dict:
     sl_dist = round(atr * ATR_SL_MULT, 2)
     tp_dist = round(atr * ATR_TP_MULT, 2)
 
-    # Punteggio BUY (0-5)
     buy_score = 0
-    if ema20 > ema50:  buy_score += 1
-    if macd > sig:     buy_score += 1
-    if rsi < 50:       buy_score += 1
-    if rsi < 40:       buy_score += 1
-    if rsi < 30:       buy_score += 1
+    if ema20 > ema50: buy_score += 1
+    if macd > sig:    buy_score += 1
+    if rsi < 50:      buy_score += 1
+    if rsi < 40:      buy_score += 1
+    if rsi < 30:      buy_score += 1
 
-    # Punteggio SELL (0-5)
     sell_score = 0
-    if ema20 < ema50:  sell_score += 1
-    if macd < sig:     sell_score += 1
-    if rsi > 50:       sell_score += 1
-    if rsi > 60:       sell_score += 1
-    if rsi > 70:       sell_score += 1
+    if ema20 < ema50: sell_score += 1
+    if macd < sig:    sell_score += 1
+    if rsi > 50:      sell_score += 1
+    if rsi > 60:      sell_score += 1
+    if rsi > 70:      sell_score += 1
 
     if buy_score >= 2:
         signal   = "BUY"
         sl       = round(price - sl_dist, 2)
         tp       = round(price + tp_dist, 2)
         strength = stars(buy_score)
-        macd_txt = "sopra" if macd > sig else "sotto"
         reason   = (
             f"EMA20 > EMA50 (trend rialzista)\n"
             f"RSI: {round(rsi, 1)}\n"
-            f"MACD {macd_txt} la signal line\n"
+            f"MACD {'sopra' if macd > sig else 'sotto'} la signal line\n"
             f"Punteggio: {buy_score}/5"
         )
     elif sell_score >= 2:
@@ -135,11 +206,10 @@ def analyze(df: pd.DataFrame) -> dict:
         sl       = round(price + sl_dist, 2)
         tp       = round(price - tp_dist, 2)
         strength = stars(sell_score)
-        macd_txt = "sotto" if macd < sig else "sopra"
         reason   = (
             f"EMA20 < EMA50 (trend ribassista)\n"
             f"RSI: {round(rsi, 1)}\n"
-            f"MACD {macd_txt} la signal line\n"
+            f"MACD {'sotto' if macd < sig else 'sopra'} la signal line\n"
             f"Punteggio: {sell_score}/5"
         )
     else:
@@ -167,7 +237,6 @@ def analyze(df: pd.DataFrame) -> dict:
 
 
 def format_message(data: dict) -> str:
-    """Formatta il messaggio da inviare su Telegram."""
     emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "⚪"}.get(data["signal"], "⚪")
 
     msg = (
@@ -191,7 +260,7 @@ def format_message(data: dict) -> str:
         f"{data['reason']}\n"
         f"\n📉 ATR (14): ${data['atr']}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-       "_Fonte: Twelve Data | Timeframe: 1min_"
+        f"_Fonte: Twelve Data | Timeframe: 1min_"
     )
     return msg
 
@@ -207,6 +276,7 @@ async def cmd_start(update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 Il tuo Chat ID è: `{chat_id}`\n\n"
         f"Comandi disponibili:\n"
         f"/signal — Analisi manuale immediata\n"
+        f"/stats — Storico segnali e % successo\n"
         f"/status — Stato del bot e parametri\n"
         f"/start — Mostra questo messaggio",
         parse_mode="Markdown"
@@ -226,6 +296,37 @@ async def cmd_signal(update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Errore nell'analisi: {e}")
 
 
+async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /stats — mostra storico segnali e percentuale successo."""
+    stats   = compute_stats()
+    history = load_history()
+
+    # Ultimi 5 segnali
+    recent = [h for h in history if h["result"] != "pending"][-5:]
+    recent_txt = ""
+    for h in reversed(recent):
+        emoji = "✅" if h["result"] == "WIN" else "❌"
+        recent_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
+
+    if not recent_txt:
+        recent_txt = "Nessun segnale completato ancora.\n"
+
+    msg = (
+        f"📊 *STORICO SEGNALI*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"✅ Vincenti: *{stats['wins']}*\n"
+        f"❌ Perdenti: *{stats['losses']}*\n"
+        f"⏳ In attesa: *{stats['pending']}*\n"
+        f"📈 Win Rate: *{stats['winrate']}%*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"*Ultimi 5 segnali:*\n"
+        f"{recent_txt}"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Totale segnali completati: {stats['total']}_"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
 async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"⚙️ *Stato Gold Bot*\n"
@@ -233,8 +334,8 @@ async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
         f"🔁 Controllo automatico: ogni *{CHECK_INTERVAL} min*\n"
         f"📐 SL moltiplicatore ATR: *{ATR_SL_MULT}x*\n"
         f"🎯 TP moltiplicatore ATR: *{ATR_TP_MULT}x*\n"
-        f"📊 Ticker: *GC=F (Gold Futures)*\n"
-        f"⏱ Timeframe analisi: *1H*\n"
+        f"📊 Fonte: *Twelve Data*\n"
+        f"⏱ Timeframe: *1min*\n"
         f"🤖 Stato: *Attivo*",
         parse_mode="Markdown"
     )
@@ -251,9 +352,16 @@ async def auto_check(bot: Bot):
         df   = compute_indicators(df)
         data = analyze(df)
 
+        # Aggiorna risultati segnali precedenti
+        update_history_results(data["price"])
+
         is_new = data["signal"] != "NEUTRAL" and data["signal"] != last_signal
         if data["signal"] != "NEUTRAL":
             last_signal = data["signal"]
+            if is_new:
+                add_signal_to_history(
+                    data["signal"], data["price"], data["tp"], data["sl"]
+                )
 
         prefix = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
         msg = prefix + format_message(data)
@@ -274,6 +382,7 @@ async def main():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("signal", cmd_signal))
+    app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("status", cmd_status))
 
     scheduler = AsyncIOScheduler()
