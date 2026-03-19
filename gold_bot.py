@@ -6,7 +6,7 @@ Analizza XAU/USD e invia segnali BUY/SELL con TP, SL e punteggio a stelle
 import logging
 import asyncio
 from datetime import datetime
-import yfinance as yf
+import requests as req
 import pandas as pd
 import ta
 from telegram import Bot
@@ -34,15 +34,35 @@ last_signal = None
 
 
 def get_gold_data() -> pd.DataFrame:
-    """Scarica dati oro Gold Futures da yfinance."""
-    import curl_cffi.requests as cfsession
-    session = cfsession.Session(impersonate="chrome")
-    ticker = yf.Ticker("GC=F", session=session)
-    df = ticker.history(period="60d", interval="1h")
-    if df.empty:
-        raise ValueError("Nessun dato ricevuto da yfinance")
-    df.dropna(inplace=True)
-    return df
+    """Scarica dati oro XAU/USD da Metals-API gratuita."""
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/GC=F"
+    params = {
+        "interval": "1h",
+        "range": "60d",
+        "includePrePost": "false"
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    r = req.get(url, params=params, headers=headers, timeout=10)
+    data = r.json()
+    try:
+        result = data["chart"]["result"][0]
+        timestamps = result["timestamp"]
+        ohlcv = result["indicators"]["quote"][0]
+        df = pd.DataFrame({
+            "Open":   ohlcv["open"],
+            "High":   ohlcv["high"],
+            "Low":    ohlcv["low"],
+            "Close":  ohlcv["close"],
+            "Volume": ohlcv["volume"]
+        }, index=pd.to_datetime(timestamps, unit="s"))
+        df.dropna(inplace=True)
+        if df.empty:
+            raise ValueError("Nessun dato ricevuto")
+        return df
+    except Exception as e:
+        raise ValueE
 
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
