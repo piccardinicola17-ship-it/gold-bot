@@ -35,7 +35,9 @@ last_signal = None
 
 def get_gold_data() -> pd.DataFrame:
     """Scarica dati oro Gold Futures da yfinance."""
-    ticker = yf.Ticker("GC=F")
+    import curl_cffi.requests as cfsession
+    session = cfsession.Session(impersonate="chrome")
+    ticker = yf.Ticker("GC=F", session=session)
     df = ticker.history(period="60d", interval="1h")
     if df.empty:
         raise ValueError("Nessun dato ricevuto da yfinance")
