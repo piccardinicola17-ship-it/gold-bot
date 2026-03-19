@@ -1,6 +1,6 @@
 """
 Gold Trading Bot per Telegram
-Analizza XAU/USD con Bande di Bollinger, filtro orario, report giornaliero e storico
+Analizza XAU/USD con Bollinger, Stocastico, notizie mercato, filtro orario e report
 """
 
 import logging
@@ -22,6 +22,7 @@ import pytz
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.environ.get("CHAT_ID", "")
 TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
+NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "d929b1d0334e4160872bbb1bef9fbb15")
 CHECK_INTERVAL = 3
 ATR_SL_MULT    = 0.6
 ATR_TP_MULT    = 0.6
@@ -35,7 +36,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-last_signal = None
+last_signal    = None
+last_news_time = None
 
 
 # ─────────────────────────────────────────────
@@ -58,6 +60,39 @@ def market_status_text() -> str:
     if now.hour == 0:
         return "🔴 Mercato chiuso (pausa notturna)"
     return "🟢 Mercato aperto"
+
+
+# ─────────────────────────────────────────────
+# NOTIZIE DI MERCATO
+# ─────────────────────────────────────────────
+
+def get_gold_news() -> list:
+    """Scarica ultime notizie sull'oro da NewsAPI."""
+    try:
+        url = "https://newsapi.org/v2/everything"
+        params = {
+            "q":        "gold XAU price OR gold market OR fed interest rates",
+            "language": "en",
+            "sortBy":   "publishedAt",
+            "pageSize": 3,
+            "apiKey":   NEWS_API_KEY
+        }
+        r = req.get(url, params=params, timeout=10)
+        data = r.json()
+        if data.get("status") != "ok":
+            return []
+        articles = data.get("articles", [])
+        news = []
+        for a in articles:
+            title = a.get("title", "")
+            source = a.get("source", {}).get("name", "")
+            published = a.get("publishedAt", "")[:10]
+            if title and source:
+                news.append(f"📰 *{source}* ({published})\n_{title}_")
+        return news
+    except Exception as e:
+        logger.error(f"Errore notizie: {e}")
+        return []
 
 
 # ─────────────────────────────────────────────
@@ -200,28 +235,35 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_lower"]  = bb.bollinger_lband()
     df["bb_middle"] = bb.bollinger_mavg()
 
+    # Stocastico
+    stoch = ta.momentum.StochasticOscillator(
+        df["High"], df["Low"], df["Close"], window=14, smooth_window=3
+    )
+    df["stoch_k"] = stoch.stoch()
+    df["stoch_d"] = stoch.stoch_signal()
+
     return df
 
 
 def stars(score: int) -> str:
-    if score >= 6: return "⭐⭐⭐ FORTISSIMO"
-    if score >= 5: return "⭐⭐⭐ FORTE"
+    if score >= 7: return "⭐⭐⭐ FORTISSIMO"
+    if score >= 6: return "⭐⭐⭐ FORTE"
     if score >= 4: return "⭐⭐ MODERATO"
     if score == 3: return "⭐ DEBOLE"
     return ""
 
 
 def estimate_probability(score: int, rsi: float, atr: float) -> int:
-    base = {3: 50, 4: 60, 5: 72, 6: 82, 7: 90}.get(score, 50)
+    base = {3: 50, 4: 60, 5: 68, 6: 76, 7: 84, 8: 90, 9: 93}.get(score, 50)
     if rsi < 25 or rsi > 75:
-        base += 5
+        base += 4
     if atr < 10:
         base += 3
-    return min(base, 93)
+    return min(base, 94)
 
 
 def analyze(df: pd.DataFrame) -> dict:
-    row   = df.iloc[-1]
+    row      = df.iloc[-1]
     price    = round(float(row["Close"]), 2)
     atr      = float(row["atr"])
     rsi      = float(row["rsi"])
@@ -231,37 +273,51 @@ def analyze(df: pd.DataFrame) -> dict:
     sig      = float(row["signal_line"])
     bb_upper = float(row["bb_upper"])
     bb_lower = float(row["bb_lower"])
+    stoch_k  = float(row["stoch_k"])
+    stoch_d  = float(row["stoch_d"])
 
     sl_dist = round(atr * ATR_SL_MULT, 2)
     tp_dist = round(atr * ATR_TP_MULT, 2)
 
-    # Punteggio BUY (0-7)
+    # Punteggio BUY (0-9)
     buy_score = 0
     if ema20 > ema50:        buy_score += 1
     if macd > sig:           buy_score += 1
     if rsi < 50:             buy_score += 1
     if rsi < 40:             buy_score += 1
     if rsi < 30:             buy_score += 1
-    if price <= bb_lower:    buy_score += 1  # prezzo tocca banda inferiore
-    if price < bb_lower:     buy_score += 1  # prezzo sotto banda inferiore
+    if price <= bb_lower:    buy_score += 1
+    if price < bb_lower:     buy_score += 1
+    if stoch_k < 30:         buy_score += 1  # Stocastico ipervenduto
+    if stoch_k > stoch_d:    buy_score += 1  # Stocastico in rialzo
 
-    # Punteggio SELL (0-7)
+    # Punteggio SELL (0-9)
     sell_score = 0
     if ema20 < ema50:        sell_score += 1
     if macd < sig:           sell_score += 1
     if rsi > 50:             sell_score += 1
     if rsi > 60:             sell_score += 1
     if rsi > 70:             sell_score += 1
-    if price >= bb_upper:    sell_score += 1  # prezzo tocca banda superiore
-    if price > bb_upper:     sell_score += 1  # prezzo sopra banda superiore
+    if price >= bb_upper:    sell_score += 1
+    if price > bb_upper:     sell_score += 1
+    if stoch_k > 70:         sell_score += 1  # Stocastico ipercomprato
+    if stoch_k < stoch_d:    sell_score += 1  # Stocastico in ribasso
 
-    # Calcola posizione bande per il messaggio
+    # Testo Bollinger
     if price <= bb_lower:
         bb_txt = f"📉 Prezzo sotto banda inferiore BB (${round(bb_lower, 2)})"
     elif price >= bb_upper:
         bb_txt = f"📈 Prezzo sopra banda superiore BB (${round(bb_upper, 2)})"
     else:
         bb_txt = f"📊 BB: {round(bb_lower, 2)} — {round(bb_upper, 2)}"
+
+    # Testo Stocastico
+    if stoch_k < 30:
+        stoch_txt = f"📉 Stocastico ipervenduto ({round(stoch_k, 1)})"
+    elif stoch_k > 70:
+        stoch_txt = f"📈 Stocastico ipercomprato ({round(stoch_k, 1)})"
+    else:
+        stoch_txt = f"📊 Stocastico: {round(stoch_k, 1)}"
 
     if buy_score >= 3:
         signal   = "BUY"
@@ -274,7 +330,8 @@ def analyze(df: pd.DataFrame) -> dict:
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sopra' if macd > sig else 'sotto'} la signal line\n"
             f"{bb_txt}\n"
-            f"Punteggio: {buy_score}/7"
+            f"{stoch_txt}\n"
+            f"Punteggio: {buy_score}/9"
         )
     elif sell_score >= 3:
         signal   = "SELL"
@@ -287,7 +344,8 @@ def analyze(df: pd.DataFrame) -> dict:
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sotto' if macd < sig else 'sopra'} la signal line\n"
             f"{bb_txt}\n"
-            f"Punteggio: {sell_score}/7"
+            f"{stoch_txt}\n"
+            f"Punteggio: {sell_score}/9"
         )
     else:
         signal   = "NEUTRAL"
@@ -299,7 +357,8 @@ def analyze(df: pd.DataFrame) -> dict:
             f"Nessuna confluenza chiara tra gli indicatori.\n"
             f"RSI: {round(rsi, 1)} | "
             f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}\n"
-            f"{bb_txt}"
+            f"{bb_txt}\n"
+            f"{stoch_txt}"
         )
 
     return {
@@ -357,6 +416,7 @@ async def cmd_start(update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 Il tuo Chat ID è: `{chat_id}`\n\n"
         f"Comandi disponibili:\n"
         f"/signal — Analisi manuale immediata\n"
+        f"/news — Ultime notizie sull'oro\n"
         f"/stats — Storico segnali e % successo\n"
         f"/status — Stato del bot e parametri\n"
         f"/start — Mostra questo messaggio",
@@ -375,6 +435,23 @@ async def cmd_signal(update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Errore /signal: {e}")
         await update.message.reply_text(f"❌ Errore nell'analisi: {e}")
+
+
+async def cmd_news(update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /news — ultime notizie sull'oro."""
+    await update.message.reply_text("⏳ Carico le notizie...")
+    news = get_gold_news()
+    if not news:
+        await update.message.reply_text("❌ Nessuna notizia disponibile al momento.")
+        return
+    msg = (
+        f"📰 *ULTIME NOTIZIE ORO*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        + "\n\n".join(news) +
+        f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
+        f"_⚠️ Le notizie importanti possono invalidare i segnali tecnici_"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
@@ -444,6 +521,8 @@ async def send_daily_report(bot: Bot):
         signals_txt = "Nessun segnale oggi.\n"
 
     overall = compute_stats()
+    news    = get_gold_news()
+    news_txt = "\n\n".join(news[:2]) if news else "Nessuna notizia disponibile."
 
     msg = (
         f"🌙 *REPORT GIORNALIERO — {today}*\n"
@@ -461,6 +540,9 @@ async def send_daily_report(bot: Bot):
         f"📊 Win Rate totale: *{overall['winrate']}%*\n"
         f"🏆 Totale segnali: *{overall['total']}*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"*Ultime notizie oro:*\n"
+        f"{news_txt}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
         f"_Buona notte! Il bot riprende domani alle 01:00_ 🌙"
     )
 
@@ -473,7 +555,7 @@ async def send_daily_report(bot: Bot):
 # ─────────────────────────────────────────────
 
 async def auto_check(bot: Bot):
-    global last_signal
+    global last_signal, last_news_time
 
     if not is_market_open():
         logger.info("Mercato chiuso — segnale saltato")
@@ -499,6 +581,21 @@ async def auto_check(bot: Bot):
         await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
         logger.info(f"Segnale inviato: {data['signal']} @ {data['price']}")
 
+        # Invia notizie ogni ora
+        now = datetime.now(TIMEZONE)
+        if last_news_time is None or (now - last_news_time).seconds >= 3600:
+            news = get_gold_news()
+            if news:
+                news_msg = (
+                    f"📰 *AGGIORNAMENTO NOTIZIE ORO*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                    + "\n\n".join(news) +
+                    f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
+                    f"_⚠️ Notizie importanti possono invalidare i segnali tecnici_"
+                )
+                await bot.send_message(chat_id=CHAT_ID, text=news_msg, parse_mode="Markdown")
+                last_news_time = now
+
     except Exception as e:
         logger.error(f"Errore job automatico: {e}")
         await bot.send_message(chat_id=CHAT_ID, text=f"⚠️ Errore analisi automatica: {e}")
@@ -513,6 +610,7 @@ async def main():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("signal", cmd_signal))
+    app.add_handler(CommandHandler("news", cmd_news))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("status", cmd_status))
 
