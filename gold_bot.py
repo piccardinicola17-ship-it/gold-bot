@@ -1,6 +1,6 @@
 """
 Gold Trading Bot per Telegram
-Analizza XAU/USD con filtro orario, report giornaliero, probabilità e storico
+Analizza XAU/USD con Bande di Bollinger, filtro orario, report giornaliero e storico
 """
 
 import logging
@@ -43,12 +43,9 @@ last_signal = None
 # ─────────────────────────────────────────────
 
 def is_market_open() -> bool:
-    """Controlla se il mercato oro è aperto (ora italiana)."""
     now = datetime.now(TIMEZONE)
-    # Chiuso nel weekend
     if now.weekday() >= 5:
         return False
-    # Aperto 01:00 - 23:59 ora italiana
     if now.hour == 0:
         return False
     return True
@@ -134,7 +131,6 @@ def compute_stats() -> dict:
 
 
 def compute_daily_stats() -> dict:
-    """Statistiche solo di oggi."""
     history = load_history()
     today   = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
     today_h = [h for h in history if h["time"].startswith(today)]
@@ -158,7 +154,6 @@ def compute_daily_stats() -> dict:
 # ─────────────────────────────────────────────
 
 def get_gold_data() -> pd.DataFrame:
-    """Scarica dati oro XAU/USD da Twelve Data."""
     url = "https://api.twelvedata.com/time_series"
     params = {
         "symbol":     "XAU/USD",
@@ -198,52 +193,75 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["atr"] = ta.volatility.average_true_range(
         df["High"], df["Low"], df["Close"], window=14
     )
+
+    # Bande di Bollinger
+    bb = ta.volatility.BollingerBands(df["Close"], window=20, window_dev=2)
+    df["bb_upper"]  = bb.bollinger_hband()
+    df["bb_lower"]  = bb.bollinger_lband()
+    df["bb_middle"] = bb.bollinger_mavg()
+
     return df
 
 
 def stars(score: int) -> str:
-    if score >= 5: return "⭐⭐⭐ FORTISSIMO"
-    if score == 4: return "⭐⭐⭐ FORTE"
-    if score == 3: return "⭐⭐ MODERATO"
-    if score == 2: return "⭐ DEBOLE"
+    if score >= 6: return "⭐⭐⭐ FORTISSIMO"
+    if score >= 5: return "⭐⭐⭐ FORTE"
+    if score >= 4: return "⭐⭐ MODERATO"
+    if score == 3: return "⭐ DEBOLE"
     return ""
 
 
 def estimate_probability(score: int, rsi: float, atr: float) -> int:
-    base = {2: 50, 3: 60, 4: 72, 5: 82}.get(score, 50)
+    base = {3: 50, 4: 60, 5: 72, 6: 82, 7: 90}.get(score, 50)
     if rsi < 25 or rsi > 75:
-        base += 8
-    if atr < 10:
         base += 5
-    return min(base, 92)
+    if atr < 10:
+        base += 3
+    return min(base, 93)
 
 
 def analyze(df: pd.DataFrame) -> dict:
     row   = df.iloc[-1]
-    price = round(float(row["Close"]), 2)
-    atr   = float(row["atr"])
-    rsi   = float(row["rsi"])
-    ema20 = float(row["ema20"])
-    ema50 = float(row["ema50"])
-    macd  = float(row["macd"])
-    sig   = float(row["signal_line"])
+    price    = round(float(row["Close"]), 2)
+    atr      = float(row["atr"])
+    rsi      = float(row["rsi"])
+    ema20    = float(row["ema20"])
+    ema50    = float(row["ema50"])
+    macd     = float(row["macd"])
+    sig      = float(row["signal_line"])
+    bb_upper = float(row["bb_upper"])
+    bb_lower = float(row["bb_lower"])
 
     sl_dist = round(atr * ATR_SL_MULT, 2)
     tp_dist = round(atr * ATR_TP_MULT, 2)
 
+    # Punteggio BUY (0-7)
     buy_score = 0
-    if ema20 > ema50: buy_score += 1
-    if macd > sig:    buy_score += 1
-    if rsi < 50:      buy_score += 1
-    if rsi < 40:      buy_score += 1
-    if rsi < 30:      buy_score += 1
+    if ema20 > ema50:        buy_score += 1
+    if macd > sig:           buy_score += 1
+    if rsi < 50:             buy_score += 1
+    if rsi < 40:             buy_score += 1
+    if rsi < 30:             buy_score += 1
+    if price <= bb_lower:    buy_score += 1  # prezzo tocca banda inferiore
+    if price < bb_lower:     buy_score += 1  # prezzo sotto banda inferiore
 
+    # Punteggio SELL (0-7)
     sell_score = 0
-    if ema20 < ema50: sell_score += 1
-    if macd < sig:    sell_score += 1
-    if rsi > 50:      sell_score += 1
-    if rsi > 60:      sell_score += 1
-    if rsi > 70:      sell_score += 1
+    if ema20 < ema50:        sell_score += 1
+    if macd < sig:           sell_score += 1
+    if rsi > 50:             sell_score += 1
+    if rsi > 60:             sell_score += 1
+    if rsi > 70:             sell_score += 1
+    if price >= bb_upper:    sell_score += 1  # prezzo tocca banda superiore
+    if price > bb_upper:     sell_score += 1  # prezzo sopra banda superiore
+
+    # Calcola posizione bande per il messaggio
+    if price <= bb_lower:
+        bb_txt = f"📉 Prezzo sotto banda inferiore BB (${round(bb_lower, 2)})"
+    elif price >= bb_upper:
+        bb_txt = f"📈 Prezzo sopra banda superiore BB (${round(bb_upper, 2)})"
+    else:
+        bb_txt = f"📊 BB: {round(bb_lower, 2)} — {round(bb_upper, 2)}"
 
     if buy_score >= 3:
         signal   = "BUY"
@@ -255,7 +273,8 @@ def analyze(df: pd.DataFrame) -> dict:
             f"EMA20 > EMA50 (trend rialzista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sopra' if macd > sig else 'sotto'} la signal line\n"
-            f"Punteggio: {buy_score}/5"
+            f"{bb_txt}\n"
+            f"Punteggio: {buy_score}/7"
         )
     elif sell_score >= 3:
         signal   = "SELL"
@@ -267,7 +286,8 @@ def analyze(df: pd.DataFrame) -> dict:
             f"EMA20 < EMA50 (trend ribassista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sotto' if macd < sig else 'sopra'} la signal line\n"
-            f"Punteggio: {sell_score}/5"
+            f"{bb_txt}\n"
+            f"Punteggio: {sell_score}/7"
         )
     else:
         signal   = "NEUTRAL"
@@ -278,7 +298,8 @@ def analyze(df: pd.DataFrame) -> dict:
         reason   = (
             f"Nessuna confluenza chiara tra gli indicatori.\n"
             f"RSI: {round(rsi, 1)} | "
-            f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}"
+            f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}\n"
+            f"{bb_txt}"
         )
 
     return {
@@ -406,7 +427,6 @@ async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 
 async def send_daily_report(bot: Bot):
-    """Invia il report giornaliero alle 22:00."""
     stats = compute_daily_stats()
     today = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
 
