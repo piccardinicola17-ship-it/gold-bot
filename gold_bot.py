@@ -22,8 +22,8 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.environ.get("CHAT_ID", "")
 TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
 CHECK_INTERVAL = 3
-ATR_SL_MULT    = 1.5
-ATR_TP_MULT    = 3.0
+ATR_SL_MULT    = 1.0
+ATR_TP_MULT    = 1.5
 HISTORY_FILE   = "signals_history.json"
 # ─────────────────────────────────────────────
 
