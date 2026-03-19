@@ -1,6 +1,6 @@
 """
 Gold Trading Bot per Telegram
-Analizza XAU/USD e invia segnali BUY/SELL con TP, SL, punteggio, probabilità e storico
+Analizza XAU/USD con filtro orario, report giornaliero, probabilità e storico
 """
 
 import logging
@@ -14,6 +14,7 @@ import requests as req
 from telegram import Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import pytz
 
 # ─────────────────────────────────────────────
 # CONFIGURAZIONE
@@ -25,6 +26,7 @@ CHECK_INTERVAL = 3
 ATR_SL_MULT    = 0.6
 ATR_TP_MULT    = 0.6
 HISTORY_FILE   = "signals_history.json"
+TIMEZONE       = pytz.timezone("Europe/Rome")
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -34,6 +36,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 last_signal = None
+
+
+# ─────────────────────────────────────────────
+# FILTRO ORARIO
+# ─────────────────────────────────────────────
+
+def is_market_open() -> bool:
+    """Controlla se il mercato oro è aperto (ora italiana)."""
+    now = datetime.now(TIMEZONE)
+    # Chiuso nel weekend
+    if now.weekday() >= 5:
+        return False
+    # Aperto 01:00 - 23:59 ora italiana
+    if now.hour == 0:
+        return False
+    return True
+
+
+def market_status_text() -> str:
+    now = datetime.now(TIMEZONE)
+    if now.weekday() >= 5:
+        return "🔴 Mercato chiuso (weekend)"
+    if now.hour == 0:
+        return "🔴 Mercato chiuso (pausa notturna)"
+    return "🟢 Mercato aperto"
 
 
 # ─────────────────────────────────────────────
@@ -55,7 +82,7 @@ def save_history(history: list):
 def add_signal_to_history(signal: str, price: float, tp: float, sl: float):
     history = load_history()
     history.append({
-        "time":   datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "time":   datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M"),
         "signal": signal,
         "price":  price,
         "tp":     tp,
@@ -103,6 +130,26 @@ def compute_stats() -> dict:
         "losses":  losses,
         "pending": pending,
         "winrate": winrate
+    }
+
+
+def compute_daily_stats() -> dict:
+    """Statistiche solo di oggi."""
+    history = load_history()
+    today   = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
+    today_h = [h for h in history if h["time"].startswith(today)]
+    total   = len([h for h in today_h if h["result"] != "pending"])
+    wins    = len([h for h in today_h if h["result"] == "WIN"])
+    losses  = len([h for h in today_h if h["result"] == "LOSS"])
+    pending = len([h for h in today_h if h["result"] == "pending"])
+    winrate = round((wins / total * 100), 1) if total > 0 else 0
+    return {
+        "total":   total,
+        "wins":    wins,
+        "losses":  losses,
+        "pending": pending,
+        "winrate": winrate,
+        "signals": today_h
     }
 
 
@@ -244,7 +291,7 @@ def analyze(df: pd.DataFrame) -> dict:
         "rsi":      round(rsi, 1),
         "atr":      round(atr, 2),
         "reason":   reason,
-        "time":     datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "time":     datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M"),
     }
 
 
@@ -339,9 +386,11 @@ async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
+    status = market_status_text()
     await update.message.reply_text(
         f"⚙️ *Stato Gold Bot*\n"
         f"━━━━━━━━━━━━━━\n"
+        f"{status}\n"
         f"🔁 Controllo automatico: ogni *{CHECK_INTERVAL} min*\n"
         f"📐 SL moltiplicatore ATR: *{ATR_SL_MULT}x*\n"
         f"🎯 TP moltiplicatore ATR: *{ATR_TP_MULT}x*\n"
@@ -353,11 +402,63 @@ async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# REPORT GIORNALIERO
+# ─────────────────────────────────────────────
+
+async def send_daily_report(bot: Bot):
+    """Invia il report giornaliero alle 22:00."""
+    stats = compute_daily_stats()
+    today = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
+
+    signals_txt = ""
+    for h in stats["signals"]:
+        if h["result"] == "WIN":
+            emoji = "✅"
+        elif h["result"] == "LOSS":
+            emoji = "❌"
+        else:
+            emoji = "⏳"
+        signals_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
+
+    if not signals_txt:
+        signals_txt = "Nessun segnale oggi.\n"
+
+    overall = compute_stats()
+
+    msg = (
+        f"🌙 *REPORT GIORNALIERO — {today}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"*Oggi:*\n"
+        f"✅ Vincenti: *{stats['wins']}*\n"
+        f"❌ Perdenti: *{stats['losses']}*\n"
+        f"⏳ In attesa: *{stats['pending']}*\n"
+        f"📈 Win Rate oggi: *{stats['winrate']}%*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"*Segnali di oggi:*\n"
+        f"{signals_txt}"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"*Totale storico:*\n"
+        f"📊 Win Rate totale: *{overall['winrate']}%*\n"
+        f"🏆 Totale segnali: *{overall['total']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Buona notte! Il bot riprende domani alle 01:00_ 🌙"
+    )
+
+    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+    logger.info("Report giornaliero inviato")
+
+
+# ─────────────────────────────────────────────
 # JOB AUTOMATICO
 # ─────────────────────────────────────────────
 
 async def auto_check(bot: Bot):
     global last_signal
+
+    if not is_market_open():
+        logger.info("Mercato chiuso — segnale saltato")
+        return
+
     try:
         df   = get_gold_data()
         df   = compute_indicators(df)
@@ -395,8 +496,9 @@ async def main():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("status", cmd_status))
 
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     scheduler.add_job(auto_check, "interval", minutes=CHECK_INTERVAL, args=[app.bot])
+    scheduler.add_job(send_daily_report, "cron", hour=22, minute=0, args=[app.bot])
     scheduler.start()
     logger.info(f"✅ Bot avviato — controllo ogni {CHECK_INTERVAL} minuti")
 
