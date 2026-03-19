@@ -1,6 +1,6 @@
 """
 Gold Trading Bot per Telegram
-Analizza XAU/USD e invia segnali BUY/SELL con TP, SL, punteggio e storico
+Analizza XAU/USD e invia segnali BUY/SELL con TP, SL, punteggio, probabilità e storico
 """
 
 import logging
@@ -66,7 +66,6 @@ def add_signal_to_history(signal: str, price: float, tp: float, sl: float):
 
 
 def update_history_results(current_price: float):
-    """Controlla i segnali pending e aggiorna il risultato."""
     history = load_history()
     updated = False
     for entry in history:
@@ -162,10 +161,13 @@ def stars(score: int) -> str:
     if score == 2: return "⭐ DEBOLE"
     return ""
 
+
 def estimate_probability(score: int, rsi: float, atr: float) -> int:
     base = {2: 50, 3: 60, 4: 72, 5: 82}.get(score, 50)
-    if rsi < 25 or rsi > 75: base += 8
-    if atr < 10: base += 5
+    if rsi < 25 or rsi > 75:
+        base += 8
+    if atr < 10:
+        base += 5
     return min(base, 92)
 
 
@@ -231,7 +233,6 @@ def analyze(df: pd.DataFrame) -> dict:
             f"RSI: {round(rsi, 1)} | "
             f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}"
         )
-    
 
     return {
         "signal":   signal,
@@ -239,12 +240,13 @@ def analyze(df: pd.DataFrame) -> dict:
         "price":    price,
         "sl":       sl,
         "tp":       tp,
+        "prob":     prob,
         "rsi":      round(rsi, 1),
         "atr":      round(atr, 2),
         "reason":   reason,
-        "prob":     prob,
         "time":     datetime.now().strftime("%d/%m/%Y %H:%M"),
     }
+
 
 def format_message(data: dict) -> str:
     emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "⚪"}.get(data["signal"], "⚪")
@@ -257,7 +259,7 @@ def format_message(data: dict) -> str:
         f"💰 Prezzo attuale: *${data['price']}*\n"
     )
 
-   if data["sl"] and data["tp"]:
+    if data["sl"] and data["tp"]:
         rr = abs(data["tp"] - data["price"]) / abs(data["sl"] - data["price"])
         msg += (
             f"\n🎲 *Probabilità stimata:* {data['prob']}%\n"
@@ -308,11 +310,9 @@ async def cmd_signal(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /stats — mostra storico segnali e percentuale successo."""
     stats   = compute_stats()
     history = load_history()
 
-    # Ultimi 5 segnali
     recent = [h for h in history if h["result"] != "pending"][-5:]
     recent_txt = ""
     for h in reversed(recent):
@@ -346,7 +346,7 @@ async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
         f"📐 SL moltiplicatore ATR: *{ATR_SL_MULT}x*\n"
         f"🎯 TP moltiplicatore ATR: *{ATR_TP_MULT}x*\n"
         f"📊 Fonte: *Twelve Data*\n"
-        f"⏱ Timeframe: *1min*\n"
+        f"⏱ Timeframe: *5min*\n"
         f"🤖 Stato: *Attivo*",
         parse_mode="Markdown"
     )
@@ -363,7 +363,6 @@ async def auto_check(bot: Bot):
         df   = compute_indicators(df)
         data = analyze(df)
 
-        # Aggiorna risultati segnali precedenti
         update_history_results(data["price"])
 
         is_new = data["signal"] != "NEUTRAL" and data["signal"] != last_signal
