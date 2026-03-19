@@ -162,6 +162,12 @@ def stars(score: int) -> str:
     if score == 2: return "⭐ DEBOLE"
     return ""
 
+def estimate_probability(score: int, rsi: float, atr: float) -> int:
+    base = {2: 50, 3: 60, 4: 72, 5: 82}.get(score, 50)
+    if rsi < 25 or rsi > 75: base += 8
+    if atr < 10: base += 5
+    return min(base, 92)
+
 
 def analyze(df: pd.DataFrame) -> dict:
     row   = df.iloc[-1]
@@ -195,6 +201,7 @@ def analyze(df: pd.DataFrame) -> dict:
         sl       = round(price - sl_dist, 2)
         tp       = round(price + tp_dist, 2)
         strength = stars(buy_score)
+        prob     = estimate_probability(buy_score, rsi, atr)
         reason   = (
             f"EMA20 > EMA50 (trend rialzista)\n"
             f"RSI: {round(rsi, 1)}\n"
@@ -206,6 +213,7 @@ def analyze(df: pd.DataFrame) -> dict:
         sl       = round(price + sl_dist, 2)
         tp       = round(price - tp_dist, 2)
         strength = stars(sell_score)
+        prob     = estimate_probability(sell_score, rsi, atr)
         reason   = (
             f"EMA20 < EMA50 (trend ribassista)\n"
             f"RSI: {round(rsi, 1)}\n"
@@ -217,11 +225,13 @@ def analyze(df: pd.DataFrame) -> dict:
         sl       = None
         tp       = None
         strength = ""
+        prob     = 0
         reason   = (
             f"Nessuna confluenza chiara tra gli indicatori.\n"
             f"RSI: {round(rsi, 1)} | "
             f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}"
         )
+    
 
     return {
         "signal":   signal,
@@ -232,9 +242,9 @@ def analyze(df: pd.DataFrame) -> dict:
         "rsi":      round(rsi, 1),
         "atr":      round(atr, 2),
         "reason":   reason,
+        "prob":     prob,
         "time":     datetime.now().strftime("%d/%m/%Y %H:%M"),
     }
-
 
 def format_message(data: dict) -> str:
     emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "⚪"}.get(data["signal"], "⚪")
@@ -247,10 +257,11 @@ def format_message(data: dict) -> str:
         f"💰 Prezzo attuale: *${data['price']}*\n"
     )
 
-    if data["sl"] and data["tp"]:
+   if data["sl"] and data["tp"]:
         rr = abs(data["tp"] - data["price"]) / abs(data["sl"] - data["price"])
         msg += (
-            f"\n🎯 *Take Profit:* ${data['tp']}\n"
+            f"\n🎲 *Probabilità stimata:* {data['prob']}%\n"
+            f"🎯 *Take Profit:* ${data['tp']}\n"
             f"🛑 *Stop Loss:* ${data['sl']}\n"
             f"⚖️ Risk/Reward: *1:{round(rr, 1)}*\n"
         )
