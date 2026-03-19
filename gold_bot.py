@@ -116,7 +116,7 @@ def get_gold_data() -> pd.DataFrame:
     url = "https://api.twelvedata.com/time_series"
     params = {
         "symbol":     "XAU/USD",
-        "interval":   "1min",
+        "interval":   "5min",
         "outputsize": 500,
         "apikey":     TWELVE_API_KEY
     }
@@ -260,7 +260,7 @@ def format_message(data: dict) -> str:
         f"{data['reason']}\n"
         f"\n📉 ATR (14): ${data['atr']}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Fonte: Twelve Data | Timeframe: 1min_"
+        f"_Fonte: Twelve Data | Timeframe: 5min_"
     )
     return msg
 
