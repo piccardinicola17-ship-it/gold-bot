@@ -191,7 +191,7 @@ def format_message(data: dict) -> str:
         f"{data['reason']}\n"
         f"\n📉 ATR (14): ${data['atr']}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Fonte: yfinance | Timeframe: 1H_"
+       "_Fonte: Twelve Data | Timeframe: 1min_"
     )
     return msg
 
