@@ -34,35 +34,34 @@ last_signal = None
 
 
 def get_gold_data() -> pd.DataFrame:
-    """Scarica dati oro XAU/USD da Metals-API gratuita."""
-    url = "https://query1.finance.yahoo.com/v8/finance/chart/GC=F"
+    """Scarica dati oro XAU/USD da Twelve Data."""
+    API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
+    url = "https://api.twelvedata.com/time_series"
     params = {
+        "symbol": "XAU/USD",
         "interval": "1h",
-        "range": "60d",
-        "includePrePost": "false"
+        "outputsize": 500,
+        "apikey": API_KEY
     }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    r = req.get(url, params=params, headers=headers, timeout=10)
+    r = req.get(url, params=params, timeout=10)
     data = r.json()
-    try:
-        result = data["chart"]["result"][0]
-        timestamps = result["timestamp"]
-        ohlcv = result["indicators"]["quote"][0]
-        df = pd.DataFrame({
-            "Open":   ohlcv["open"],
-            "High":   ohlcv["high"],
-            "Low":    ohlcv["low"],
-            "Close":  ohlcv["close"],
-            "Volume": ohlcv["volume"]
-        }, index=pd.to_datetime(timestamps, unit="s"))
-        df.dropna(inplace=True)
-        if df.empty:
-            raise ValueError("Nessun dato ricevuto")
-        return df
-    except Exception as e:
-        raise ValueE
+    if "values" not in data:
+        raise ValueError(f"Nessun dato ricevuto: {data}")
+    rows = data["values"]
+    df = pd.DataFrame(rows)
+    df.index = pd.to_datetime(df["datetime"])
+    df = df.rename(columns={
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "volume": "Volume"
+    })
+    df = df[["Open", "High", "Low", "Close"]].astype(float)
+    df["Volume"] = 0
+    df.sort_index(inplace=True)
+    df.dropna(inplace=True)
+    return df
 
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
