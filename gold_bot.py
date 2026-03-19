@@ -19,7 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import os
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.environ.get("CHAT_ID", "")
-CHECK_INTERVAL = 5
+CHECK_INTERVAL = 3
 ATR_SL_MULT    = 1.5
 ATR_TP_MULT    = 3.0
 # ─────────────────────────────────────────────
@@ -39,7 +39,7 @@ def get_gold_data() -> pd.DataFrame:
     url = "https://api.twelvedata.com/time_series"
     params = {
         "symbol": "XAU/USD",
-        "interval": "1h",
+        "interval": "1min",
         "outputsize": 500,
         "apikey": API_KEY
     }
