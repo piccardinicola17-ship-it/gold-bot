@@ -22,8 +22,8 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.environ.get("CHAT_ID", "")
 TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
 CHECK_INTERVAL = 3
-ATR_SL_MULT    = 1.0
-ATR_TP_MULT    = 1.5
+ATR_SL_MULT    = 0.6
+ATR_TP_MULT    = 0.6
 HISTORY_FILE   = "signals_history.json"
 # ─────────────────────────────────────────────
 
@@ -198,7 +198,7 @@ def analyze(df: pd.DataFrame) -> dict:
     if rsi > 60:      sell_score += 1
     if rsi > 70:      sell_score += 1
 
-    if buy_score >= 2:
+    if buy_score >= 3:
         signal   = "BUY"
         sl       = round(price - sl_dist, 2)
         tp       = round(price + tp_dist, 2)
@@ -210,7 +210,7 @@ def analyze(df: pd.DataFrame) -> dict:
             f"MACD {'sopra' if macd > sig else 'sotto'} la signal line\n"
             f"Punteggio: {buy_score}/5"
         )
-    elif sell_score >= 2:
+    elif sell_score >= 3:
         signal   = "SELL"
         sl       = round(price + sl_dist, 2)
         tp       = round(price - tp_dist, 2)
