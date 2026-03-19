@@ -16,8 +16,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # ─────────────────────────────────────────────
 # CONFIGURAZIONE — modifica solo questi valori
 # ─────────────────────────────────────────────
-TELEGRAM_TOKEN = "8478122110:AAF_5tTdMdyl8KO3a9Wgc-XDIUqtQ2qvQZM"
-CHAT_ID        = "5591875451"
+import os
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID        = os.environ.get("CHAT_ID", "")
 CHECK_INTERVAL = 5
 ATR_SL_MULT    = 1.5
 ATR_TP_MULT    = 3.0
