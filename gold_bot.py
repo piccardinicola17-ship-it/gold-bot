@@ -481,7 +481,7 @@ async def cmd_news(update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
     try:
         stats  = compute_stats()
-        recent = get_recent_signals(15)
+        recent = get_recent_signals(5)
 
         recent_txt = ""
         for h in recent:
@@ -499,7 +499,7 @@ async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
             f"⏳ In attesa: *{stats['pending']}*\n"
             f"📈 Win Rate: *{stats['winrate']}%*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"*Ultimi 5 segnali:*\n"
+            f"*Ultimi 15 segnali:*\n"
             f"{recent_txt}"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"_Totale segnali completati: {stats['total']}_"
@@ -612,13 +612,13 @@ async def auto_check(bot: Bot):
 
         update_db_results(data["price"])
 
-        is_new = data["signal"] != "NEUTRAL" and data["signal"] != last_signal
-        if data["signal"] != "NEUTRAL":
+        is_new = data["signal"] != "NEUTRAL" and data["signal"] != last_signal and data["prob"] >= 60
+        if data["signal"] != "NEUTRAL" and data["prob"] >= 60:
             last_signal = data["signal"]
             if is_new:
                 add_signal_to_db(data["signal"], data["price"], data["tp"], data["sl"])
 
-        if data["signal"] != "NEUTRAL" and data["prob"] >= 60:
+        if data["signal"] != "NEUTRAL":
             prefix = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
             msg = prefix + format_message(data)
             await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
