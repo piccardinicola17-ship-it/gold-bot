@@ -26,7 +26,7 @@ CHAT_ID        = os.environ.get("CHAT_ID", "")
 TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
 NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "d929b1d0334e4160872bbb1bef9fbb15")
 DATABASE_URL   = os.environ.get("DATABASE_URL", "")
-CHECK_INTERVAL = 2
+CHECK_INTERVAL = 3
 ATR_SL_MULT    = 0.6
 ATR_TP_MULT    = 0.6
 TIMEZONE       = pytz.timezone("Europe/Rome")
@@ -240,7 +240,52 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["stoch_k"] = stoch.stoch()
     df["stoch_d"] = stoch.stoch_signal()
 
+    # Volume medio
+    df["vol_avg"] = df["Volume"].rolling(window=20).mean()
+
     return df
+
+
+def detect_candle_pattern(df: pd.DataFrame) -> tuple:
+    """Rileva pattern candele giapponesi. Restituisce (pattern_name, direction)."""
+    if len(df) < 2:
+        return ("", "NEUTRAL")
+
+    curr = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    o, h, l, c = curr["Open"], curr["High"], curr["Low"], curr["Close"]
+    po, pc     = prev["Open"], prev["Close"]
+
+    body      = abs(c - o)
+    candle_range = h - l
+    upper_wick = h - max(o, c)
+    lower_wick = min(o, c) - l
+
+    if candle_range == 0:
+        return ("", "NEUTRAL")
+
+    # Doji — corpo molto piccolo
+    if body <= candle_range * 0.1:
+        return ("🕯 Doji (indecisione)", "NEUTRAL")
+
+    # Hammer — corpo piccolo in alto, wick lungo in basso (rialzista)
+    if lower_wick >= body * 2 and upper_wick <= body * 0.3 and c > o:
+        return ("🔨 Hammer (rialzista)", "BUY")
+
+    # Shooting Star — corpo piccolo in basso, wick lungo in alto (ribassista)
+    if upper_wick >= body * 2 and lower_wick <= body * 0.3 and c < o:
+        return ("⭐ Shooting Star (ribassista)", "SELL")
+
+    # Engulfing Bullish — candela verde che ingloba quella rossa precedente
+    if c > o and pc < po and c > po and o < pc:
+        return ("📈 Engulfing Bullish (rialzista)", "BUY")
+
+    # Engulfing Bearish — candela rossa che ingloba quella verde precedente
+    if c < o and pc > po and c < po and o > pc:
+        return ("📉 Engulfing Bearish (ribassista)", "SELL")
+
+    return ("", "NEUTRAL")
 
 
 def get_trend_1h() -> str:
@@ -260,21 +305,21 @@ def get_trend_1h() -> str:
 
 
 def stars(score: int) -> str:
-    if score >= 7: return "⭐⭐⭐ FORTISSIMO"
-    if score >= 6: return "⭐⭐⭐ FORTE"
-    if score >= 4: return "⭐⭐ MODERATO"
-    if score == 3: return "⭐ DEBOLE"
+    if score >= 10: return "⭐⭐⭐ FORTISSIMO"
+    if score >= 8:  return "⭐⭐⭐ FORTE"
+    if score >= 5:  return "⭐⭐ MODERATO"
+    if score >= 3:  return "⭐ DEBOLE"
     return ""
 
 
 def estimate_probability(score: int, rsi: float, atr: float, trend_confirmed: bool) -> int:
-    base = {3: 50, 4: 60, 5: 68, 6: 76, 7: 84, 8: 90, 9: 93}.get(score, 50)
+    base = {3: 45, 4: 52, 5: 60, 6: 67, 7: 73, 8: 79, 9: 84, 10: 88, 11: 91, 12: 93, 13: 95}.get(score, 45)
     if rsi < 25 or rsi > 75:
-        base += 4
-    if atr < 10:
         base += 3
+    if atr < 10:
+        base += 2
     if trend_confirmed:
-        base += 8
+        base += 6
     return min(base, 95)
 
 
@@ -291,31 +336,45 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     bb_lower = float(row["bb_lower"])
     stoch_k  = float(row["stoch_k"])
     stoch_d  = float(row["stoch_d"])
+    volume   = float(row["Volume"])
+    vol_avg  = float(row["vol_avg"]) if row["vol_avg"] > 0 else 1
 
     sl_dist = round(atr * ATR_SL_MULT, 2)
     tp_dist = round(atr * ATR_TP_MULT, 2)
 
-    buy_score = 0
-    if ema20 > ema50:     buy_score += 1
-    if macd > sig:        buy_score += 1
-    if rsi < 50:          buy_score += 1
-    if rsi < 40:          buy_score += 1
-    if rsi < 30:          buy_score += 1
-    if price <= bb_lower: buy_score += 1
-    if price < bb_lower:  buy_score += 1
-    if stoch_k < 30:      buy_score += 1
-    if stoch_k > stoch_d: buy_score += 1
+    # Pattern candele
+    candle_pattern, candle_dir = detect_candle_pattern(df)
 
+    # Volume alto = sopra la media
+    high_volume = volume > vol_avg * 1.2
+
+    # Punteggio BUY (0-13)
+    buy_score = 0
+    if ema20 > ema50:              buy_score += 1
+    if macd > sig:                 buy_score += 1
+    if rsi < 50:                   buy_score += 1
+    if rsi < 40:                   buy_score += 1
+    if rsi < 30:                   buy_score += 1
+    if price <= bb_lower:          buy_score += 1
+    if price < bb_lower:           buy_score += 1
+    if stoch_k < 30:               buy_score += 1
+    if stoch_k > stoch_d:          buy_score += 1
+    if candle_dir == "BUY":        buy_score += 2
+    if high_volume:                buy_score += 1
+
+    # Punteggio SELL (0-13)
     sell_score = 0
-    if ema20 < ema50:     sell_score += 1
-    if macd < sig:        sell_score += 1
-    if rsi > 50:          sell_score += 1
-    if rsi > 60:          sell_score += 1
-    if rsi > 70:          sell_score += 1
-    if price >= bb_upper: sell_score += 1
-    if price > bb_upper:  sell_score += 1
-    if stoch_k > 70:      sell_score += 1
-    if stoch_k < stoch_d: sell_score += 1
+    if ema20 < ema50:              sell_score += 1
+    if macd < sig:                 sell_score += 1
+    if rsi > 50:                   sell_score += 1
+    if rsi > 60:                   sell_score += 1
+    if rsi > 70:                   sell_score += 1
+    if price >= bb_upper:          sell_score += 1
+    if price > bb_upper:           sell_score += 1
+    if stoch_k > 70:               sell_score += 1
+    if stoch_k < stoch_d:          sell_score += 1
+    if candle_dir == "SELL":       sell_score += 2
+    if high_volume:                sell_score += 1
 
     if price <= bb_lower:
         bb_txt = f"📉 Prezzo sotto banda inferiore BB (${round(bb_lower, 2)})"
@@ -331,44 +390,51 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     else:
         stoch_txt = f"📊 Stocastico: {round(stoch_k, 1)}"
 
+    vol_txt   = "📊 Volume: 🔥 Alto" if high_volume else "📊 Volume: normale"
     trend_emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "⚪"}.get(trend_1h, "⚪")
-    trend_txt = f"{trend_emoji} Trend 1H: *{trend_1h}*"
+    trend_txt   = f"{trend_emoji} Trend 1H: *{trend_1h}*"
 
     if buy_score >= 3:
-        signal            = "BUY"
-        trend_confirmed   = trend_1h == "BUY"
-        sl                = round(price - sl_dist, 2)
-        tp                = round(price + tp_dist, 2)
-        strength          = stars(buy_score)
-        prob              = estimate_probability(buy_score, rsi, atr, trend_confirmed)
-        confirm_txt       = "✅ Confermato dal trend 1H!" if trend_confirmed else "⚠️ Non confermato dal trend 1H"
+        signal          = "BUY"
+        trend_confirmed = trend_1h == "BUY"
+        sl              = round(price - sl_dist, 2)
+        tp              = round(price + tp_dist, 2)
+        strength        = stars(buy_score)
+        prob            = estimate_probability(buy_score, rsi, atr, trend_confirmed)
+        confirm_txt     = "✅ Confermato dal trend 1H!" if trend_confirmed else "⚠️ Non confermato dal trend 1H"
+        candle_txt      = candle_pattern if candle_pattern else ""
         reason = (
             f"EMA20 > EMA50 (trend rialzista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sopra' if macd > sig else 'sotto'} la signal line\n"
             f"{bb_txt}\n"
             f"{stoch_txt}\n"
+            f"{vol_txt}\n"
+            + (f"{candle_txt}\n" if candle_txt else "") +
             f"{trend_txt}\n"
             f"{confirm_txt}\n"
-            f"Punteggio: {buy_score}/9"
+            f"Punteggio: {buy_score}/13"
         )
     elif sell_score >= 3:
-        signal            = "SELL"
-        trend_confirmed   = trend_1h == "SELL"
-        sl                = round(price + sl_dist, 2)
-        tp                = round(price - tp_dist, 2)
-        strength          = stars(sell_score)
-        prob              = estimate_probability(sell_score, rsi, atr, trend_confirmed)
-        confirm_txt       = "✅ Confermato dal trend 1H!" if trend_confirmed else "⚠️ Non confermato dal trend 1H"
+        signal          = "SELL"
+        trend_confirmed = trend_1h == "SELL"
+        sl              = round(price + sl_dist, 2)
+        tp              = round(price - tp_dist, 2)
+        strength        = stars(sell_score)
+        prob            = estimate_probability(sell_score, rsi, atr, trend_confirmed)
+        confirm_txt     = "✅ Confermato dal trend 1H!" if trend_confirmed else "⚠️ Non confermato dal trend 1H"
+        candle_txt      = candle_pattern if candle_pattern else ""
         reason = (
             f"EMA20 < EMA50 (trend ribassista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sotto' if macd < sig else 'sopra'} la signal line\n"
             f"{bb_txt}\n"
             f"{stoch_txt}\n"
+            f"{vol_txt}\n"
+            + (f"{candle_txt}\n" if candle_txt else "") +
             f"{trend_txt}\n"
             f"{confirm_txt}\n"
-            f"Punteggio: {sell_score}/9"
+            f"Punteggio: {sell_score}/13"
         )
     else:
         signal   = "NEUTRAL"
@@ -382,6 +448,7 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
             f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}\n"
             f"{bb_txt}\n"
             f"{stoch_txt}\n"
+            f"{vol_txt}\n"
             f"{trend_txt}"
         )
 
