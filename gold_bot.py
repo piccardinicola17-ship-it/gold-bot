@@ -503,6 +503,22 @@ async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
 # REPORT GIORNALIERO
 # ─────────────────────────────────────────────
 
+async def send_morning_news(bot: Bot):
+    """Invia notizie oro ogni mattina alle 8:00."""
+    news = get_gold_news()
+    if not news:
+        return
+    msg = (
+        f"🌅 *BUONGIORNO — NOTIZIE ORO*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        + "\n\n".join(news) +
+        f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
+        f"_⚠️ Notizie importanti possono invalidare i segnali tecnici_"
+    )
+    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+    logger.info("Notizie mattutine inviate")
+
+
 async def send_daily_report(bot: Bot):
     stats = compute_daily_stats()
     today = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
@@ -576,25 +592,13 @@ async def auto_check(bot: Bot):
                     data["signal"], data["price"], data["tp"], data["sl"]
                 )
 
-        prefix = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
-        msg = prefix + format_message(data)
-        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
-        logger.info(f"Segnale inviato: {data['signal']} @ {data['price']}")
+        if data["signal"] != "NEUTRAL":
+            prefix = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
+            msg = prefix + format_message(data)
+            await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+            logger.info(f"Segnale inviato: {data['signal']} @ {data['price']}")
 
-        # Invia notizie ogni ora
-        now = datetime.now(TIMEZONE)
-        if last_news_time is None or (now - last_news_time).seconds >= 3600:
-            news = get_gold_news()
-            if news:
-                news_msg = (
-                    f"📰 *AGGIORNAMENTO NOTIZIE ORO*\n"
-                    f"━━━━━━━━━━━━━━━━━━━━\n\n"
-                    + "\n\n".join(news) +
-                    f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
-                    f"_⚠️ Notizie importanti possono invalidare i segnali tecnici_"
-                )
-                await bot.send_message(chat_id=CHAT_ID, text=news_msg, parse_mode="Markdown")
-                last_news_time = now
+
 
     except Exception as e:
         logger.error(f"Errore job automatico: {e}")
@@ -617,6 +621,7 @@ async def main():
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     scheduler.add_job(auto_check, "interval", minutes=CHECK_INTERVAL, args=[app.bot])
     scheduler.add_job(send_daily_report, "cron", hour=22, minute=0, args=[app.bot])
+    scheduler.add_job(send_morning_news, "cron", hour=8, minute=0, args=[app.bot])
     scheduler.start()
     logger.info(f"✅ Bot avviato — controllo ogni {CHECK_INTERVAL} minuti")
 
