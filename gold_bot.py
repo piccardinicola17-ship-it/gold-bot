@@ -243,7 +243,20 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # Volume medio
     df["vol_avg"] = df["Volume"].rolling(window=20).mean()
 
+    # ADX — forza del trend
+    adx_obj   = ta.trend.ADXIndicator(df["High"], df["Low"], df["Close"], window=14)
+    df["adx"] = adx_obj.adx()
+
     return df
+
+
+def get_support_resistance(df):
+    """Calcola livelli di supporto e resistenza dagli ultimi 50 periodi."""
+    recent     = df.tail(50)
+    support    = round(float(recent["Low"].min()), 2)
+    resistance = round(float(recent["High"].max()), 2)
+    pivot      = round(float((recent["High"].iloc[-1] + recent["Low"].iloc[-1] + recent["Close"].iloc[-1]) / 3), 2)
+    return support, resistance, pivot
 
 
 def detect_candle_pattern(df: pd.DataFrame) -> tuple:
@@ -305,21 +318,21 @@ def get_trend_1h() -> str:
 
 
 def stars(score: int) -> str:
-    if score >= 10: return "⭐⭐⭐ FORTISSIMO"
-    if score >= 8:  return "⭐⭐⭐ FORTE"
-    if score >= 5:  return "⭐⭐ MODERATO"
+    if score >= 12: return "⭐⭐⭐ FORTISSIMO"
+    if score >= 9:  return "⭐⭐⭐ FORTE"
+    if score >= 6:  return "⭐⭐ MODERATO"
     if score >= 3:  return "⭐ DEBOLE"
     return ""
 
 
 def estimate_probability(score: int, rsi: float, atr: float, trend_confirmed: bool) -> int:
-    base = {3: 45, 4: 52, 5: 60, 6: 67, 7: 73, 8: 79, 9: 84, 10: 88, 11: 91, 12: 93, 13: 95}.get(score, 45)
+    base = {3: 45, 4: 50, 5: 55, 6: 60, 7: 65, 8: 70, 9: 75, 10: 80, 11: 85, 12: 88, 13: 91, 14: 93, 15: 95}.get(score, 45)
     if rsi < 25 or rsi > 75:
         base += 3
     if atr < 10:
         base += 2
     if trend_confirmed:
-        base += 6
+        base += 5
     return min(base, 95)
 
 
@@ -338,6 +351,7 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     stoch_d  = float(row["stoch_d"])
     volume   = float(row["Volume"])
     vol_avg  = float(row["vol_avg"]) if row["vol_avg"] > 0 else 1
+    adx      = float(row["adx"]) if not pd.isna(row["adx"]) else 0
 
     sl_dist = round(atr * ATR_SL_MULT, 2)
     tp_dist = round(atr * ATR_TP_MULT, 2)
@@ -348,7 +362,15 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     # Volume alto = sopra la media
     high_volume = volume > vol_avg * 1.2
 
-    # Punteggio BUY (0-13)
+    # Supporto e resistenza
+    support, resistance, pivot = get_support_resistance(df)
+    near_support    = abs(price - support) <= atr * 0.5
+    near_resistance = abs(price - resistance) <= atr * 0.5
+
+    # ADX — ignora segnali in mercato laterale
+    trend_strong = adx >= 20
+
+    # Punteggio BUY (0-15)
     buy_score = 0
     if ema20 > ema50:              buy_score += 1
     if macd > sig:                 buy_score += 1
@@ -361,8 +383,10 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     if stoch_k > stoch_d:          buy_score += 1
     if candle_dir == "BUY":        buy_score += 2
     if high_volume:                buy_score += 1
+    if near_support:               buy_score += 1
+    if trend_strong:               buy_score += 1
 
-    # Punteggio SELL (0-13)
+    # Punteggio SELL (0-15)
     sell_score = 0
     if ema20 < ema50:              sell_score += 1
     if macd < sig:                 sell_score += 1
@@ -375,6 +399,8 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     if stoch_k < stoch_d:          sell_score += 1
     if candle_dir == "SELL":       sell_score += 2
     if high_volume:                sell_score += 1
+    if near_resistance:            sell_score += 1
+    if trend_strong:               sell_score += 1
 
     if price <= bb_lower:
         bb_txt = f"📉 Prezzo sotto banda inferiore BB (${round(bb_lower, 2)})"
