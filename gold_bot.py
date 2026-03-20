@@ -618,7 +618,7 @@ async def auto_check(bot: Bot):
             if is_new:
                 add_signal_to_db(data["signal"], data["price"], data["tp"], data["sl"])
 
-        if data["signal"] != "NEUTRAL":
+        if data["signal"] != "NEUTRAL" and data["prob"] >= 60:
             prefix = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
             msg = prefix + format_message(data)
             await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
