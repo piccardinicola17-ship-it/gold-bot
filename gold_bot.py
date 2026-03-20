@@ -437,9 +437,11 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
             f"{stoch_txt}\n"
             f"{vol_txt}\n"
             + (f"{candle_txt}\n" if candle_txt else "") +
+            f"📍 Supporto: ${support} | Resistenza: ${resistance}\n"
+            f"📐 ADX: {round(adx, 1)} ({'trend forte' if trend_strong else 'mercato laterale'})\n"
             f"{trend_txt}\n"
             f"{confirm_txt}\n"
-            f"Punteggio: {buy_score}/13"
+            f"Punteggio: {buy_score}/15"
         )
     elif sell_score >= 3:
         signal          = "SELL"
@@ -458,9 +460,11 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
             f"{stoch_txt}\n"
             f"{vol_txt}\n"
             + (f"{candle_txt}\n" if candle_txt else "") +
+            f"📍 Supporto: ${support} | Resistenza: ${resistance}\n"
+            f"📐 ADX: {round(adx, 1)} ({'trend forte' if trend_strong else 'mercato laterale'})\n"
             f"{trend_txt}\n"
             f"{confirm_txt}\n"
-            f"Punteggio: {sell_score}/13"
+            f"Punteggio: {sell_score}/15"
         )
     else:
         signal   = "NEUTRAL"
