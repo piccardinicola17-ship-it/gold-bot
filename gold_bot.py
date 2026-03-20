@@ -1,11 +1,11 @@
 """
 Gold Trading Bot per Telegram
-Analizza XAU/USD con Bollinger, Stocastico, notizie mercato, filtro orario e report
+Analizza XAU/USD con database persistente, timeframe multipli 5min+1H,
+Bollinger, Stocastico, filtro orario, notizie e report giornaliero
 """
 
 import logging
 import asyncio
-import json
 import os
 from datetime import datetime
 import pandas as pd
@@ -15,6 +15,8 @@ from telegram import Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ─────────────────────────────────────────────
 # CONFIGURAZIONE
@@ -23,10 +25,10 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.environ.get("CHAT_ID", "")
 TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
 NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "d929b1d0334e4160872bbb1bef9fbb15")
+DATABASE_URL   = os.environ.get("DATABASE_URL", "")
 CHECK_INTERVAL = 3
 ATR_SL_MULT    = 0.6
 ATR_TP_MULT    = 0.6
-HISTORY_FILE   = "signals_history.json"
 TIMEZONE       = pytz.timezone("Europe/Rome")
 # ─────────────────────────────────────────────
 
@@ -36,8 +38,107 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-last_signal    = None
-last_news_time = None
+last_signal = None
+
+
+# ─────────────────────────────────────────────
+# DATABASE
+# ─────────────────────────────────────────────
+
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
+
+
+def init_db():
+    """Crea la tabella segnali se non esiste."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    id SERIAL PRIMARY KEY,
+                    time TEXT NOT NULL,
+                    signal TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    tp REAL NOT NULL,
+                    sl REAL NOT NULL,
+                    result TEXT DEFAULT 'pending'
+                )
+            """)
+        conn.commit()
+    logger.info("Database inizializzato")
+
+
+def add_signal_to_db(signal: str, price: float, tp: float, sl: float):
+    time = datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO signals (time, signal, price, tp, sl) VALUES (%s, %s, %s, %s, %s)",
+                (time, signal, price, tp, sl)
+            )
+        conn.commit()
+
+
+def update_db_results(current_price: float):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM signals WHERE result = 'pending'")
+            pending = cur.fetchall()
+            for entry in pending:
+                new_result = None
+                if entry["signal"] == "BUY":
+                    if current_price >= entry["tp"]:
+                        new_result = "WIN"
+                    elif current_price <= entry["sl"]:
+                        new_result = "LOSS"
+                elif entry["signal"] == "SELL":
+                    if current_price <= entry["tp"]:
+                        new_result = "WIN"
+                    elif current_price >= entry["sl"]:
+                        new_result = "LOSS"
+                if new_result:
+                    cur.execute(
+                        "UPDATE signals SET result = %s WHERE id = %s",
+                        (new_result, entry["id"])
+                    )
+        conn.commit()
+
+
+def compute_stats() -> dict:
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT result FROM signals")
+            rows = cur.fetchall()
+    total   = len([r for r in rows if r["result"] != "pending"])
+    wins    = len([r for r in rows if r["result"] == "WIN"])
+    losses  = len([r for r in rows if r["result"] == "LOSS"])
+    pending = len([r for r in rows if r["result"] == "pending"])
+    winrate = round((wins / total * 100), 1) if total > 0 else 0
+    return {"total": total, "wins": wins, "losses": losses, "pending": pending, "winrate": winrate}
+
+
+def compute_daily_stats() -> dict:
+    today = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM signals WHERE time LIKE %s", (f"{today}%",))
+            rows = cur.fetchall()
+    total   = len([r for r in rows if r["result"] != "pending"])
+    wins    = len([r for r in rows if r["result"] == "WIN"])
+    losses  = len([r for r in rows if r["result"] == "LOSS"])
+    pending = len([r for r in rows if r["result"] == "pending"])
+    winrate = round((wins / total * 100), 1) if total > 0 else 0
+    return {"total": total, "wins": wins, "losses": losses, "pending": pending, "winrate": winrate, "signals": rows}
+
+
+def get_recent_signals(limit: int = 5) -> list:
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM signals WHERE result != 'pending' ORDER BY id DESC LIMIT %s",
+                (limit,)
+            )
+            return cur.fetchall()
 
 
 # ─────────────────────────────────────────────
@@ -63,11 +164,10 @@ def market_status_text() -> str:
 
 
 # ─────────────────────────────────────────────
-# NOTIZIE DI MERCATO
+# NOTIZIE
 # ─────────────────────────────────────────────
 
 def get_gold_news() -> list:
-    """Scarica ultime notizie sull'oro da NewsAPI."""
     try:
         url = "https://newsapi.org/v2/everything"
         params = {
@@ -84,7 +184,7 @@ def get_gold_news() -> list:
         articles = data.get("articles", [])
         news = []
         for a in articles:
-            title = a.get("title", "")
+            title  = a.get("title", "")
             source = a.get("source", {}).get("name", "")
             published = a.get("publishedAt", "")[:10]
             if title and source:
@@ -96,119 +196,24 @@ def get_gold_news() -> list:
 
 
 # ─────────────────────────────────────────────
-# STORICO SEGNALI
-# ─────────────────────────────────────────────
-
-def load_history() -> list:
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "r") as f:
-            return json.load(f)
-    return []
-
-
-def save_history(history: list):
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
-
-
-def add_signal_to_history(signal: str, price: float, tp: float, sl: float):
-    history = load_history()
-    history.append({
-        "time":   datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M"),
-        "signal": signal,
-        "price":  price,
-        "tp":     tp,
-        "sl":     sl,
-        "result": "pending"
-    })
-    save_history(history)
-
-
-def update_history_results(current_price: float):
-    history = load_history()
-    updated = False
-    for entry in history:
-        if entry["result"] != "pending":
-            continue
-        if entry["signal"] == "BUY":
-            if current_price >= entry["tp"]:
-                entry["result"] = "WIN"
-                updated = True
-            elif current_price <= entry["sl"]:
-                entry["result"] = "LOSS"
-                updated = True
-        elif entry["signal"] == "SELL":
-            if current_price <= entry["tp"]:
-                entry["result"] = "WIN"
-                updated = True
-            elif current_price >= entry["sl"]:
-                entry["result"] = "LOSS"
-                updated = True
-    if updated:
-        save_history(history)
-    return history
-
-
-def compute_stats() -> dict:
-    history = load_history()
-    total   = len([h for h in history if h["result"] != "pending"])
-    wins    = len([h for h in history if h["result"] == "WIN"])
-    losses  = len([h for h in history if h["result"] == "LOSS"])
-    pending = len([h for h in history if h["result"] == "pending"])
-    winrate = round((wins / total * 100), 1) if total > 0 else 0
-    return {
-        "total":   total,
-        "wins":    wins,
-        "losses":  losses,
-        "pending": pending,
-        "winrate": winrate
-    }
-
-
-def compute_daily_stats() -> dict:
-    history = load_history()
-    today   = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
-    today_h = [h for h in history if h["time"].startswith(today)]
-    total   = len([h for h in today_h if h["result"] != "pending"])
-    wins    = len([h for h in today_h if h["result"] == "WIN"])
-    losses  = len([h for h in today_h if h["result"] == "LOSS"])
-    pending = len([h for h in today_h if h["result"] == "pending"])
-    winrate = round((wins / total * 100), 1) if total > 0 else 0
-    return {
-        "total":   total,
-        "wins":    wins,
-        "losses":  losses,
-        "pending": pending,
-        "winrate": winrate,
-        "signals": today_h
-    }
-
-
-# ─────────────────────────────────────────────
 # DATI E INDICATORI
 # ─────────────────────────────────────────────
 
-def get_gold_data() -> pd.DataFrame:
+def get_gold_data(interval: str = "5min", outputsize: int = 500) -> pd.DataFrame:
     url = "https://api.twelvedata.com/time_series"
     params = {
         "symbol":     "XAU/USD",
-        "interval":   "5min",
-        "outputsize": 500,
+        "interval":   interval,
+        "outputsize": outputsize,
         "apikey":     TWELVE_API_KEY
     }
     r = req.get(url, params=params, timeout=10)
     data = r.json()
     if "values" not in data:
         raise ValueError(f"Nessun dato ricevuto: {data}")
-    rows = data["values"]
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(data["values"])
     df.index = pd.to_datetime(df["datetime"])
-    df = df.rename(columns={
-        "open":  "Open",
-        "high":  "High",
-        "low":   "Low",
-        "close": "Close"
-    })
+    df = df.rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close"})
     df = df[["Open", "High", "Low", "Close"]].astype(float)
     df["Volume"] = 0
     df.sort_index(inplace=True)
@@ -225,24 +230,33 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["macd"]        = macd_obj.macd()
     df["signal_line"] = macd_obj.macd_signal()
 
-    df["atr"] = ta.volatility.average_true_range(
-        df["High"], df["Low"], df["Close"], window=14
-    )
+    df["atr"] = ta.volatility.average_true_range(df["High"], df["Low"], df["Close"], window=14)
 
-    # Bande di Bollinger
     bb = ta.volatility.BollingerBands(df["Close"], window=20, window_dev=2)
     df["bb_upper"]  = bb.bollinger_hband()
     df["bb_lower"]  = bb.bollinger_lband()
-    df["bb_middle"] = bb.bollinger_mavg()
 
-    # Stocastico
-    stoch = ta.momentum.StochasticOscillator(
-        df["High"], df["Low"], df["Close"], window=14, smooth_window=3
-    )
+    stoch = ta.momentum.StochasticOscillator(df["High"], df["Low"], df["Close"], window=14, smooth_window=3)
     df["stoch_k"] = stoch.stoch()
     df["stoch_d"] = stoch.stoch_signal()
 
     return df
+
+
+def get_trend_1h() -> str:
+    """Controlla il trend sull'1H — restituisce BUY, SELL o NEUTRAL."""
+    try:
+        df = get_gold_data(interval="1h", outputsize=100)
+        df = compute_indicators(df)
+        row = df.iloc[-1]
+        if float(row["ema20"]) > float(row["ema50"]) and float(row["macd"]) > float(row["signal_line"]):
+            return "BUY"
+        elif float(row["ema20"]) < float(row["ema50"]) and float(row["macd"]) < float(row["signal_line"]):
+            return "SELL"
+        return "NEUTRAL"
+    except Exception as e:
+        logger.error(f"Errore trend 1H: {e}")
+        return "NEUTRAL"
 
 
 def stars(score: int) -> str:
@@ -253,16 +267,18 @@ def stars(score: int) -> str:
     return ""
 
 
-def estimate_probability(score: int, rsi: float, atr: float) -> int:
+def estimate_probability(score: int, rsi: float, atr: float, trend_confirmed: bool) -> int:
     base = {3: 50, 4: 60, 5: 68, 6: 76, 7: 84, 8: 90, 9: 93}.get(score, 50)
     if rsi < 25 or rsi > 75:
         base += 4
     if atr < 10:
         base += 3
-    return min(base, 94)
+    if trend_confirmed:
+        base += 8
+    return min(base, 95)
 
 
-def analyze(df: pd.DataFrame) -> dict:
+def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     row      = df.iloc[-1]
     price    = round(float(row["Close"]), 2)
     atr      = float(row["atr"])
@@ -279,31 +295,28 @@ def analyze(df: pd.DataFrame) -> dict:
     sl_dist = round(atr * ATR_SL_MULT, 2)
     tp_dist = round(atr * ATR_TP_MULT, 2)
 
-    # Punteggio BUY (0-9)
     buy_score = 0
-    if ema20 > ema50:        buy_score += 1
-    if macd > sig:           buy_score += 1
-    if rsi < 50:             buy_score += 1
-    if rsi < 40:             buy_score += 1
-    if rsi < 30:             buy_score += 1
-    if price <= bb_lower:    buy_score += 1
-    if price < bb_lower:     buy_score += 1
-    if stoch_k < 30:         buy_score += 1  # Stocastico ipervenduto
-    if stoch_k > stoch_d:    buy_score += 1  # Stocastico in rialzo
+    if ema20 > ema50:     buy_score += 1
+    if macd > sig:        buy_score += 1
+    if rsi < 50:          buy_score += 1
+    if rsi < 40:          buy_score += 1
+    if rsi < 30:          buy_score += 1
+    if price <= bb_lower: buy_score += 1
+    if price < bb_lower:  buy_score += 1
+    if stoch_k < 30:      buy_score += 1
+    if stoch_k > stoch_d: buy_score += 1
 
-    # Punteggio SELL (0-9)
     sell_score = 0
-    if ema20 < ema50:        sell_score += 1
-    if macd < sig:           sell_score += 1
-    if rsi > 50:             sell_score += 1
-    if rsi > 60:             sell_score += 1
-    if rsi > 70:             sell_score += 1
-    if price >= bb_upper:    sell_score += 1
-    if price > bb_upper:     sell_score += 1
-    if stoch_k > 70:         sell_score += 1  # Stocastico ipercomprato
-    if stoch_k < stoch_d:    sell_score += 1  # Stocastico in ribasso
+    if ema20 < ema50:     sell_score += 1
+    if macd < sig:        sell_score += 1
+    if rsi > 50:          sell_score += 1
+    if rsi > 60:          sell_score += 1
+    if rsi > 70:          sell_score += 1
+    if price >= bb_upper: sell_score += 1
+    if price > bb_upper:  sell_score += 1
+    if stoch_k > 70:      sell_score += 1
+    if stoch_k < stoch_d: sell_score += 1
 
-    # Testo Bollinger
     if price <= bb_lower:
         bb_txt = f"📉 Prezzo sotto banda inferiore BB (${round(bb_lower, 2)})"
     elif price >= bb_upper:
@@ -311,7 +324,6 @@ def analyze(df: pd.DataFrame) -> dict:
     else:
         bb_txt = f"📊 BB: {round(bb_lower, 2)} — {round(bb_upper, 2)}"
 
-    # Testo Stocastico
     if stoch_k < 30:
         stoch_txt = f"📉 Stocastico ipervenduto ({round(stoch_k, 1)})"
     elif stoch_k > 70:
@@ -319,32 +331,43 @@ def analyze(df: pd.DataFrame) -> dict:
     else:
         stoch_txt = f"📊 Stocastico: {round(stoch_k, 1)}"
 
+    trend_emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "⚪"}.get(trend_1h, "⚪")
+    trend_txt = f"{trend_emoji} Trend 1H: *{trend_1h}*"
+
     if buy_score >= 3:
-        signal   = "BUY"
-        sl       = round(price - sl_dist, 2)
-        tp       = round(price + tp_dist, 2)
-        strength = stars(buy_score)
-        prob     = estimate_probability(buy_score, rsi, atr)
-        reason   = (
+        signal            = "BUY"
+        trend_confirmed   = trend_1h == "BUY"
+        sl                = round(price - sl_dist, 2)
+        tp                = round(price + tp_dist, 2)
+        strength          = stars(buy_score)
+        prob              = estimate_probability(buy_score, rsi, atr, trend_confirmed)
+        confirm_txt       = "✅ Confermato dal trend 1H!" if trend_confirmed else "⚠️ Non confermato dal trend 1H"
+        reason = (
             f"EMA20 > EMA50 (trend rialzista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sopra' if macd > sig else 'sotto'} la signal line\n"
             f"{bb_txt}\n"
             f"{stoch_txt}\n"
+            f"{trend_txt}\n"
+            f"{confirm_txt}\n"
             f"Punteggio: {buy_score}/9"
         )
     elif sell_score >= 3:
-        signal   = "SELL"
-        sl       = round(price + sl_dist, 2)
-        tp       = round(price - tp_dist, 2)
-        strength = stars(sell_score)
-        prob     = estimate_probability(sell_score, rsi, atr)
-        reason   = (
+        signal            = "SELL"
+        trend_confirmed   = trend_1h == "SELL"
+        sl                = round(price + sl_dist, 2)
+        tp                = round(price - tp_dist, 2)
+        strength          = stars(sell_score)
+        prob              = estimate_probability(sell_score, rsi, atr, trend_confirmed)
+        confirm_txt       = "✅ Confermato dal trend 1H!" if trend_confirmed else "⚠️ Non confermato dal trend 1H"
+        reason = (
             f"EMA20 < EMA50 (trend ribassista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sotto' if macd < sig else 'sopra'} la signal line\n"
             f"{bb_txt}\n"
             f"{stoch_txt}\n"
+            f"{trend_txt}\n"
+            f"{confirm_txt}\n"
             f"Punteggio: {sell_score}/9"
         )
     else:
@@ -358,7 +381,8 @@ def analyze(df: pd.DataFrame) -> dict:
             f"RSI: {round(rsi, 1)} | "
             f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}\n"
             f"{bb_txt}\n"
-            f"{stoch_txt}"
+            f"{stoch_txt}\n"
+            f"{trend_txt}"
         )
 
     return {
@@ -400,7 +424,7 @@ def format_message(data: dict) -> str:
         f"{data['reason']}\n"
         f"\n📉 ATR (14): ${data['atr']}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Fonte: Twelve Data | Timeframe: 5min_"
+        f"_Fonte: Twelve Data | Timeframe: 5min + 1H_"
     )
     return msg
 
@@ -427,10 +451,11 @@ async def cmd_start(update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_signal(update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Analisi in corso...")
     try:
-        df   = get_gold_data()
-        df   = compute_indicators(df)
-        data = analyze(df)
-        msg  = format_message(data)
+        df       = get_gold_data()
+        df       = compute_indicators(df)
+        trend_1h = get_trend_1h()
+        data     = analyze(df, trend_1h)
+        msg      = format_message(data)
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Errore /signal: {e}")
@@ -438,7 +463,6 @@ async def cmd_signal(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_news(update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /news — ultime notizie sull'oro."""
     await update.message.reply_text("⏳ Carico le notizie...")
     news = get_gold_news()
     if not news:
@@ -455,32 +479,34 @@ async def cmd_news(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
-    stats   = compute_stats()
-    history = load_history()
+    try:
+        stats  = compute_stats()
+        recent = get_recent_signals(5)
 
-    recent = [h for h in history if h["result"] != "pending"][-5:]
-    recent_txt = ""
-    for h in reversed(recent):
-        emoji = "✅" if h["result"] == "WIN" else "❌"
-        recent_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
+        recent_txt = ""
+        for h in recent:
+            emoji = "✅" if h["result"] == "WIN" else "❌"
+            recent_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
 
-    if not recent_txt:
-        recent_txt = "Nessun segnale completato ancora.\n"
+        if not recent_txt:
+            recent_txt = "Nessun segnale completato ancora.\n"
 
-    msg = (
-        f"📊 *STORICO SEGNALI*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ Vincenti: *{stats['wins']}*\n"
-        f"❌ Perdenti: *{stats['losses']}*\n"
-        f"⏳ In attesa: *{stats['pending']}*\n"
-        f"📈 Win Rate: *{stats['winrate']}%*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"*Ultimi 5 segnali:*\n"
-        f"{recent_txt}"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Totale segnali completati: {stats['total']}_"
-    )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+        msg = (
+            f"📊 *STORICO SEGNALI*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ Vincenti: *{stats['wins']}*\n"
+            f"❌ Perdenti: *{stats['losses']}*\n"
+            f"⏳ In attesa: *{stats['pending']}*\n"
+            f"📈 Win Rate: *{stats['winrate']}%*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"*Ultimi 5 segnali:*\n"
+            f"{recent_txt}"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"_Totale segnali completati: {stats['total']}_"
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Errore stats: {e}")
 
 
 async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
@@ -493,18 +519,18 @@ async def cmd_status(update, context: ContextTypes.DEFAULT_TYPE):
         f"📐 SL moltiplicatore ATR: *{ATR_SL_MULT}x*\n"
         f"🎯 TP moltiplicatore ATR: *{ATR_TP_MULT}x*\n"
         f"📊 Fonte: *Twelve Data*\n"
-        f"⏱ Timeframe: *5min*\n"
+        f"⏱ Timeframe: *5min + 1H*\n"
+        f"🗄 Database: *PostgreSQL persistente*\n"
         f"🤖 Stato: *Attivo*",
         parse_mode="Markdown"
     )
 
 
 # ─────────────────────────────────────────────
-# REPORT GIORNALIERO
+# REPORT E NOTIZIE MATTINO
 # ─────────────────────────────────────────────
 
 async def send_morning_news(bot: Bot):
-    """Invia notizie oro ogni mattina alle 8:00."""
     news = get_gold_news()
     if not news:
         return
@@ -520,50 +546,51 @@ async def send_morning_news(bot: Bot):
 
 
 async def send_daily_report(bot: Bot):
-    stats = compute_daily_stats()
-    today = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
+    try:
+        stats   = compute_daily_stats()
+        overall = compute_stats()
+        today   = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
+        news    = get_gold_news()
+        news_txt = "\n\n".join(news[:2]) if news else "Nessuna notizia disponibile."
 
-    signals_txt = ""
-    for h in stats["signals"]:
-        if h["result"] == "WIN":
-            emoji = "✅"
-        elif h["result"] == "LOSS":
-            emoji = "❌"
-        else:
-            emoji = "⏳"
-        signals_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
+        signals_txt = ""
+        for h in stats["signals"]:
+            if h["result"] == "WIN":
+                emoji = "✅"
+            elif h["result"] == "LOSS":
+                emoji = "❌"
+            else:
+                emoji = "⏳"
+            signals_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
 
-    if not signals_txt:
-        signals_txt = "Nessun segnale oggi.\n"
+        if not signals_txt:
+            signals_txt = "Nessun segnale oggi.\n"
 
-    overall = compute_stats()
-    news    = get_gold_news()
-    news_txt = "\n\n".join(news[:2]) if news else "Nessuna notizia disponibile."
-
-    msg = (
-        f"🌙 *REPORT GIORNALIERO — {today}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"*Oggi:*\n"
-        f"✅ Vincenti: *{stats['wins']}*\n"
-        f"❌ Perdenti: *{stats['losses']}*\n"
-        f"⏳ In attesa: *{stats['pending']}*\n"
-        f"📈 Win Rate oggi: *{stats['winrate']}%*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"*Segnali di oggi:*\n"
-        f"{signals_txt}"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"*Totale storico:*\n"
-        f"📊 Win Rate totale: *{overall['winrate']}%*\n"
-        f"🏆 Totale segnali: *{overall['total']}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"*Ultime notizie oro:*\n"
-        f"{news_txt}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Buona notte! Il bot riprende domani alle 01:00_ 🌙"
-    )
-
-    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
-    logger.info("Report giornaliero inviato")
+        msg = (
+            f"🌙 *REPORT GIORNALIERO — {today}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"*Oggi:*\n"
+            f"✅ Vincenti: *{stats['wins']}*\n"
+            f"❌ Perdenti: *{stats['losses']}*\n"
+            f"⏳ In attesa: *{stats['pending']}*\n"
+            f"📈 Win Rate oggi: *{stats['winrate']}%*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"*Segnali di oggi:*\n"
+            f"{signals_txt}"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"*Totale storico:*\n"
+            f"📊 Win Rate totale: *{overall['winrate']}%*\n"
+            f"🏆 Totale segnali: *{overall['total']}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"*Ultime notizie oro:*\n"
+            f"{news_txt}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"_Buona notte! Il bot riprende domani alle 01:00_ 🌙"
+        )
+        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+        logger.info("Report giornaliero inviato")
+    except Exception as e:
+        logger.error(f"Errore report giornaliero: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -571,34 +598,31 @@ async def send_daily_report(bot: Bot):
 # ─────────────────────────────────────────────
 
 async def auto_check(bot: Bot):
-    global last_signal, last_news_time
+    global last_signal
 
     if not is_market_open():
         logger.info("Mercato chiuso — segnale saltato")
         return
 
     try:
-        df   = get_gold_data()
-        df   = compute_indicators(df)
-        data = analyze(df)
+        df       = get_gold_data()
+        df       = compute_indicators(df)
+        trend_1h = get_trend_1h()
+        data     = analyze(df, trend_1h)
 
-        update_history_results(data["price"])
+        update_db_results(data["price"])
 
         is_new = data["signal"] != "NEUTRAL" and data["signal"] != last_signal
         if data["signal"] != "NEUTRAL":
             last_signal = data["signal"]
             if is_new:
-                add_signal_to_history(
-                    data["signal"], data["price"], data["tp"], data["sl"]
-                )
+                add_signal_to_db(data["signal"], data["price"], data["tp"], data["sl"])
 
         if data["signal"] != "NEUTRAL":
             prefix = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
             msg = prefix + format_message(data)
             await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
             logger.info(f"Segnale inviato: {data['signal']} @ {data['price']}")
-
-
 
     except Exception as e:
         logger.error(f"Errore job automatico: {e}")
@@ -610,6 +634,8 @@ async def auto_check(bot: Bot):
 # ─────────────────────────────────────────────
 
 async def main():
+    init_db()
+
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
