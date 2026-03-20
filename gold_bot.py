@@ -481,7 +481,7 @@ async def cmd_news(update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
     try:
         stats  = compute_stats()
-        recent = get_recent_signals(5)
+        recent = get_recent_signals(15)
 
         recent_txt = ""
         for h in recent:
