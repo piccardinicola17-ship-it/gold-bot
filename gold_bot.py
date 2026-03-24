@@ -149,7 +149,7 @@ def is_market_open() -> bool:
     now = datetime.now(TIMEZONE)
     if now.weekday() >= 5:
         return False
-    if now.hour == 0:
+    if now.hour < 8 or now.hour >= 20:
         return False
     return True
 
@@ -158,9 +158,9 @@ def market_status_text() -> str:
     now = datetime.now(TIMEZONE)
     if now.weekday() >= 5:
         return "🔴 Mercato chiuso (weekend)"
-    if now.hour == 0:
-        return "🔴 Mercato chiuso (pausa notturna)"
-    return "🟢 Mercato aperto"
+    if now.hour < 8 or now.hour >= 20:
+        return "🔴 Mercato chiuso (fuori orario 08:00–20:00)"
+    return "🟢 Mercato aperto (08:00–20:00)"
 
 
 # ─────────────────────────────────────────────
@@ -682,7 +682,7 @@ async def send_daily_report(bot: Bot):
             f"*Ultime notizie oro:*\n"
             f"{news_txt}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Buona notte! Il bot riprende domani alle 01:00_ 🌙"
+            f"_Buona notte! Il bot riprende domani alle 08:00_ 🌙"
         )
         await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
         logger.info("Report giornaliero inviato")
@@ -743,10 +743,10 @@ async def main():
 
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     scheduler.add_job(auto_check, "interval", minutes=CHECK_INTERVAL, args=[app.bot])
-    scheduler.add_job(send_daily_report, "cron", hour=22, minute=0, args=[app.bot])
+    scheduler.add_job(send_daily_report, "cron", hour=20, minute=0, args=[app.bot])
     scheduler.add_job(send_morning_news, "cron", hour=8, minute=0, args=[app.bot])
     scheduler.start()
-    logger.info(f"✅ Bot avviato — controllo ogni {CHECK_INTERVAL} minuti")
+    logger.info(f"✅ Bot avviato — controllo ogni {CHECK_INTERVAL} minuti (08:00–20:00)")
 
     await app.initialize()
     await app.start()
