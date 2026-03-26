@@ -2,17 +2,19 @@
 Gold Trading Bot per Telegram
 Analizza XAU/USD con database persistente, timeframe multipli 5min+1H,
 Bollinger, Stocastico, filtro orario, notizie e report giornaliero
++ Tasto apertura operazione su MT5 via file JSON
 """
 
 import logging
 import asyncio
 import os
+import json
 from datetime import datetime
 import pandas as pd
 import ta
 import requests as req
-from telegram import Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
 import psycopg2
@@ -30,6 +32,9 @@ CHECK_INTERVAL = 2
 ATR_SL_MULT    = 0.6
 ATR_TP_MULT    = 0.6
 TIMEZONE       = pytz.timezone("Europe/Rome")
+
+# Percorso del file JSON che l'EA legge su MT5
+SIGNAL_FILE_PATH = os.environ.get("SIGNAL_FILE_PATH", "/Users/nico.piccardi/Documents/MT5_Signal/signal.json")
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -50,7 +55,6 @@ def get_db():
 
 
 def init_db():
-    """Crea la tabella segnali se non esiste."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -164,6 +168,29 @@ def market_status_text() -> str:
 
 
 # ─────────────────────────────────────────────
+# FILE JSON PER MT5
+# ─────────────────────────────────────────────
+
+def write_signal_file(signal: str, price: float, tp: float, sl: float):
+    """Scrive il file JSON che l'EA su MT5 legge per aprire l'ordine."""
+    try:
+        os.makedirs(os.path.dirname(SIGNAL_FILE_PATH), exist_ok=True)
+        data = {
+            "signal":   signal,
+            "price":    price,
+            "tp":       tp,
+            "sl":       sl,
+            "time":     datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M:%S"),
+            "executed": False
+        }
+        with open(SIGNAL_FILE_PATH, "w") as f:
+            json.dump(data, f)
+        logger.info(f"File segnale scritto: {signal} @ {price}")
+    except Exception as e:
+        logger.error(f"Errore scrittura file segnale: {e}")
+
+
+# ─────────────────────────────────────────────
 # NOTIZIE
 # ─────────────────────────────────────────────
 
@@ -184,8 +211,8 @@ def get_gold_news() -> list:
         articles = data.get("articles", [])
         news = []
         for a in articles:
-            title  = a.get("title", "")
-            source = a.get("source", {}).get("name", "")
+            title     = a.get("title", "")
+            source    = a.get("source", {}).get("name", "")
             published = a.get("publishedAt", "")[:10]
             if title and source:
                 news.append(f"📰 *{source}* ({published})\n_{title}_")
@@ -233,17 +260,15 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["atr"] = ta.volatility.average_true_range(df["High"], df["Low"], df["Close"], window=14)
 
     bb = ta.volatility.BollingerBands(df["Close"], window=20, window_dev=2)
-    df["bb_upper"]  = bb.bollinger_hband()
-    df["bb_lower"]  = bb.bollinger_lband()
+    df["bb_upper"] = bb.bollinger_hband()
+    df["bb_lower"] = bb.bollinger_lband()
 
     stoch = ta.momentum.StochasticOscillator(df["High"], df["Low"], df["Close"], window=14, smooth_window=3)
     df["stoch_k"] = stoch.stoch()
     df["stoch_d"] = stoch.stoch_signal()
 
-    # Volume medio
     df["vol_avg"] = df["Volume"].rolling(window=20).mean()
 
-    # ADX — forza del trend
     adx_obj   = ta.trend.ADXIndicator(df["High"], df["Low"], df["Close"], window=14)
     df["adx"] = adx_obj.adx()
 
@@ -251,7 +276,6 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_support_resistance(df):
-    """Calcola livelli di supporto e resistenza dagli ultimi 50 periodi."""
     recent     = df.tail(50)
     support    = round(float(recent["Low"].min()), 2)
     resistance = round(float(recent["High"].max()), 2)
@@ -260,7 +284,6 @@ def get_support_resistance(df):
 
 
 def detect_candle_pattern(df: pd.DataFrame) -> tuple:
-    """Rileva pattern candele giapponesi. Restituisce (pattern_name, direction)."""
     if len(df) < 2:
         return ("", "NEUTRAL")
 
@@ -270,31 +293,22 @@ def detect_candle_pattern(df: pd.DataFrame) -> tuple:
     o, h, l, c = curr["Open"], curr["High"], curr["Low"], curr["Close"]
     po, pc     = prev["Open"], prev["Close"]
 
-    body      = abs(c - o)
+    body         = abs(c - o)
     candle_range = h - l
-    upper_wick = h - max(o, c)
-    lower_wick = min(o, c) - l
+    upper_wick   = h - max(o, c)
+    lower_wick   = min(o, c) - l
 
     if candle_range == 0:
         return ("", "NEUTRAL")
 
-    # Doji — corpo molto piccolo
     if body <= candle_range * 0.1:
         return ("🕯 Doji (indecisione)", "NEUTRAL")
-
-    # Hammer — corpo piccolo in alto, wick lungo in basso (rialzista)
     if lower_wick >= body * 2 and upper_wick <= body * 0.3 and c > o:
         return ("🔨 Hammer (rialzista)", "BUY")
-
-    # Shooting Star — corpo piccolo in basso, wick lungo in alto (ribassista)
     if upper_wick >= body * 2 and lower_wick <= body * 0.3 and c < o:
         return ("⭐ Shooting Star (ribassista)", "SELL")
-
-    # Engulfing Bullish — candela verde che ingloba quella rossa precedente
     if c > o and pc < po and c > po and o < pc:
         return ("📈 Engulfing Bullish (rialzista)", "BUY")
-
-    # Engulfing Bearish — candela rossa che ingloba quella verde precedente
     if c < o and pc > po and c < po and o > pc:
         return ("📉 Engulfing Bearish (ribassista)", "SELL")
 
@@ -302,7 +316,6 @@ def detect_candle_pattern(df: pd.DataFrame) -> tuple:
 
 
 def get_trend_1h() -> str:
-    """Controlla il trend sull'1H — restituisce BUY, SELL o NEUTRAL."""
     try:
         df = get_gold_data(interval="1h", outputsize=100)
         df = compute_indicators(df)
@@ -356,51 +369,42 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     sl_dist = round(atr * ATR_SL_MULT, 2)
     tp_dist = round(atr * ATR_TP_MULT, 2)
 
-    # Pattern candele
     candle_pattern, candle_dir = detect_candle_pattern(df)
-
-    # Volume alto = sopra la media
-    high_volume = volume > vol_avg * 1.2
-
-    # Supporto e resistenza
+    high_volume     = volume > vol_avg * 1.2
     support, resistance, pivot = get_support_resistance(df)
     near_support    = abs(price - support) <= atr * 0.5
     near_resistance = abs(price - resistance) <= atr * 0.5
+    trend_strong    = adx >= 20
 
-    # ADX — ignora segnali in mercato laterale
-    trend_strong = adx >= 20
-
-    # Punteggio BUY (0-15)
     buy_score = 0
-    if ema20 > ema50:              buy_score += 1
-    if macd > sig:                 buy_score += 1
-    if rsi < 50:                   buy_score += 1
-    if rsi < 40:                   buy_score += 1
-    if rsi < 30:                   buy_score += 1
-    if price <= bb_lower:          buy_score += 1
-    if price < bb_lower:           buy_score += 1
-    if stoch_k < 30:               buy_score += 1
-    if stoch_k > stoch_d:          buy_score += 1
-    if candle_dir == "BUY":        buy_score += 2
-    if high_volume:                buy_score += 1
-    if near_support:               buy_score += 1
-    if trend_strong:               buy_score += 1
+    if ema20 > ema50:           buy_score += 1
+    if macd > sig:              buy_score += 1
+    if rsi < 50:                buy_score += 1
+    if rsi < 40:                buy_score += 1
+    if rsi < 30:                buy_score += 1
+    if price <= bb_lower:       buy_score += 1
+    if price < bb_lower:        buy_score += 1
+    if stoch_k < 30:            buy_score += 1
+    if stoch_k > stoch_d:       buy_score += 1
+    if candle_dir == "BUY":     buy_score += 2
+    if high_volume:             buy_score += 1
+    if near_support:            buy_score += 1
+    if trend_strong:            buy_score += 1
 
-    # Punteggio SELL (0-15)
     sell_score = 0
-    if ema20 < ema50:              sell_score += 1
-    if macd < sig:                 sell_score += 1
-    if rsi > 50:                   sell_score += 1
-    if rsi > 60:                   sell_score += 1
-    if rsi > 70:                   sell_score += 1
-    if price >= bb_upper:          sell_score += 1
-    if price > bb_upper:           sell_score += 1
-    if stoch_k > 70:               sell_score += 1
-    if stoch_k < stoch_d:          sell_score += 1
-    if candle_dir == "SELL":       sell_score += 2
-    if high_volume:                sell_score += 1
-    if near_resistance:            sell_score += 1
-    if trend_strong:               sell_score += 1
+    if ema20 < ema50:           sell_score += 1
+    if macd < sig:              sell_score += 1
+    if rsi > 50:                sell_score += 1
+    if rsi > 60:                sell_score += 1
+    if rsi > 70:                sell_score += 1
+    if price >= bb_upper:       sell_score += 1
+    if price > bb_upper:        sell_score += 1
+    if stoch_k > 70:            sell_score += 1
+    if stoch_k < stoch_d:       sell_score += 1
+    if candle_dir == "SELL":    sell_score += 2
+    if high_volume:             sell_score += 1
+    if near_resistance:         sell_score += 1
+    if trend_strong:            sell_score += 1
 
     if price <= bb_lower:
         bb_txt = f"📉 Prezzo sotto banda inferiore BB (${round(bb_lower, 2)})"
@@ -416,7 +420,7 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
     else:
         stoch_txt = f"📊 Stocastico: {round(stoch_k, 1)}"
 
-    vol_txt   = "📊 Volume: 🔥 Alto" if high_volume else "📊 Volume: normale"
+    vol_txt     = "📊 Volume: 🔥 Alto" if high_volume else "📊 Volume: normale"
     trend_emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "⚪"}.get(trend_1h, "⚪")
     trend_txt   = f"{trend_emoji} Trend 1H: *{trend_1h}*"
 
@@ -433,15 +437,11 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
             f"EMA20 > EMA50 (trend rialzista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sopra' if macd > sig else 'sotto'} la signal line\n"
-            f"{bb_txt}\n"
-            f"{stoch_txt}\n"
-            f"{vol_txt}\n"
+            f"{bb_txt}\n{stoch_txt}\n{vol_txt}\n"
             + (f"{candle_txt}\n" if candle_txt else "") +
             f"📍 Supporto: ${support} | Resistenza: ${resistance}\n"
             f"📐 ADX: {round(adx, 1)} ({'trend forte' if trend_strong else 'mercato laterale'})\n"
-            f"{trend_txt}\n"
-            f"{confirm_txt}\n"
-            f"Punteggio: {buy_score}/15"
+            f"{trend_txt}\n{confirm_txt}\nPunteggio: {buy_score}/15"
         )
     elif sell_score >= 3:
         signal          = "SELL"
@@ -456,15 +456,11 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
             f"EMA20 < EMA50 (trend ribassista)\n"
             f"RSI: {round(rsi, 1)}\n"
             f"MACD {'sotto' if macd < sig else 'sopra'} la signal line\n"
-            f"{bb_txt}\n"
-            f"{stoch_txt}\n"
-            f"{vol_txt}\n"
+            f"{bb_txt}\n{stoch_txt}\n{vol_txt}\n"
             + (f"{candle_txt}\n" if candle_txt else "") +
             f"📍 Supporto: ${support} | Resistenza: ${resistance}\n"
             f"📐 ADX: {round(adx, 1)} ({'trend forte' if trend_strong else 'mercato laterale'})\n"
-            f"{trend_txt}\n"
-            f"{confirm_txt}\n"
-            f"Punteggio: {sell_score}/15"
+            f"{trend_txt}\n{confirm_txt}\nPunteggio: {sell_score}/15"
         )
     else:
         signal   = "NEUTRAL"
@@ -474,12 +470,8 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
         prob     = 0
         reason   = (
             f"Nessuna confluenza chiara tra gli indicatori.\n"
-            f"RSI: {round(rsi, 1)} | "
-            f"EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}\n"
-            f"{bb_txt}\n"
-            f"{stoch_txt}\n"
-            f"{vol_txt}\n"
-            f"{trend_txt}"
+            f"RSI: {round(rsi, 1)} | EMA20: {round(ema20, 2)} | EMA50: {round(ema50, 2)}\n"
+            f"{bb_txt}\n{stoch_txt}\n{vol_txt}\n{trend_txt}"
         )
 
     return {
@@ -498,7 +490,6 @@ def analyze(df: pd.DataFrame, trend_1h: str) -> dict:
 
 def format_message(data: dict) -> str:
     emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "⚪"}.get(data["signal"], "⚪")
-
     msg = (
         f"{emoji} *SEGNALE ORO (XAU/USD)*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -506,7 +497,6 @@ def format_message(data: dict) -> str:
         f"📊 Segnale: *{data['signal']}* {data['strength']}\n"
         f"💰 Prezzo attuale: *${data['price']}*\n"
     )
-
     if data["sl"] and data["tp"]:
         rr = abs(data["tp"] - data["price"]) / abs(data["sl"] - data["price"])
         msg += (
@@ -515,7 +505,6 @@ def format_message(data: dict) -> str:
             f"🛑 *Stop Loss:* ${data['sl']}\n"
             f"⚖️ Risk/Reward: *1:{round(rr, 1)}*\n"
         )
-
     msg += (
         f"\n📈 *Analisi:*\n"
         f"{data['reason']}\n"
@@ -524,6 +513,47 @@ def format_message(data: dict) -> str:
         f"_Fonte: Twelve Data | Timeframe: 5min + 1H_"
     )
     return msg
+
+
+def build_keyboard(data: dict) -> InlineKeyboardMarkup:
+    callback = f"open|{data['signal']}|{data['price']}|{data['tp']}|{data['sl']}"
+    keyboard = [[InlineKeyboardButton("⚡ Apri operazione su MT5", callback_data=callback)]]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# ─────────────────────────────────────────────
+# CALLBACK — tasto Apri operazione
+# ─────────────────────────────────────────────
+
+async def handle_open_trade(update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        parts  = query.data.split("|")
+        signal = parts[1]
+        price  = float(parts[2])
+        tp     = float(parts[3])
+        sl     = float(parts[4])
+
+        write_signal_file(signal, price, tp, sl)
+
+        await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=(
+                f"⚡ *Segnale inviato a MT5!*\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"📊 {signal} @ ${price}\n"
+                f"🎯 TP: ${tp} | 🛑 SL: ${sl}\n"
+                f"⏳ L'EA aprirà l'ordine entro pochi secondi.\n"
+                f"_Se il prezzo si è mosso oltre 10 pips, l'EA non entrerà._"
+            ),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Errore apertura trade: {e}")
+        await context.bot.send_message(chat_id=CHAT_ID, text=f"❌ Errore apertura operazione: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -553,7 +583,11 @@ async def cmd_signal(update, context: ContextTypes.DEFAULT_TYPE):
         trend_1h = get_trend_1h()
         data     = analyze(df, trend_1h)
         msg      = format_message(data)
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        if data["signal"] != "NEUTRAL":
+            keyboard = build_keyboard(data)
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Errore /signal: {e}")
         await update.message.reply_text(f"❌ Errore nell'analisi: {e}")
@@ -596,7 +630,7 @@ async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
             f"⏳ In attesa: *{stats['pending']}*\n"
             f"📈 Win Rate: *{stats['winrate']}%*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"*Ultimi 15 segnali:*\n"
+            f"*Ultimi 5 segnali:*\n"
             f"{recent_txt}"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"_Totale segnali completati: {stats['total']}_"
@@ -716,9 +750,10 @@ async def auto_check(bot: Bot):
                 add_signal_to_db(data["signal"], data["price"], data["tp"], data["sl"])
 
         if data["signal"] != "NEUTRAL" and data["prob"] >= 60 and data["strength"] != "⭐ DEBOLE":
-            prefix = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
-            msg = prefix + format_message(data)
-            await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+            prefix   = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
+            msg      = prefix + format_message(data)
+            keyboard = build_keyboard(data)
+            await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown", reply_markup=keyboard)
             logger.info(f"Segnale inviato: {data['signal']} @ {data['price']}")
 
     except Exception as e:
@@ -740,6 +775,7 @@ async def main():
     app.add_handler(CommandHandler("news", cmd_news))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CallbackQueryHandler(handle_open_trade, pattern="^open\\|"))
 
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     scheduler.add_job(auto_check, "interval", minutes=CHECK_INTERVAL, args=[app.bot])
