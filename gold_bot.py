@@ -2,17 +2,17 @@
 Gold Trading Bot per Telegram
 Analizza XAU/USD con database persistente, timeframe multipli 5min+1H,
 Bollinger, Stocastico, filtro orario, notizie e report giornaliero
-+ Tasto apertura operazione su MT5 via file JSON
++ Tasto apertura operazione su MT5 via server locale
 """
 
 import logging
 import asyncio
 import os
 import json
+import requests as req
 from datetime import datetime
 import pandas as pd
 import ta
-import requests as req
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -23,18 +23,16 @@ from psycopg2.extras import RealDictCursor
 # ─────────────────────────────────────────────
 # CONFIGURAZIONE
 # ─────────────────────────────────────────────
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-CHAT_ID        = os.environ.get("CHAT_ID", "")
-TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
-NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "d929b1d0334e4160872bbb1bef9fbb15")
-DATABASE_URL   = os.environ.get("DATABASE_URL", "")
-CHECK_INTERVAL = 2
-ATR_SL_MULT    = 0.6
-ATR_TP_MULT    = 0.6
-TIMEZONE       = pytz.timezone("Europe/Rome")
-
-# Percorso del file JSON che l'EA legge su MT5
-SIGNAL_FILE_PATH = os.environ.get("SIGNAL_FILE_PATH", "/Users/nico.piccardi/Documents/MT5_Signal/signal.json")
+TELEGRAM_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID         = os.environ.get("CHAT_ID", "")
+TWELVE_API_KEY  = os.environ.get("TWELVE_API_KEY", "85f2bac59bb24b3a8e55551a3337f844")
+NEWS_API_KEY    = os.environ.get("NEWS_API_KEY", "d929b1d0334e4160872bbb1bef9fbb15")
+DATABASE_URL    = os.environ.get("DATABASE_URL", "")
+LOCAL_SERVER_URL = os.environ.get("LOCAL_SERVER_URL", "")  # es: http://TUO_IP:8765/signal
+CHECK_INTERVAL  = 2
+ATR_SL_MULT     = 0.6
+ATR_TP_MULT     = 0.6
+TIMEZONE        = pytz.timezone("Europe/Rome")
 # ─────────────────────────────────────────────
 
 logging.basicConfig(
@@ -168,13 +166,15 @@ def market_status_text() -> str:
 
 
 # ─────────────────────────────────────────────
-# FILE JSON PER MT5
+# INVIO SEGNALE AL SERVER LOCALE
 # ─────────────────────────────────────────────
 
-def write_signal_file(signal: str, price: float, tp: float, sl: float):
-    """Scrive il file JSON che l'EA su MT5 legge per aprire l'ordine."""
+def send_signal_to_local_server(signal: str, price: float, tp: float, sl: float) -> bool:
+    """Invia il segnale al server Python che gira sul Mac."""
+    if not LOCAL_SERVER_URL:
+        logger.warning("LOCAL_SERVER_URL non configurato")
+        return False
     try:
-        os.makedirs(os.path.dirname(SIGNAL_FILE_PATH), exist_ok=True)
         data = {
             "signal":   signal,
             "price":    price,
@@ -183,11 +183,11 @@ def write_signal_file(signal: str, price: float, tp: float, sl: float):
             "time":     datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M:%S"),
             "executed": False
         }
-        with open(SIGNAL_FILE_PATH, "w") as f:
-            json.dump(data, f)
-        logger.info(f"File segnale scritto: {signal} @ {price}")
+        r = req.post(LOCAL_SERVER_URL, json=data, timeout=5)
+        return r.status_code == 200
     except Exception as e:
-        logger.error(f"Errore scrittura file segnale: {e}")
+        logger.error(f"Errore invio segnale al server locale: {e}")
+        return False
 
 
 # ─────────────────────────────────────────────
@@ -286,21 +286,16 @@ def get_support_resistance(df):
 def detect_candle_pattern(df: pd.DataFrame) -> tuple:
     if len(df) < 2:
         return ("", "NEUTRAL")
-
     curr = df.iloc[-1]
     prev = df.iloc[-2]
-
     o, h, l, c = curr["Open"], curr["High"], curr["Low"], curr["Close"]
     po, pc     = prev["Open"], prev["Close"]
-
     body         = abs(c - o)
     candle_range = h - l
     upper_wick   = h - max(o, c)
     lower_wick   = min(o, c) - l
-
     if candle_range == 0:
         return ("", "NEUTRAL")
-
     if body <= candle_range * 0.1:
         return ("🕯 Doji (indecisione)", "NEUTRAL")
     if lower_wick >= body * 2 and upper_wick <= body * 0.3 and c > o:
@@ -311,7 +306,6 @@ def detect_candle_pattern(df: pd.DataFrame) -> tuple:
         return ("📈 Engulfing Bullish (rialzista)", "BUY")
     if c < o and pc > po and c < po and o > pc:
         return ("📉 Engulfing Bearish (ribassista)", "SELL")
-
     return ("", "NEUTRAL")
 
 
@@ -536,21 +530,32 @@ async def handle_open_trade(update, context: ContextTypes.DEFAULT_TYPE):
         tp     = float(parts[3])
         sl     = float(parts[4])
 
-        write_signal_file(signal, price, tp, sl)
+        success = send_signal_to_local_server(signal, price, tp, sl)
 
         await query.edit_message_reply_markup(reply_markup=None)
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text=(
-                f"⚡ *Segnale inviato a MT5!*\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"📊 {signal} @ ${price}\n"
-                f"🎯 TP: ${tp} | 🛑 SL: ${sl}\n"
-                f"⏳ L'EA aprirà l'ordine entro pochi secondi.\n"
-                f"_Se il prezzo si è mosso oltre 10 pips, l'EA non entrerà._"
-            ),
-            parse_mode="Markdown"
-        )
+
+        if success:
+            await context.bot.send_message(
+                chat_id=CHAT_ID,
+                text=(
+                    f"⚡ *Segnale inviato a MT5!*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 {signal} @ ${price}\n"
+                    f"🎯 TP: ${tp} | 🛑 SL: ${sl}\n"
+                    f"⏳ L'EA aprirà l'ordine entro pochi secondi.\n"
+                    f"_Se il prezzo si è mosso oltre 10 pips, l'EA non entrerà._"
+                ),
+                parse_mode="Markdown"
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=CHAT_ID,
+                text=(
+                    f"❌ *Impossibile raggiungere il server locale.*\n"
+                    f"Assicurati che `goldbot_server.py` sia in esecuzione sul tuo Mac."
+                ),
+                parse_mode="Markdown"
+            )
     except Exception as e:
         logger.error(f"Errore apertura trade: {e}")
         await context.bot.send_message(chat_id=CHAT_ID, text=f"❌ Errore apertura operazione: {e}")
@@ -613,15 +618,12 @@ async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
     try:
         stats  = compute_stats()
         recent = get_recent_signals(5)
-
         recent_txt = ""
         for h in recent:
             emoji = "✅" if h["result"] == "WIN" else "❌"
             recent_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
-
         if not recent_txt:
             recent_txt = "Nessun segnale completato ancora.\n"
-
         msg = (
             f"📊 *STORICO SEGNALI*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -683,7 +685,6 @@ async def send_daily_report(bot: Bot):
         today   = datetime.now(TIMEZONE).strftime("%d/%m/%Y")
         news    = get_gold_news()
         news_txt = "\n\n".join(news[:2]) if news else "Nessuna notizia disponibile."
-
         signals_txt = ""
         for h in stats["signals"]:
             if h["result"] == "WIN":
@@ -693,10 +694,8 @@ async def send_daily_report(bot: Bot):
             else:
                 emoji = "⏳"
             signals_txt += f"{emoji} {h['signal']} @ ${h['price']} — {h['time']}\n"
-
         if not signals_txt:
             signals_txt = "Nessun segnale oggi.\n"
-
         msg = (
             f"🌙 *REPORT GIORNALIERO — {today}*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -730,32 +729,26 @@ async def send_daily_report(bot: Bot):
 
 async def auto_check(bot: Bot):
     global last_signal
-
     if not is_market_open():
         logger.info("Mercato chiuso — segnale saltato")
         return
-
     try:
         df       = get_gold_data()
         df       = compute_indicators(df)
         trend_1h = get_trend_1h()
         data     = analyze(df, trend_1h)
-
         update_db_results(data["price"])
-
         is_new = data["signal"] != "NEUTRAL" and data["signal"] != last_signal and data["prob"] >= 60
         if data["signal"] != "NEUTRAL" and data["prob"] >= 60:
             last_signal = data["signal"]
             if is_new:
                 add_signal_to_db(data["signal"], data["price"], data["tp"], data["sl"])
-
         if data["signal"] != "NEUTRAL" and data["prob"] >= 60 and data["strength"] != "⭐ DEBOLE":
             prefix   = "🚨 *NUOVO SEGNALE RILEVATO!*\n\n" if is_new else ""
             msg      = prefix + format_message(data)
             keyboard = build_keyboard(data)
             await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown", reply_markup=keyboard)
             logger.info(f"Segnale inviato: {data['signal']} @ {data['price']}")
-
     except Exception as e:
         logger.error(f"Errore job automatico: {e}")
         await bot.send_message(chat_id=CHAT_ID, text=f"⚠️ Errore analisi automatica: {e}")
@@ -767,27 +760,22 @@ async def auto_check(bot: Bot):
 
 async def main():
     init_db()
-
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("signal", cmd_signal))
     app.add_handler(CommandHandler("news", cmd_news))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CallbackQueryHandler(handle_open_trade, pattern="^open\\|"))
-
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     scheduler.add_job(auto_check, "interval", minutes=CHECK_INTERVAL, args=[app.bot])
     scheduler.add_job(send_daily_report, "cron", hour=20, minute=0, args=[app.bot])
     scheduler.add_job(send_morning_news, "cron", hour=8, minute=0, args=[app.bot])
     scheduler.start()
     logger.info(f"✅ Bot avviato — controllo ogni {CHECK_INTERVAL} minuti (08:00–20:00)")
-
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-
     try:
         await asyncio.Event().wait()
     except (KeyboardInterrupt, SystemExit):
