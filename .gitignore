@@ -4,3 +4,6 @@ __pycache__/
 active_trades.json
 regime_history.json
 .env
+# Cartella dati locale (BOT_DIR): DB runtime, CSV storici scaricati da
+# historical_events.py — ricostruibili, non vanno in git.
+data/
