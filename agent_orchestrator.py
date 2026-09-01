@@ -251,13 +251,31 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
         else:
             MIN_PROB = int(__import__("os").environ.get("MIN_PROB", "55"))
 
-        # Blocca RANGING per H1/H4 — backtest: WR 20%, avg -0.5R
+        # Regimi bloccati per timeframe — non è lo stesso regime ovunque.
+        # H1: RANGING resta il peggiore (WR 23.7%, avg -0.297R, n=38 su 1y).
+        # TRENDING_UP aggiunto il 1 set 2026: negativo in modo coerente su
+        # tre finestre annidate (3m WR 27.6% avg -0.052R n=29; 6m WR 28.0%
+        # avg -0.074R n=50; 1y WR 27.4% avg -0.113R n=84) — non un fluke di
+        # un solo campione.
+        # H4: RANGING bloccato, ma il campione (n=7, avg positivo) è troppo
+        # piccolo per confermarlo o toglierlo — lasciato invariato finché
+        # non c'è più storico.
+        # D1: RANGING è quasi inesistente come regime lì (sotto la soglia
+        # minima di 3 trade sia su 5y sia su 20y); il regime davvero debole
+        # è TRENDING_DOWN, confermato su entrambi i campioni (WR 25-27%,
+        # avg negativo, n=15 e n=67).
+        _BLOCKED_REGIMES_BY_TF = {
+            "1h":   ("RANGING", "TRENDING_UP"),
+            "4h":   ("RANGING",),
+            "1day": ("TRENDING_DOWN",),
+        }
         _regime_up = str(state.regime).upper().replace(" ","_")
-        if _regime_up in ("RANGING",) and _tf in ("1h", "4h"):
+        _blocked = _BLOCKED_REGIMES_BY_TF.get(_tf, ())
+        if _regime_up in _blocked:
             state.final_decision  = "SKIP"
-            state.decision_reason = f"Regime RANGING bloccato per {state.timeframe}"
+            state.decision_reason = f"Regime {_regime_up} bloccato per {state.timeframe}"
             state.decision_conf   = 90.0
-            state.add_log("🎯 DecisionMaker", f"SKIP — RANGING bloccato su {state.timeframe}")
+            state.add_log("🎯 DecisionMaker", f"SKIP — {_regime_up} bloccato su {state.timeframe}")
             return AgentResult(success=True, data={"decision": "SKIP"})
 
         state.structure_ok = (
