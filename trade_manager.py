@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytz
@@ -56,6 +56,23 @@ RESULT_PNL = {
 
 _write_lock = threading.RLock()
 _price_cache = {"price": 0.0, "ts": 0.0}
+
+# Come in analyzer.py: se Twelve Data segnala quota esaurita, smettiamo di
+# richiamarla fino a mezzanotte UTC invece di continuare a provarci a ogni
+# ciclo di monitoraggio (ogni 10s). Qui il rischio è basso — gold-api.com è
+# 2° in cascata e molto affidabile — ma protegge comunque il monitoraggio
+# SL/TP/BE nel caso raro in cui anche Yahoo e gold-api falliscano insieme.
+_twelvedata_price_blocked_until = 0.0
+
+
+def _twelvedata_quota_exceeded(exc: Exception) -> bool:
+    return "api credits" in str(exc).lower()
+
+
+def _seconds_until_utc_midnight() -> float:
+    now = datetime.now(timezone.utc)
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (tomorrow - now).total_seconds()
 
 
 class DuplicateSetupError(RuntimeError):
@@ -949,7 +966,11 @@ def _fetch_price_twelvedata() -> float:
     if response.status_code == 429:
         raise requests.HTTPError("429 Too Many Requests")
     response.raise_for_status()
-    return float(response.json()["price"])
+    data = response.json()
+    if "price" not in data:
+        # Quota esaurita risponde 200 OK con un JSON di errore (niente "price")
+        raise ValueError(f"Nessun prezzo: {data.get('message', data)}")
+    return float(data["price"])
 
 
 def _fetch_price_stooq() -> float:
@@ -1038,6 +1059,7 @@ def _fetch_price_sync() -> float:
     Se tutte le fonti live falliscono usa il prezzo più recente in cache.
     Il monitor NON si ferma mai per mancanza di prezzo — usa il dato più vecchio.
     """
+    global _twelvedata_price_blocked_until
     now = time.time()
 
     if now - _price_cache["ts"] < _PRICE_CACHE_TTL and _price_cache["price"] > 0:
@@ -1046,7 +1068,10 @@ def _fetch_price_sync() -> float:
     sources = [
         ("Yahoo Finance", _fetch_price_yahoo),
         ("gold-api.com",  _fetch_price_goldapi),
-        ("Twelve Data",   _fetch_price_twelvedata),
+    ]
+    if now >= _twelvedata_price_blocked_until:
+        sources.append(("Twelve Data", _fetch_price_twelvedata))
+    sources += [
         ("Stooq",         _fetch_price_stooq),
         ("metals.live",   _fetch_price_metals_api),
     ]
@@ -1064,6 +1089,12 @@ def _fetch_price_sync() -> float:
             else:
                 logger.debug(f"{name}: HTTP error {e}")
         except Exception as e:
+            if name == "Twelve Data" and _twelvedata_quota_exceeded(e):
+                _twelvedata_price_blocked_until = now + _seconds_until_utc_midnight()
+                logger.warning(
+                    f"Twelve Data (prezzo): quota esaurita, sospesa per "
+                    f"{(_twelvedata_price_blocked_until - now) / 3600:.1f}h"
+                )
             logger.debug(f"{name}: {e}")
 
     # Tutte le fonti live fallite — usa cache stale

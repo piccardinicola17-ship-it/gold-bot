@@ -25,6 +25,26 @@ TIMEZONE       = pytz.timezone("Europe/Rome")
 # ═══════════════════════════════════════════════════════════════
 _data_cache = {}  # {interval: (timestamp_unix, dataframe)}
 _price_cache = {"timestamp": 0, "price": 0.0}
+_data_fail_cache = {}  # {interval: timestamp_unix ultimo fallimento totale}
+_FAIL_BACKOFF = 30  # secondi di pausa dopo un fallimento totale su un TF
+
+# Se Twelve Data segnala quota giornaliera esaurita, smettiamo di richiamarla
+# fino a mezzanotte UTC invece di continuare a provarci a ogni fetch — trovato
+# in produzione: quando yfinance+Stooq falliscono insieme, OGNI fetch di OGNI
+# timeframe cascata su Twelve Data (moltiplicato ×6 da get_multi_timeframe_data
+# dentro full_analyze), esaurendo 800 crediti/giorno in poche ore invece che mai.
+_twelvedata_blocked_until = 0.0
+
+
+def _twelvedata_quota_exceeded(exc: Exception) -> bool:
+    return "api credits" in str(exc).lower()
+
+
+def _seconds_until_utc_midnight() -> float:
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (tomorrow - now).total_seconds()
 
 # Ogni quanti secondi è lecito riscaricare ciascun timeframe
 CACHE_TTL = {
@@ -164,7 +184,14 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
     transitorio dopo diversi download pesanti di fila, come in
     /backtest tutti) si ritenta una seconda volta dopo una breve pausa
     prima di arrendersi — invece di rinunciare al primo intoppo.
+
+    Durante un blackout totale (tutte le fonti giù insieme) un breve
+    backoff evita di ripetere lo stesso tentativo fallito a ogni singola
+    chiamata: con 5 timeframe controllati ogni 5 minuti e full_analyze()
+    che li ri-scarica tutti per ciascuno, senza backoff un blackout
+    diventa decine di tentativi falliti al minuto.
     """
+    global _twelvedata_blocked_until
     import time
     now = time.time()
     cache_key = (interval, outputsize)
@@ -173,11 +200,19 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
     if not bypass_cache and cached and (now - cached[0]) < ttl:
         return cached[1].copy()
 
+    if not bypass_cache:
+        last_fail = _data_fail_cache.get(interval, 0)
+        if now - last_fail < _FAIL_BACKOFF:
+            if cached:
+                return cached[1].copy()
+            raise ValueError(f"Nessun dato disponibile per {interval} (backoff dopo fallimento recente)")
+
     sources = [
-        ("yfinance",    lambda: _fetch_yfinance(interval, outputsize)),
-        ("Stooq",       lambda: _fetch_stooq(interval, outputsize)),
-        ("Twelve Data", lambda: _fetch_twelvedata(interval, outputsize)),
+        ("yfinance", lambda: _fetch_yfinance(interval, outputsize)),
+        ("Stooq",    lambda: _fetch_stooq(interval, outputsize)),
     ]
+    if now >= _twelvedata_blocked_until:
+        sources.append(("Twelve Data", lambda: _fetch_twelvedata(interval, outputsize)))
 
     for attempt in (1, 2):
         for name, fetch_fn in sources:
@@ -185,12 +220,21 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
                 df = fetch_fn()
                 if df is not None and not df.empty:
                     _data_cache[cache_key] = (now, df)
+                    _data_fail_cache.pop(interval, None)
                     logger.debug(f"Candele {interval} da {name}: {len(df)} barre")
                     return df.copy()
             except Exception as e:
+                if name == "Twelve Data" and _twelvedata_quota_exceeded(e):
+                    _twelvedata_blocked_until = now + _seconds_until_utc_midnight()
+                    logger.warning(
+                        f"Twelve Data: quota esaurita, sospesa per "
+                        f"{(_twelvedata_blocked_until - now) / 3600:.1f}h (fino a mezzanotte UTC)"
+                    )
                 logger.warning(f"{name} fallito per {interval} (tentativo {attempt}/2): {e}")
         if attempt == 1:
             time.sleep(3)
+
+    _data_fail_cache[interval] = now
 
     if cached:
         logger.warning(f"Tutte le fonti fallite per {interval}, uso cache stale")
