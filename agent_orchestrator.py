@@ -145,12 +145,21 @@ async def agent_data_collector(state: TradingState) -> AgentResult:
         state.current_price = price
         state.timestamp = datetime.now(TIMEZONE).isoformat()
 
-        # Candele per timeframe — meno candele = analisi più veloce
-        # M5/M15: 150 bastano per tutti gli indicatori incluso EMA200
-        # H1/H4/D1: 200 per avere storico sufficiente su TF più lenti
+        # Stessi outputsize di analyzer.get_multi_timeframe_data() (usata da
+        # full_analyze, chiamata subito dopo da agent_structure_analyst):
+        # allineare i due significa che il fetch qui sotto e quello dentro
+        # full_analyze condividono la stessa chiave di cache in
+        # analyzer._data_cache, quindi il secondo trova un cache hit invece
+        # di riscaricare le stesse candele una seconda volta. Prima i due
+        # numeri erano diversi per ogni timeframe: ogni singolo controllo
+        # pipeline faceva sempre DUE fetch reali dello stesso TF, anche a
+        # sorgenti dati perfettamente sane — scoperto analizzando la causa
+        # dell'esaurimento quota Twelve Data del 1 settembre 2026 (quel bug
+        # era il moltiplicatore ×6 su tutti i TF; questo è il raddoppio sul
+        # solo TF principale, più piccolo ma non ancora sistemato allora).
         OUTPUTSIZE = {
-            "5min": 150, "15min": 150,
-            "1h": 200, "4h": 200, "1day": 200
+            "1min": 120, "5min": 300, "15min": 200,
+            "1h": 150, "4h": 100, "1day": 100,
         }
         outputsize = OUTPUTSIZE.get(state.timeframe, 150)
 
