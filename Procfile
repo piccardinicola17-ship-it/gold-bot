@@ -1,1 +1,1 @@
-worker: python3 gold_bot.py
+web: bash start_bot.sh

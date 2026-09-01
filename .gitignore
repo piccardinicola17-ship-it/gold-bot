@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.db
+active_trades.json
+regime_history.json
+.env
