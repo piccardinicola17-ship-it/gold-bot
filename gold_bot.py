@@ -25,7 +25,7 @@ from telegram import Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from analyzer import get_news_sentiment, get_extended_news
+from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_data_success
 from agent_orchestrator import run_pipeline, format_pipeline_report
 from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news
 # ORB rimosso — gestito manualmente dall'utente
@@ -61,7 +61,13 @@ MIN_PROB       = 55
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ALL_TIMEFRAMES = ["5min", "15min", "1h", "4h", "1day"]
+# M5 e M15 esclusi dalla generazione automatica di segnali: il backtest del
+# 1 settembre 2026 (dopo il fix del bug break-even, vedi report "GoldMind
+# Audit") mostra profit factor 0,70 e 0,97 su un anno di dati — nessun edge
+# reale, il bot perderebbe soldi in media. Restano disponibili a mano con
+# /signal e /m15 (con un avviso), per chi vuole comunque testarli.
+ALL_TIMEFRAMES = ["1h", "4h", "1day"]
+NO_EDGE_TIMEFRAMES = {"5min", "15min"}
 
 TF_LABEL = {"5min": "M5", "15min": "M15", "1h": "H1", "4h": "H4", "1day": "D1"}
 
@@ -368,6 +374,13 @@ async def _run_analysis(update, timeframe: str):
             return
         trade_id = open_trade(data)
         await update.message.reply_text(format_pipeline_report(state), parse_mode="Markdown")
+        if timeframe in NO_EDGE_TIMEFRAMES:
+            await update.message.reply_text(
+                f"⚠️ Promemoria: il backtest mostra che {tf_label} non ha edge "
+                f"positivo su un anno di dati (profit factor sotto o vicino a 1) — "
+                f"per questo non genera più segnali automatici. Questo trade è "
+                f"stato aperto solo perché richiesto a mano."
+            )
         logger.info(f"[MANUAL] Trade aperto: {trade_id}")
 
     except DuplicateSetupError:
@@ -1458,6 +1471,49 @@ async def send_daily_report(bot: Bot):
 # AUTO CHECK — Pipeline multi-timeframe
 # ═══════════════════════════════════════════════
 
+# Sopra questa soglia senza NESSUN fetch candele riuscito (su nessun
+# timeframe, nessuna fonte), il bot avvisa che non può generare segnali —
+# prima andava semplicemente in SKIP in silenzio: un blackout Yahoo+Stooq
+# poteva durare ore senza che nessuno se ne accorgesse (visto in produzione
+# il 1 settembre 2026, notato solo controllando i log a mano).
+BLIND_THRESHOLD_SECONDS = 900  # 15 minuti
+_blind_alert_sent = False
+
+
+async def _check_data_blindness(bot: Bot):
+    """Avvisa una volta se il bot resta senza dati candele per troppo tempo, e una volta quando si riprende."""
+    global _blind_alert_sent
+    elapsed = seconds_since_last_data_success()
+
+    if elapsed > BLIND_THRESHOLD_SECONDS:
+        if not _blind_alert_sent:
+            _blind_alert_sent = True
+            minuti = int(elapsed / 60)
+            try:
+                await bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=(
+                        f"⚠️ *Nessun dato candele da {minuti} minuti*\n"
+                        f"Yahoo, Stooq e Twelve Data sembrano irraggiungibili insieme — "
+                        f"nessun nuovo segnale possibile finché non tornano disponibili. "
+                        f"Il monitoraggio dei trade già aperti (SL/TP/BE) non è influenzato, "
+                        f"usa una fonte prezzo separata."
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                logger.exception("Invio alert blackout dati fallito")
+    elif _blind_alert_sent:
+        _blind_alert_sent = False
+        try:
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text="✅ Dati candele ripristinati — i segnali riprendono normalmente.",
+            )
+        except Exception:
+            logger.exception("Invio alert ripristino dati fallito")
+
+
 async def auto_check_all_timeframes(bot: Bot):
     """
     Controlla tutti i timeframe ogni 5 minuti IN SEQUENZA.
@@ -1484,6 +1540,8 @@ async def auto_check_all_timeframes(bot: Bot):
 
         # Stagger 2s tra TF per non esaurire il rate limit API
         await asyncio.sleep(2)
+
+    await _check_data_blindness(bot)
 
 
 async def _check_single_timeframe(bot: Bot, tf: str):

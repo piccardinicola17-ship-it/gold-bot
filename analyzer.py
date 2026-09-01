@@ -6,6 +6,7 @@ Multi-timeframe: 1min, 5min, 15min, 1h, 4h, 1day
 """
 
 import os
+import time
 import logging
 import requests
 import pandas as pd
@@ -27,6 +28,16 @@ _data_cache = {}  # {interval: (timestamp_unix, dataframe)}
 _price_cache = {"timestamp": 0, "price": 0.0}
 _data_fail_cache = {}  # {interval: timestamp_unix ultimo fallimento totale}
 _FAIL_BACKOFF = 30  # secondi di pausa dopo un fallimento totale su un TF
+
+# Timestamp dell'ultimo fetch candele riuscito, su QUALSIASI timeframe/fonte.
+# Inizializzato a "ora" (non 0) per non generare un falso allarme "cieco" nei
+# secondi subito dopo l'avvio del processo, prima ancora del primo fetch.
+_last_data_success_ts = time.time()
+
+
+def seconds_since_last_data_success() -> float:
+    """Da quanto tempo NESSUN timeframe riesce a scaricare candele da nessuna fonte."""
+    return time.time() - _last_data_success_ts
 
 # Se Twelve Data segnala quota giornaliera esaurita, smettiamo di richiamarla
 # fino a mezzanotte UTC invece di continuare a provarci a ogni fetch — trovato
@@ -191,8 +202,7 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
     che li ri-scarica tutti per ciascuno, senza backoff un blackout
     diventa decine di tentativi falliti al minuto.
     """
-    global _twelvedata_blocked_until
-    import time
+    global _twelvedata_blocked_until, _last_data_success_ts
     now = time.time()
     cache_key = (interval, outputsize)
     cached = _data_cache.get(cache_key)
@@ -221,6 +231,7 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
                 if df is not None and not df.empty:
                     _data_cache[cache_key] = (now, df)
                     _data_fail_cache.pop(interval, None)
+                    _last_data_success_ts = now
                     logger.debug(f"Candele {interval} da {name}: {len(df)} barre")
                     return df.copy()
             except Exception as e:
