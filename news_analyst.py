@@ -156,6 +156,40 @@ def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str =
     return analysis
 
 
+def analyze_breaking_news(source_label: str, title: str, summary: str = "",
+                           xau_bias: str = "N/D", current_price: float = 0) -> str:
+    """
+    Spiegazione breve di un breaking alert Fed (comunicato o discorso) per chi
+    non ha tempo di leggere la fonte: cos'è, di cosa parla, cosa implica per
+    XAU/USD accanto al prezzo attuale. Stesso principio di analyze_macro_event:
+    MAI cifre/pip/livelli inventati — solo lettura qualitativa, e onestà
+    quando il contenuto non ha nulla a che fare con politica monetaria
+    (es. discorsi Fed su temi non di mercato, come inclusione finanziaria).
+    """
+    price_txt = f"${current_price:,.2f}" if current_price > 0 else "N/D"
+    context = [f"Tipo: {source_label}", f"Titolo: {title}"]
+    if summary:
+        context.append(f"Estratto: {summary[:400]}")
+    if xau_bias and xau_bias != "N/D":
+        context.append(f"Tono da screening a parole chiave: {xau_bias}")
+    context.append(f"Prezzo XAU/USD attuale: {price_txt}")
+
+    return _call_groq(
+        system=(
+            "Sei un analista che spiega in italiano, in modo brevissimo, una "
+            "comunicazione ufficiale della Fed a un trader XAU/USD che non ha "
+            "tempo di leggerla. Rispondi in ESATTAMENTE questo formato, 3 righe:\n"
+            "Cos'è: <tipo di comunicazione in poche parole>\n"
+            "Di cosa parla: <una frase, max 20 parole, il succo reale del contenuto>\n"
+            "Per l'oro: BUY|SELL|NEUTRO — <motivo, max 15 parole, MAI cifre precise, "
+            "pip o livelli di prezzo: se il contenuto non riguarda politica "
+            "monetaria/inflazione/tassi, dillo onestamente e usa NEUTRO>"
+        ),
+        user="\n".join(context),
+        max_tokens=140,
+    )
+
+
 def get_macro_briefing(events: list, current_price: float = 0) -> str:
     if not events:
         return "Nessun evento macro ad alto impatto oggi."

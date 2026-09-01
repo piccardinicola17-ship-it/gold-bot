@@ -27,7 +27,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from analyzer import get_news_sentiment, get_extended_news
 from agent_orchestrator import run_pipeline, format_pipeline_report
-from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing
+from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news
 # ORB rimosso — gestito manualmente dall'utente
 from regime_detector import format_regime_message
 from self_learning import analyze_last_trade, weekly_review, optimize_strategy_weights, format_learning_report
@@ -1210,9 +1210,29 @@ async def check_breaking_news_job(bot):
             if alert["source"] == "fed_press" and alert["classification"]["label"] == "NEUTRO":
                 continue
             try:
+                price = await get_current_price_async()
+            except Exception:
+                price = 0.0
+
+            source_label = {
+                "fed_press": "Comunicato Fed",
+                "fed_speech": "Discorso di un membro Fed",
+                "treasury": "Comunicato Treasury",
+            }.get(alert["source"], alert["source"])
+            try:
+                ai_analysis = await asyncio.to_thread(
+                    analyze_breaking_news,
+                    source_label, alert["title"], alert.get("summary", ""),
+                    alert.get("classification", {}).get("xau_bias", "N/D"), price,
+                )
+            except Exception:
+                logger.exception("Analisi AI breaking news fallita")
+                ai_analysis = None
+
+            try:
                 await bot.send_message(
                     chat_id=CHAT_ID,
-                    text=breaking_news.format_breaking_alert(alert),
+                    text=breaking_news.format_breaking_alert(alert, current_price=price, ai_analysis=ai_analysis),
                     parse_mode="Markdown",
                 )
             except Exception:

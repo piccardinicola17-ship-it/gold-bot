@@ -204,6 +204,7 @@ def check_breaking_news(seen_ids: set) -> tuple[list[dict], set]:
             alerts.append({
                 "source": name,
                 "title": item.get("title", ""),
+                "summary": item.get("summary", ""),
                 "link": item.get("link", ""),
                 "classification": classification,
                 "geopolitical": geo if geo["risk_off"] or geo["xau_bias"] != "N/D" else None,
@@ -216,7 +217,7 @@ def check_breaking_news(seen_ids: set) -> tuple[list[dict], set]:
     return alerts, new_seen
 
 
-def format_breaking_alert(alert: dict) -> str:
+def format_breaking_alert(alert: dict, current_price: float = 0, ai_analysis: str | None = None) -> str:
     source_label = {
         "fed_press": "🏛 FED — Comunicato",
         "fed_speech": "🎙 FED — Discorso",
@@ -225,11 +226,22 @@ def format_breaking_alert(alert: dict) -> str:
 
     lines = [f"🔴 *BREAKING — {source_label}*", f"_{alert['title']}_"]
 
-    c = alert.get("classification", {})
-    if "label" in c and c["label"] != "NEUTRO":
-        lines.append(f"Tono: *{c['label']}* (bias oro: {c['xau_bias']}) — {', '.join(c['matched'][:3])}")
-    if c.get("shock_detected"):
-        lines.append(f"⚠️ Possibile shock fiscale — parole chiave: {', '.join(c['matched'][:3])}")
+    price_txt = f"${current_price:,.2f}" if current_price > 0 else "N/D"
+    lines.append(f"XAU/USD: *{price_txt}*")
+
+    if ai_analysis:
+        # Spiegazione breve (cos'è / di cosa parla / bias oro) — vedi
+        # news_analyst.analyze_breaking_news(). Sostituisce la riga "Tono"
+        # a parole chiave quando disponibile: più utile e sempre presente,
+        # anche quando lo screening rileva NEUTRO (prima la riga spariva
+        # del tutto e il messaggio restava senza alcun contesto).
+        lines.append(ai_analysis)
+    else:
+        c = alert.get("classification", {})
+        if "label" in c and c["label"] != "NEUTRO":
+            lines.append(f"Tono: *{c['label']}* (bias oro: {c['xau_bias']}) — {', '.join(c['matched'][:3])}")
+        if c.get("shock_detected"):
+            lines.append(f"⚠️ Possibile shock fiscale — parole chiave: {', '.join(c['matched'][:3])}")
 
     geo = alert.get("geopolitical")
     if geo:
