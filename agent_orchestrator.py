@@ -79,6 +79,12 @@ class TradingState:
     regime:        str          = ""
     rr:            float        = 0.0
     structure_ok:  bool         = False
+    # Livello del precedente swing high (BUY) / swing low (SELL) sul
+    # timeframe del segnale, misurato al momento dell'apertura. Se il prezzo
+    # lo rompe a favore prima di TP1, il monitor arma il break-even in
+    # anticipo (vedi trade_manager._monitor_single) invece di aspettare il
+    # target pieno — pensato per contenere il drawdown di H4/D1.
+    early_be_level: float       = 0.0
     strategies:    dict         = field(default_factory=dict)
 
     # Agente 3 — risk
@@ -211,6 +217,17 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
         state.regime     = data.get("regime", "UNKNOWN")
         state.strategies = data.get("strategies", {})
         state.data_timestamp = str(data.get("data_timestamp") or "")
+
+        # Livello strutturale per il break-even anticipato: il precedente
+        # swing high/low sul TF del segnale. Solo se è ancora "davanti" al
+        # prezzo (non già superato dall'entry stessa) — altrimenti armerebbe
+        # il BE al primo tick, senza che il prezzo si sia mosso a favore.
+        last_high = data.get("last_high")
+        last_low  = data.get("last_low")
+        if state.signal == "BUY" and last_high and float(last_high) > state.entry:
+            state.early_be_level = float(last_high)
+        elif state.signal == "SELL" and last_low and float(last_low) < state.entry:
+            state.early_be_level = float(last_low)
 
         # Calcola R:R su TP2
         if state.entry and state.sl and state.tp2:

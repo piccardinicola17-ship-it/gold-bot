@@ -2369,6 +2369,8 @@ def full_analyze(timeframe_focus: str = "5min") -> dict:
         "pd_zone":     pd_zone,
         "bos":         smc.get("bos"),
         "choch":       smc.get("choch"),
+        "last_high":   smc.get("last_high"),
+        "last_low":    smc.get("last_low"),
         "smc_setup":   smc_setup,
         "ob":          ob,
         "fvg":         fvg,

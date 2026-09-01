@@ -367,6 +367,7 @@ async def _run_analysis(update, timeframe: str):
             "risk_pct": state.risk_pct,
             "strategies": state.strategies,
             "data_timestamp": state.data_timestamp,
+            "early_be_level": state.early_be_level,
         }
         data["setup_key"] = build_setup_key(data)
         if was_setup_seen(data["setup_key"]):
@@ -1581,6 +1582,8 @@ async def _check_single_timeframe(bot: Bot, tf: str):
                 state.tp1   -= basis
                 state.tp2   -= basis
                 state.tp3   -= basis
+                if state.early_be_level:
+                    state.early_be_level -= basis
         except Exception as e:
             logger.debug(f"[{tf}] Basis GC=F-spot non calcolabile: {e}")
 
@@ -1601,6 +1604,7 @@ async def _check_single_timeframe(bot: Bot, tf: str):
             "strategies": state.strategies,
             "data_timestamp": state.data_timestamp,
             "price_basis": basis,
+            "early_be_level": state.early_be_level,
         }
         data["setup_key"] = build_setup_key(data)
         if was_setup_seen(data["setup_key"]):

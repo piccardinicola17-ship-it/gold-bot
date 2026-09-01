@@ -159,6 +159,12 @@ def _ensure_trade_columns(conn: sqlite3.Connection) -> None:
         # per convertire il prezzo live durante il monitoraggio. Vedi
         # open_trade() e _monitor_single().
         "price_basis": "REAL DEFAULT 0",
+        # Precedente swing high (BUY) / swing low (SELL) sul timeframe del
+        # segnale, misurato all'apertura. Se il prezzo lo rompe a favore
+        # prima di TP1, _monitor_single arma il break-even in anticipo
+        # invece di aspettare il target pieno. NULL/0 = non disponibile,
+        # nessun cambiamento rispetto al comportamento precedente.
+        "early_be_level": "REAL",
     }
     existing = _column_names(conn, "trades")
     status_was_missing = "status" not in existing
@@ -608,8 +614,8 @@ def open_trade(data: dict) -> str:
                     trade_id, setup_key, timestamp, signal, order_type, timeframe,
                     regime, entry, sl, tp1, tp2, tp3, be_price, prob, risk_pct,
                     lot_size, status, notified_json, strategies_json, data_timestamp,
-                    price_basis
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    price_basis, early_be_level
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     trade_id,
@@ -633,6 +639,7 @@ def open_trade(data: dict) -> str:
                     json.dumps(strategies),
                     data.get("data_timestamp"),
                     float(data.get("price_basis", 0) or 0),
+                    float(data.get("early_be_level") or 0) or None,
                 ),
             )
     except sqlite3.IntegrityError as exc:
@@ -746,10 +753,15 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
         if tp1_hit:
             be_armed = 1
 
-        # WIN_BE: il trade ha raggiunto TP1 prima di tornare a BE.
-        # I pips devono essere calcolati fino a TP1 (il massimo raggiunto),
-        # non fino all'exit price (che è l'entry = 0 pips).
-        if result == "WIN_BE" and row.get("tp1") and float(row["tp1"]) > 0:
+        # WIN_BE dopo TP1: i pips si calcolano fino a TP1 (il massimo
+        # raggiunto), non fino all'exit price (che è l'entry = 0 pips).
+        # WIN_BE anticipato (rottura struttura, TP1 mai raggiunto): niente
+        # da accreditare oltre l'entry, i pips restano quelli fino all'exit.
+        # NOTA: usa il flag tp1_hit ORIGINALE della riga (letto sopra prima
+        # di eventuali aggiornamenti), non la sola presenza della colonna
+        # tp1 (sempre valorizzata) — altrimenti un BE anticipato senza TP1
+        # verrebbe accreditato per errore come se TP1 fosse stato toccato.
+        if result == "WIN_BE" and row["tp1_hit"] and row["tp1"] and float(row["tp1"]) > 0:
             pips = calculate_trade_pips(row["signal"], row["entry"], float(row["tp1"]))
         else:
             pips = calculate_trade_pips(row["signal"], row["entry"], exit_price)
@@ -1255,6 +1267,14 @@ def msg_be_closed(entry, signal="", timeframe="") -> str:
     )
 
 
+def msg_be_armed_early(entry, level, price, signal="", timeframe="") -> str:
+    return (
+        f"🛡️ *BREAK EVEN ANTICIPATO — {signal} {_tf_label(timeframe)}*\n"
+        f"Prezzo *${price}* ha rotto il livello strutturale ${level} prima di TP1.\n"
+        f"Protezione a pareggio attivata in anticipo su entry ${entry}."
+    )
+
+
 def msg_tp1(entry, tp2, price, signal="", timeframe="") -> str:
     return (
         f"🎯 *TP1 — {signal} {_tf_label(timeframe)}*\n"
@@ -1419,12 +1439,35 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
     if not trade.get("activated"):
         activate_trade(trade_id)
 
+    # Registra tutti i target/eventi attraversati nello stesso campionamento.
+    # Non usa ``elif``: un salto diretto a TP3 deve salvare e notificare
+    # TP1, TP2 e TP3 (e l'eventuale BE anticipato) tutti insieme.
+    messages: list[tuple[str, str]] = []
+
     # Prima gestisce le uscite avverse usando lo stato già consolidato dal
     # ciclo precedente. Dopo TP1 lo stop virtuale è a entry: un ritorno
     # all'entry è BE, mai SL.
     tp1_hit = bool(trade.get("tp1_hit"))
     be_armed = bool(trade.get("be_armed"))
-    if tp1_hit and be_armed and _stop_reached(signal, adverse_price, entry):
+
+    # Break-even anticipato: se il prezzo rompe a favore il precedente swing
+    # high/low del TF del segnale (misurato all'apertura, vedi agent_
+    # orchestrator.py) PRIMA che TP1 venga raggiunto, la protezione scatta
+    # comunque — non serve aspettare il target pieno. Pensato per contenere
+    # il drawdown pesante di H4/D1 (vedi backtest del 1 settembre 2026),
+    # senza il bug del vecchio trigger a $10 fissi: qui il livello è
+    # strutturale e specifico del setup, non arbitrario.
+    if not be_armed:
+        early_level = trade.get("early_be_level")
+        if early_level and _target_reached(signal, favorable_price, float(early_level)):
+            arm_break_even(trade_id)
+            be_armed = True
+            messages.append((
+                "be_early",
+                msg_be_armed_early(entry, float(early_level), favorable_price, signal, timeframe),
+            ))
+
+    if be_armed and _stop_reached(signal, adverse_price, entry):
         mark_be_hit(trade_id)
         closed = close_trade(
             trade_id,
@@ -1466,9 +1509,6 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
             asyncio.create_task(_post_trade_analysis(bot, chat_id))
         return
 
-    # Registra tutti i target attraversati nello stesso campionamento. Non usa
-    # ``elif``: un salto diretto a TP3 deve salvare e notificare TP1, TP2 e TP3.
-    messages: list[tuple[str, str]] = []
     if _target_reached(signal, favorable_price, tp1):
         if not trade.get("tp1_hit"):
             mark_tp1_hit(trade_id)
