@@ -937,10 +937,18 @@ def _parse_calendar_datetime(raw_date: str) -> datetime:
     return parsed.astimezone(TIMEZONE)
 
 
-def get_upcoming_events(days_ahead: int = 7) -> list:
+def get_upcoming_events(days_ahead: int = 7, hours_lookback: float = 0.0) -> list:
     """
     Ritorna tutti gli eventi USD ad alto impatto per i prossimi N giorni.
     Usato dall'AI assistant per rispondere a domande sui prossimi eventi.
+
+    hours_lookback: include anche eventi già avvenuti fino a questa distanza
+    nel passato (default 0 = solo futuri, comportamento originale). Serve a
+    gold_bot.check_macro_alerts() per il controllo POST-evento: con
+    hours_lookback=0 un evento appena passato spariva dalla lista prima
+    ancora che il codice potesse verificare la finestra "8-15 minuti dopo",
+    rendendo il resoconto post-evento morto dal codice (mai potuto scattare
+    per nessun evento) — scoperto in produzione il 1 settembre 2026.
     """
     import math
     try:
@@ -963,7 +971,7 @@ def get_upcoming_events(days_ahead: int = 7) -> list:
             try:
                 ev_it       = _parse_calendar_datetime(raw_date)
                 diff_h      = (ev_it - now).total_seconds() / 3600
-                if diff_h < 0 or diff_h > days_ahead * 24:
+                if diff_h < -hours_lookback or diff_h > days_ahead * 24:
                     continue
             except (ValueError, TypeError):
                 continue

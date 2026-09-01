@@ -1266,7 +1266,11 @@ async def check_macro_alerts(bot):
     try:
         from analyzer import get_upcoming_events
         now    = datetime.now(TIMEZONE)
-        events = await asyncio.to_thread(get_upcoming_events, 1)
+        # hours_lookback=0.5: senza, get_upcoming_events() scarta gli eventi
+        # già avvenuti prima ancora che si possa controllare la finestra
+        # POST-evento (8-15 minuti dopo) — il resoconto post-evento non
+        # scattava mai, per nessun evento (bug trovato il 1 settembre 2026).
+        events = await asyncio.to_thread(get_upcoming_events, 1, 0.5)
 
         for ev in events:
             ev_key = f"{ev['date']}_{ev['time']}_{ev['title']}"
