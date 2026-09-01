@@ -41,6 +41,7 @@ from trade_manager import (
     get_current_price, get_current_price_async,
     is_authorized, build_setup_key, was_setup_seen, DuplicateSetupError,
     is_bot_paused, set_bot_paused,
+    load_macro_alert_state, save_macro_alert_state,
     DB_PATH as CORE_DB_PATH, BOT_DIR as CORE_BOT_DIR,
 )
 from ai_assistant import ask_ai
@@ -1374,6 +1375,13 @@ async def check_macro_alerts(bot):
             for k in list(_pre_event_bias.keys())[:-30]:
                 _pre_event_bias.pop(k, None)
 
+        # Persisti lo stato aggiornato: sopravvive a un riavvio/deploy nel
+        # mezzo di una finestra pre/post-evento (vedi load_macro_alert_state).
+        await asyncio.to_thread(
+            save_macro_alert_state,
+            _sent_event_alerts, _sent_post_event_alerts, _pre_event_bias,
+        )
+
     except Exception as e:
         logger.error(f"Errore check_macro_alerts: {e}")
 
@@ -1682,6 +1690,16 @@ async def main():
 
     # Inizializza DB unico
     init_db()
+
+    # Ripristina lo stato degli alert macro (pre/post-evento + bias
+    # catturato) da prima di un eventuale riavvio/deploy — senza questo,
+    # un deploy a metà finestra evento perde il bias pre-evento e il
+    # post-evento non può più confermare/smentire la previsione.
+    global _sent_event_alerts, _sent_post_event_alerts, _pre_event_bias
+    _macro_state = load_macro_alert_state()
+    _sent_event_alerts      = _macro_state["sent_event_alerts"]
+    _sent_post_event_alerts = _macro_state["sent_post_event_alerts"]
+    _pre_event_bias         = _macro_state["pre_event_bias"]
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 

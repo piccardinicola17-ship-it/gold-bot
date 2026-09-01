@@ -1214,6 +1214,46 @@ def save_breaking_news_seen(seen_ids: set) -> None:
         )
 
 
+def load_macro_alert_state() -> dict:
+    """
+    Stato di check_macro_alerts (gold_bot.py): quali alert pre/post-evento
+    sono già stati inviati, e il bias+prezzo catturati al pre-evento per il
+    confronto oggettivo nel post-evento. Prima viveva solo in memoria: un
+    riavvio/deploy a metà finestra evento perdeva il bias pre-evento (visto
+    in produzione il 1 settembre 2026, durante l'ISM PMI) o rischiava di
+    reinviare un alert già mandato. Persistito qui, sopravvive ai riavvii.
+    """
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM bot_state WHERE key='macro_alert_state'"
+            ).fetchone()
+        if not row:
+            return {"sent_event_alerts": set(), "sent_post_event_alerts": set(), "pre_event_bias": {}}
+        data = json.loads(row["value"])
+        return {
+            "sent_event_alerts": set(data.get("sent_event_alerts", [])),
+            "sent_post_event_alerts": set(data.get("sent_post_event_alerts", [])),
+            "pre_event_bias": data.get("pre_event_bias", {}),
+        }
+    except Exception:
+        return {"sent_event_alerts": set(), "sent_post_event_alerts": set(), "pre_event_bias": {}}
+
+
+def save_macro_alert_state(sent_event_alerts: set, sent_post_event_alerts: set,
+                            pre_event_bias: dict) -> None:
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO bot_state(key, value) VALUES('macro_alert_state', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps({
+                "sent_event_alerts": list(sent_event_alerts),
+                "sent_post_event_alerts": list(sent_post_event_alerts),
+                "pre_event_bias": pre_event_bias,
+            }),),
+        )
+
+
 def check_order_activation(trade: dict, price: float) -> bool:
     signal = trade.get("signal")
     order_type = str(trade.get("order_type", signal)).upper()
