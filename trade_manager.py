@@ -1310,8 +1310,41 @@ def check_order_activation(trade: dict, price: float) -> bool:
     return False
 
 
-def check_limit_invalidation(trade: dict, _price: float) -> bool:
-    """I pending scadono per tempo, non perché inizialmente distanti dall'entry."""
+PENDING_MAX_ADVERSE_SL_MULTIPLE = 2.0
+
+
+def _pending_adverse_distance(trade: dict, price: float) -> float:
+    """
+    Quanto il prezzo si è allontanato dall'entry nella direzione che rende
+    il pending sempre meno probabile — 0 se si è mosso verso l'attivazione
+    (o non si è mosso). BUY LIMIT/SELL STOP aspettano un ribasso verso
+    l'entry: allontanarsi = prezzo sale sopra. SELL LIMIT/BUY STOP aspettano
+    un rialzo verso l'entry: allontanarsi = prezzo scende sotto.
+    """
+    signal = trade.get("signal")
+    order_type = str(trade.get("order_type", signal)).upper()
+    entry = float(trade.get("entry", 0))
+    if "LIMIT" in order_type:
+        return max(0.0, price - entry) if signal == "BUY" else max(0.0, entry - price)
+    if "STOP" in order_type:
+        return max(0.0, entry - price) if signal == "BUY" else max(0.0, price - entry)
+    return 0.0
+
+
+def check_limit_invalidation(trade: dict, price: float) -> bool:
+    """
+    Un pending scade per tempo (comportamento originale, invariato) OPPURE
+    se il prezzo si allontana troppo dall'entry nella direzione che rende il
+    fill sempre meno probabile — misurato come multiplo della distanza
+    entry-SL dello stesso trade (riflette la volatilità/struttura specifica
+    di quel setup, non una soglia fissa in pip uguale per tutti).
+
+    Aggiunto il 2 settembre 2026: un BUY LIMIT H1 non si cancellava
+    nonostante il prezzo fosse salito di ~600 pip (quasi 4x la distanza
+    entry-SL di quel trade) perché l'unico criterio esistente era il tempo
+    (fino a 6h per H1) — il setup era ormai chiaramente superato dal
+    movimento, ma restava in attesa per altre ore.
+    """
     timestamp = trade.get("timestamp") or ""
     try:
         created = datetime.fromisoformat(timestamp)
@@ -1321,7 +1354,16 @@ def check_limit_invalidation(trade: dict, _price: float) -> bool:
         return True
     ttl = PENDING_TTL_MINUTES.get(trade.get("timeframe", "15min"), 90)
     age_minutes = (datetime.now(TIMEZONE) - created.astimezone(TIMEZONE)).total_seconds() / 60
-    return age_minutes >= ttl
+    if age_minutes >= ttl:
+        return True
+
+    sl_distance = abs(float(trade.get("entry", 0)) - float(trade.get("sl", 0)))
+    if sl_distance > 0 and price > 0:
+        adverse = _pending_adverse_distance(trade, price)
+        if adverse > PENDING_MAX_ADVERSE_SL_MULTIPLE * sl_distance:
+            return True
+
+    return False
 
 
 def _tf_label(timeframe: str) -> str:
