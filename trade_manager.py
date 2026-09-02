@@ -1447,6 +1447,81 @@ def _favorable_extreme(signal: str, price: float, candle_high: float, candle_low
     return min(price, candle_low) if candle_low > 0 else price
 
 
+_BASIS_REBASE_SECONDS = 900  # 15 min — gold-api.com è gratuita, nessun limite noto
+_basis_rebase_state = {"ts": 0.0}
+
+
+def _rebase_open_trades(gcf_price: float) -> None:
+    """
+    price_basis (scarto GC=F-spot) viene catturato una volta sola all'apertura
+    del trade (vedi gold_bot._check_single_timeframe) e usato per tradurre
+    entry/sl/tp1/tp2/tp3/early_be_level in "equivalente spot". Lo scarto reale
+    si muove nel tempo: su un trade H4/D1 tenuto aperto per giorni può
+    driftare di decine di dollari, rendendo i livelli monitorati sempre meno
+    fedeli al livello GC=F originale che rappresentano — rischio residuo noto
+    dal 1 settembre 2026, senza soluzione fino ad ora.
+
+    Ricalcolato qui periodicamente (non a ogni ciclo da 10s, sarebbe uno
+    spreco di chiamate): il prezzo GC=F fresco arriva gratis quando Yahoo è
+    la fonte di questo ciclo (nessuna chiamata aggiuntiva, vedi il chiamante),
+    il prezzo spot fresco costa una singola chiamata extra a gold-api.com
+    ogni _BASIS_REBASE_SECONDS. Ogni trade aperto con un basis registrato
+    viene traslato dello stesso delta (nuovo basis - vecchio basis) su tutti
+    i suoi livelli, così restano coerenti tra loro e con lo stesso livello
+    GC=F di partenza — non un ricalcolo dell'analisi, solo una ritraduzione
+    più fresca sullo spot.
+    """
+    now = time.time()
+    if now - _basis_rebase_state["ts"] < _BASIS_REBASE_SECONDS:
+        return
+    _basis_rebase_state["ts"] = now
+
+    trades = [t for t in load_all_active_trades() if float(t.get("price_basis") or 0)]
+    if not trades or gcf_price <= 0:
+        return
+    try:
+        spot_price = _fetch_price_goldapi()
+    except Exception as e:
+        logger.debug(f"Rebase basis: gold-api.com non disponibile, salto ({e})")
+        return
+    if spot_price <= 0:
+        return
+
+    fresh_basis = gcf_price - spot_price
+    for trade in trades:
+        old_basis = float(trade["price_basis"])
+        delta = fresh_basis - old_basis
+        if abs(delta) < 0.01:
+            continue
+        _apply_basis_rebase(trade, delta, fresh_basis)
+
+
+def _apply_basis_rebase(trade: dict, delta: float, fresh_basis: float) -> None:
+    trade_id = trade["trade_id"]
+    fields = {
+        "entry": float(trade["entry"]) - delta,
+        "sl":    float(trade["sl"]) - delta,
+        "tp1":   float(trade["tp1"]) - delta,
+        "tp2":   float(trade["tp2"]) - delta,
+        "tp3":   float(trade["tp3"]) - delta,
+        "price_basis": fresh_basis,
+    }
+    early = trade.get("early_be_level")
+    if early:
+        fields["early_be_level"] = float(early) - delta
+    assignments = ", ".join(f"{key}=?" for key in fields)
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            f"UPDATE trades SET {assignments} WHERE trade_id=?",
+            (*fields.values(), trade_id),
+        )
+    _sync_active_snapshot()
+    logger.info(
+        f"Rebase basis {trade_id}: delta=${delta:+.2f} "
+        f"(vecchio=${float(trade['price_basis']):.2f} nuovo=${fresh_basis:.2f})"
+    )
+
+
 async def monitor_active_trade(bot, chat_id: str) -> None:
     trades = load_all_active_trades()
     if not trades:
@@ -1454,6 +1529,8 @@ async def monitor_active_trade(bot, chat_id: str) -> None:
     price, price_is_futures = await get_current_price_and_scale_async()
     if price <= 0:
         return
+    if price_is_futures:
+        await asyncio.to_thread(_rebase_open_trades, price)
     # High/Low candela M5 in formazione: cattura le ombre intracandle
     # (il prezzo tocca SL/TP/BE e torna indietro prima del prossimo ciclo).
     # Aggiornato in memoria dal prezzo appena campionato, nessuna chiamata
