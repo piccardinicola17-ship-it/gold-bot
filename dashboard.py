@@ -205,6 +205,34 @@ def api_data():
     )
 
 
+@app.route("/api/admin/fix-trade-76", methods=["POST"])
+def api_fix_trade_76():
+    """
+    Correzione una tantum (2 settembre 2026): il trade id=76 (SELL D1,
+    aperto 1 settembre) aveva livelli tradotti con un price_basis rivelatosi
+    sbagliato rispetto al prezzo reale visto dall'utente sul suo broker, più
+    un TP2 falsamente segnato raggiunto (bug di scala prezzo nel monitor,
+    risolto lo stesso giorno). Ripristina i valori confermati dall'utente e
+    annulla il falso TP2. Da rimuovere subito dopo l'uso, non è un endpoint
+    generico di editing trade.
+    """
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                UPDATE trades SET
+                    entry=4436.61, sl=4505.53, tp1=4367.69, tp2=4298.77, tp3=4216.06,
+                    price_basis=0, tp2_hit=0,
+                    notified_json='{"tp1": true}'
+                WHERE id=76
+                """
+            )
+            conn.commit()
+        return jsonify({"status": "ok"})
+    except sqlite3.Error as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
     if not ALLOW_RESET:
