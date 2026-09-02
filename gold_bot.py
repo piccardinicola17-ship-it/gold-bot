@@ -748,7 +748,7 @@ async def cmd_report(update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"*Per timeframe:*\n{tf_txt}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Win Rate calcolato su trade decisivi (WIN/LOSS). WIN_BE escluso._"
+            f"_Win Rate calcolato su trade decisivi (WIN/LOSS). WIN\\_BE escluso._"
         )
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:

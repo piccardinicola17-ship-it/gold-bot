@@ -273,7 +273,11 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
         _blocked = _BLOCKED_REGIMES_BY_TF.get(_tf, ())
         if _regime_up in _blocked:
             state.final_decision  = "SKIP"
-            state.decision_reason = f"Regime {_regime_up} bloccato per {state.timeframe}"
+            # _regime_up serve solo al confronto con _BLOCKED_REGIMES_BY_TF
+            # (chiavi con underscore, es. "TRENDING_DOWN"): NON va mai in un
+            # messaggio Telegram Markdown così com'è, vedi il commento su
+            # format_pipeline_report più sotto sullo stesso bug.
+            state.decision_reason = f"Regime {_regime_up.replace('_', ' ')} bloccato per {state.timeframe}"
             state.decision_conf   = 90.0
             state.add_log("🎯 DecisionMaker", f"SKIP — {_regime_up} bloccato su {state.timeframe}")
             return AgentResult(success=True, data={"decision": "SKIP"})
@@ -565,6 +569,14 @@ def format_pipeline_report(state: TradingState) -> str:
         f"🎯 TP2: ${_fmt(state.tp2)} | 🏆 TP3: ${_fmt(state.tp3)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 Prob: *{state.prob}%* | R:R: *{state.rr}* | Risk: *{state.risk_pct:.2f}%*\n"
-        f"📈 Regime: {state.regime}\n"
+        # state.regime (es. "TRENDING_DOWN"/"TRENDING_UP") contiene un
+        # underscore che Telegram in Markdown legge come apertura di corsivo:
+        # sommato all'unico "_...IT_" della riga sotto fa un numero dispari
+        # di underscore nel messaggio, e l'intero invio fallisce con "Can't
+        # parse entities" — bug reale in produzione, trovato il 2 settembre
+        # 2026: bloccava OGNI segnale quando il regime era TRENDING_UP/DOWN
+        # (0 segnali per ore nonostante setup validi). Sostituito con uno
+        # spazio solo per la visualizzazione.
+        f"📈 Regime: {str(state.regime).replace('_', ' ')}\n"
         f"_5 agenti | {state.timestamp[11:16]} IT_"
     )
