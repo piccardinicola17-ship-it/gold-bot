@@ -40,6 +40,7 @@ from trade_manager import (
     monitor_active_trade,
     get_current_price, get_current_price_async,
     is_authorized, build_setup_key, was_setup_seen, DuplicateSetupError,
+    _fmt,
     is_bot_paused, set_bot_paused,
     load_macro_alert_state, save_macro_alert_state,
     DB_PATH as CORE_DB_PATH, BOT_DIR as CORE_BOT_DIR,
@@ -516,8 +517,8 @@ async def cmd_chiudi(update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"{'✅' if 'WIN' in result else '❌' if result == 'LOSS' else '⚖️'} *TRADE CHIUSO*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📍 {trade.get('signal')} [{tf}] @ ${trade.get('entry')}\n"
-        f"💰 Exit: ${exit_price}\n"
+        f"📍 {trade.get('signal')} [{tf}] @ ${_fmt(trade.get('entry'))}\n"
+        f"💰 Exit: ${_fmt(exit_price)}\n"
         f"📊 Risultato: *{pnl_map.get(result, result)}*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"ID: `{trade_id}`",
@@ -1310,7 +1311,7 @@ async def check_macro_alerts(bot):
                     f"📅 *{ev['title']}*\n"
                     f"🕐 Orario: *{ev['time']} IT*\n"
                     f"📊 Prev: `{ev.get('forecast','N/A')}` | Prec: `{ev.get('previous','N/A')}`\n"
-                    f"💰 XAU/USD: *${price}*\n"
+                    f"💰 XAU/USD: *${_fmt(price)}*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"🚫 *BLACKOUT TRADING ATTIVO*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1360,7 +1361,7 @@ async def check_macro_alerts(bot):
                 msg_post = (
                     f"📊 *POST-EVENTO — {ev['title']}*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
-                    f"💰 XAU/USD: *${price}*\n"
+                    f"💰 XAU/USD: *${_fmt(price)}*\n"
                     f"🚦 *Blackout terminato — trading riaperto*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"{resoconto}"
@@ -1408,7 +1409,7 @@ async def send_morning_report(bot: Bot):
         macro_txt = await asyncio.to_thread(get_macro_briefing, events, price)
         msg1 = (
             f"🌅 *BUONGIORNO — {today}*\n"
-            f"💰 XAU/USD: *${price}*\n"
+            f"💰 XAU/USD: *${_fmt(price)}*\n"
             f"{s_emoji} Sentiment: *{s_label}* ({s_score:+d})\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
             + macro_txt

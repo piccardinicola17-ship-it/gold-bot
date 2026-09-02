@@ -537,6 +537,12 @@ def format_pipeline_report(state: TradingState) -> str:
     Formatta il report segnale per Telegram — compatto e leggibile.
     Niente pipeline log, niente ridondanze.
     """
+    from trade_manager import _fmt  # entry/sl/tp passano per una sottrazione
+    # float (basis GC=F-spot, vedi gold_bot._check_single_timeframe) che può
+    # lasciare artefatti di arrotondamento tipo "$4382.009999999999" nel
+    # messaggio del segnale — stesso bug visto e corretto oggi (2026-09-02)
+    # nei messaggi di trade_manager.py.
+
     tf_label = {
         "5min": "5MIN", "15min": "15MIN", "1h": "1H",
         "4h": "4H", "1day": "D1"
@@ -554,9 +560,9 @@ def format_pipeline_report(state: TradingState) -> str:
     return (
         f"🤖 *MULTI-AGENT REPORT — {tf_label}*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📍 *{state.signal} {order_label}* @ *${state.entry}*\n"
-        f"🛑 SL: ${state.sl} | 🎯 TP1: ${state.tp1}\n"
-        f"🎯 TP2: ${state.tp2} | 🏆 TP3: ${state.tp3}\n"
+        f"📍 *{state.signal} {order_label}* @ *${_fmt(state.entry)}*\n"
+        f"🛑 SL: ${_fmt(state.sl)} | 🎯 TP1: ${_fmt(state.tp1)}\n"
+        f"🎯 TP2: ${_fmt(state.tp2)} | 🏆 TP3: ${_fmt(state.tp3)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 Prob: *{state.prob}%* | R:R: *{state.rr}* | Risk: *{state.risk_pct:.2f}%*\n"
         f"📈 Regime: {state.regime}\n"
