@@ -27,6 +27,15 @@ GROQ_MODEL   = "groq/compound-mini"
 MIN_TRADES_FOR_LEARNING = 10
 MIN_TRADES_PER_STRATEGY = 3
 
+# Soglia per bloccare del tutto un regime (vedi optimize_strategy_weights):
+# deliberatamente molto più alta di MIN_TRADES_PER_STRATEGY. Bloccare un intero
+# regime è un'azione consequenziale quanto quella presa nel backtest storico
+# del 1 settembre 2026 (filtro _BLOCKED_REGIMES_BY_TF in agent_orchestrator.py),
+# dove n=7 è stato esplicitamente giudicato "troppo poco per decidere" anche
+# con un segnale positivo — lì si è deciso solo con n=15+ su dati storici
+# verificati. Qui i trade sono live, non backtestati: stesso standard minimo.
+MIN_TRADES_FOR_REGIME_BLOCK = 20
+
 _weights_cache      = {}
 _weights_cache_mtime = 0.0
 
@@ -305,18 +314,31 @@ def optimize_strategy_weights() -> dict:
         if "WIN" in t.get("result",""): dir_wr[sig]["wins"] += 1
     dir_performance = {sig: round(d["wins"]/d["total"]*100,1) for sig,d in dir_wr.items() if d["total"] >= MIN_TRADES_PER_STRATEGY}
 
-    regime_avg_r = {}
+    regime_r_values = {}
     for t in decisivi:
         r = t.get("regime","UNKNOWN")
-        regime_avg_r.setdefault(r, [])
-        regime_avg_r[r].append(t.get("pnl_r") or 0)
-    regime_avg_r = {r: round(sum(v)/len(v),2) for r,v in regime_avg_r.items() if len(v) >= MIN_TRADES_PER_STRATEGY}
+        regime_r_values.setdefault(r, [])
+        regime_r_values[r].append(t.get("pnl_r") or 0)
+    regime_avg_r = {r: round(sum(v)/len(v),2) for r,v in regime_r_values.items() if len(v) >= MIN_TRADES_PER_STRATEGY}
+
+    # Bloccare un intero regime viene deciso qui dal codice, MAI dall'LLM: a
+    # differenza dei moltiplicatori sotto (limitati a +-20%, rischio contenuto
+    # anche se l'LLM sbaglia), azzerare un regime è un'azione netta e binaria.
+    # Serve lo stesso standard di campione usato per le decisioni sui regimi
+    # nel backtest storico (vedi MIN_TRADES_FOR_REGIME_BLOCK) più un criterio
+    # oggettivo — R medio negativo, non solo winrate basso: un regime può
+    # avere WR modesto ma R medio comunque positivo (visto nel backtest di
+    # ieri, H4 RANGING: WR 42.9% ma +0.311R) e non avrebbe senso bloccarlo.
+    auto_blocked_regimes = [
+        r for r, values in regime_r_values.items()
+        if len(values) >= MIN_TRADES_FOR_REGIME_BLOCK and (sum(values) / len(values)) < 0
+    ]
 
     perf_summary = json.dumps({"total_decisivi":len(decisivi),"regime_wr_pct":regime_performance,"regime_avg_r":regime_avg_r,"timeframe_wr_pct":tf_performance,"direction_wr_pct":dir_performance}, indent=2)
 
     groq_raw = _call_groq(
         system="Sei un quantitative analyst su XAU/USD. Rispondi SOLO con JSON valido, zero testo extra.",
-        user=f"Performance reali:\n{perf_summary}\n\nRestituisci SOLO questo JSON:\n{{\n  \"regime_multipliers\": {{\"TRENDING_DOWN\": 1.2}},\n  \"direction_bias\": {{\"BUY\": 1.0, \"SELL\": 1.1}},\n  \"preferred_timeframe\": \"1h\",\n  \"blocked_regimes\": [],\n  \"rationale\": \"max 2 righe\"\n}}\nValori tra 0.5 e 1.5. WR>65% e avg_r>0.5 → 1.2-1.4. WR<50% → 0.6-0.8.",
+        user=f"Performance reali:\n{perf_summary}\n\nRestituisci SOLO questo JSON:\n{{\n  \"regime_multipliers\": {{\"TRENDING_DOWN\": 1.2}},\n  \"direction_bias\": {{\"BUY\": 1.0, \"SELL\": 1.1}},\n  \"preferred_timeframe\": \"1h\",\n  \"rationale\": \"max 2 righe\"\n}}\nValori tra 0.5 e 1.5. WR>65% e avg_r>0.5 → 1.2-1.4. WR<50% → 0.6-0.8. Non decidere quali regimi bloccare: ci pensa il codice con una soglia più severa.",
         max_tokens=450,
     )
 
@@ -325,6 +347,11 @@ def optimize_strategy_weights() -> dict:
         learned = json.loads(clean)
     except Exception:
         learned = {}
+
+    # Sovrascrive sempre qualunque "blocked_regimes" l'LLM avesse comunque
+    # restituito nonostante il prompt — la decisione è solo quella calcolata
+    # sopra, deterministica.
+    learned["blocked_regimes"] = auto_blocked_regimes
 
     learned["updated_at"]     = datetime.now(TIMEZONE).isoformat()
     learned["based_on"]       = len(decisivi)
