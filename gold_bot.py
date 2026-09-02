@@ -73,6 +73,13 @@ NO_EDGE_TIMEFRAMES = {"5min", "15min"}
 
 TF_LABEL = {"5min": "M5", "15min": "M15", "1h": "H1", "4h": "H4", "1day": "D1"}
 
+# Soglia di disaccordo tra due fonti spot indipendenti (gold-api.com e Twelve
+# Data) oltre la quale il basis GC=F-spot calcolato in _check_single_timeframe
+# viene scartato. Due letture spot per lo stesso istante dovrebbero essere
+# vicine tra loro (a differenza di GC=F-spot, che diverge per costruzione) —
+# vedi il commento sul controllo incrociato più sotto.
+MAX_SPOT_SOURCE_DISAGREEMENT_USD = 20.0
+
 
 # ═══════════════════════════════════════════════
 # DB — usa il DB unico di trade_manager
@@ -1586,17 +1593,52 @@ async def _check_single_timeframe(bot: Bot, tf: str):
         # invariato rispetto a prima.
         basis = 0.0
         try:
-            from trade_manager import _fetch_price_goldapi
+            from trade_manager import (
+                _fetch_price_goldapi, _fetch_price_twelvedata, is_twelvedata_price_blocked,
+            )
             spot_price = await asyncio.to_thread(_fetch_price_goldapi)
             if spot_price > 0 and state.current_price > 0:
-                basis = state.current_price - spot_price
-                state.entry -= basis
-                state.sl    -= basis
-                state.tp1   -= basis
-                state.tp2   -= basis
-                state.tp3   -= basis
-                if state.early_be_level:
-                    state.early_be_level -= basis
+                candidate_basis = state.current_price - spot_price
+
+                # Verifica incrociata prima di fidarsi del basis: gold-api.com
+                # è una fonte piccola, gratuita e senza SLA, e una sua lettura
+                # anomala isolata resterebbe congelata per tutta la vita del
+                # trade (visto in produzione l'1 settembre 2026 — trade 76:
+                # basis di $54.60 rivelatosi sbagliato rispetto al prezzo
+                # reale sul broker dell'utente, con errore ereditato sia dal
+                # messaggio SEGNALE sia dal monitoraggio). Due fonti spot
+                # indipendenti per lo stesso istante dovrebbero essere vicine
+                # tra loro (a differenza di GC=F-spot, che diverge per
+                # costruzione): se non lo sono, la lettura non è affidabile —
+                # meglio nessuna traduzione (comportamento originale) che una
+                # traduzione probabilmente sbagliata. Se Twelve Data non è
+                # disponibile (quota esaurita o errore), nessun controllo è
+                # possibile: si procede come prima, senza bloccare la feature.
+                confirmed = True
+                if not is_twelvedata_price_blocked():
+                    try:
+                        spot_price_2 = await asyncio.to_thread(_fetch_price_twelvedata)
+                        disagreement = abs(spot_price - spot_price_2)
+                        if spot_price_2 > 0 and disagreement > MAX_SPOT_SOURCE_DISAGREEMENT_USD:
+                            confirmed = False
+                            logger.warning(
+                                f"[{tf}] Basis GC=F-spot scartato: gold-api "
+                                f"${spot_price:.2f} e Twelve Data ${spot_price_2:.2f} "
+                                f"disaccordo di ${disagreement:.2f} (soglia "
+                                f"${MAX_SPOT_SOURCE_DISAGREEMENT_USD:.0f})"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[{tf}] Controllo incrociato basis non riuscito: {e}")
+
+                if confirmed:
+                    basis = candidate_basis
+                    state.entry -= basis
+                    state.sl    -= basis
+                    state.tp1   -= basis
+                    state.tp2   -= basis
+                    state.tp3   -= basis
+                    if state.early_be_level:
+                        state.early_be_level -= basis
         except Exception as e:
             logger.debug(f"[{tf}] Basis GC=F-spot non calcolabile: {e}")
 

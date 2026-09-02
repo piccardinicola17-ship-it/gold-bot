@@ -69,6 +69,15 @@ def _twelvedata_quota_exceeded(exc: Exception) -> bool:
     return "api credits" in str(exc).lower()
 
 
+def is_twelvedata_price_blocked() -> bool:
+    """True se Twelve Data ha segnalato quota esaurita e siamo ancora nella
+    finestra di sospensione (vedi _fetch_price_with_scale_sync). Usato da
+    gold_bot._check_single_timeframe prima di tentare il controllo
+    incrociato del basis GC=F-spot, per non sprecare una chiamata già
+    sappiamo destinata a fallire."""
+    return time.time() < _twelvedata_price_blocked_until
+
+
 def _seconds_until_utc_midnight() -> float:
     now = datetime.now(timezone.utc)
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
