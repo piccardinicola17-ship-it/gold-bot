@@ -55,7 +55,7 @@ RESULT_PNL = {
 }
 
 _write_lock = threading.RLock()
-_price_cache = {"price": 0.0, "ts": 0.0}
+_price_cache = {"price": 0.0, "ts": 0.0, "futures": False}
 
 # Come in analyzer.py: se Twelve Data segnala quota esaurita, smettiamo di
 # richiamarla fino a mezzanotte UTC invece di continuare a provarci a ogni
@@ -1071,11 +1071,27 @@ def _fetch_price_sync() -> float:
     Se tutte le fonti live falliscono usa il prezzo più recente in cache.
     Il monitor NON si ferma mai per mancanza di prezzo — usa il dato più vecchio.
     """
+    return _fetch_price_with_scale_sync()[0]
+
+
+def _fetch_price_with_scale_sync() -> tuple:
+    """
+    Come _fetch_price_sync, ma ritorna anche se il prezzo è in scala futures
+    (Yahoo/GC=F) o spot (tutte le altre fonti). Il monitor (_monitor_single)
+    ne ha bisogno: applica la conversione price_basis (GC=F-spot catturato
+    all'apertura del trade) SOLO se il prezzo di questo ciclo è arrivato in
+    scala futures — altrimenti sottrarrebbe il basis a un prezzo già spot,
+    spostandolo erroneamente di un secondo basis nella stessa direzione.
+    Bug reale osservato in produzione il 2 settembre 2026: un TP2 SELL D1
+    segnalato a un prezzo mai toccato dal mercato, quando il monitor è
+    caduto su gold-api.com (spot) dopo un rate-limit di Yahoo e ha comunque
+    sottratto il basis come se il prezzo fosse ancora futures.
+    """
     global _twelvedata_price_blocked_until
     now = time.time()
 
     if now - _price_cache["ts"] < _PRICE_CACHE_TTL and _price_cache["price"] > 0:
-        return float(_price_cache["price"])
+        return float(_price_cache["price"]), bool(_price_cache["futures"])
 
     sources = [
         ("Yahoo Finance", _fetch_price_yahoo),
@@ -1092,9 +1108,10 @@ def _fetch_price_sync() -> float:
         try:
             price = fetch_fn()
             if price > 0:
-                _price_cache.update(price=price, ts=now)
+                is_futures = (name == "Yahoo Finance")
+                _price_cache.update(price=price, ts=now, futures=is_futures)
                 logger.debug(f"Prezzo da {name}: ${price}")
-                return price
+                return price, is_futures
         except requests.HTTPError as e:
             if "429" in str(e):
                 logger.debug(f"{name}: rate limit, prossima fonte")
@@ -1113,14 +1130,18 @@ def _fetch_price_sync() -> float:
     if _price_cache["price"] > 0:
         age = (now - _price_cache["ts"]) / 60
         logger.warning(f"Prezzo: tutte le fonti fallite, uso cache stale ${_price_cache['price']} (età: {age:.0f} min)")
-        return float(_price_cache["price"])
+        return float(_price_cache["price"]), bool(_price_cache["futures"])
 
     logger.error("Prezzo non disponibile da nessuna fonte e cache vuota")
-    return 0.0
+    return 0.0, False
 
 
 async def get_current_price_async() -> float:
     return await asyncio.to_thread(_fetch_price_sync)
+
+
+async def get_current_price_and_scale_async() -> tuple:
+    return await asyncio.to_thread(_fetch_price_with_scale_sync)
 
 
 def get_current_price() -> float:
@@ -1137,10 +1158,19 @@ def get_current_price() -> float:
 # di rete zero, perché riusa il prezzo che get_current_price_async() prende
 # comunque ad ogni ciclo del monitor.
 _CANDLE_PERIOD_SECONDS = 300  # M5
-_live_candle = {"period_start": 0, "high": 0.0, "low": 0.0}
+_live_candle = {"period_start": 0, "high": 0.0, "low": 0.0, "futures_only": True}
 
 
-def _update_live_candle(price: float) -> None:
+def _update_live_candle(price: float, is_futures: bool = True) -> None:
+    """
+    is_futures indica la scala del campione (vedi _fetch_price_with_scale_sync):
+    True se preso da Yahoo/GC=F, False se da una fonte spot di fallback. Il
+    range accumulato viene esposto da get_current_candle_range() SOLO se
+    tutti i campioni della finestra sono futures — un solo campione spot in
+    mezzo a campioni futures produrrebbe un high/low ibrido tra due scale
+    diverse, con lo stesso rischio di falsi TP/SL della conversione basis
+    scoperta il 2 settembre 2026 (vedi _fetch_price_with_scale_sync).
+    """
     if price <= 0:
         return
     period_start = int(time.time() // _CANDLE_PERIOD_SECONDS) * _CANDLE_PERIOD_SECONDS
@@ -1148,9 +1178,12 @@ def _update_live_candle(price: float) -> None:
         _live_candle["period_start"] = period_start
         _live_candle["high"] = price
         _live_candle["low"] = price
-    else:
+        _live_candle["futures_only"] = is_futures
+    elif is_futures and _live_candle["futures_only"]:
         _live_candle["high"] = max(_live_candle["high"], price)
         _live_candle["low"] = min(_live_candle["low"], price)
+    elif not is_futures:
+        _live_candle["futures_only"] = False
 
 
 def get_current_candle_range() -> tuple:
@@ -1158,9 +1191,12 @@ def get_current_candle_range() -> tuple:
     Ritorna (high, low) della candela M5 corrente, ricostruita dai
     campionamenti di prezzo del monitor (vedi _update_live_candle).
     Usato per catturare ombre intracandle che toccano SL/TP/BE senza che
-    il prezzo dell'ultimo campionamento le rilevi.
+    il prezzo dell'ultimo campionamento le rilevi. Ritorna (0, 0) se la
+    finestra corrente ha ricevuto anche un solo campione spot (vedi
+    _update_live_candle) — range disabilitato per quel ciclo piuttosto che
+    rischiare un high/low ibrido tra scale diverse.
     """
-    if _live_candle["high"] > 0 and _live_candle["low"] > 0:
+    if _live_candle["futures_only"] and _live_candle["high"] > 0 and _live_candle["low"] > 0:
         return _live_candle["high"], _live_candle["low"]
     return 0.0, 0.0
 
@@ -1283,18 +1319,32 @@ def _tf_label(timeframe: str) -> str:
     return TF_LABEL.get(timeframe, (timeframe or "").upper())
 
 
+def _fmt(price) -> str:
+    """
+    Prezzo per i messaggi Telegram, arrotondato a 2 decimali. Senza questo,
+    valori passati attraverso una sottrazione float (es. entry - price_basis
+    in gold_bot.py) possono mostrare artefatti di arrotondamento come
+    "$4382.009999999999" invece di "$4382.01" — visto in produzione il
+    2 settembre 2026.
+    """
+    try:
+        return f"{float(price):.2f}"
+    except (TypeError, ValueError):
+        return str(price)
+
+
 def msg_order_activated(order_type, entry, price, timeframe="") -> str:
     return (
         f"✅ *ORDINE ATTIVATO — {_tf_label(timeframe)}*\n"
-        f"{order_type} @ ${entry} eseguito\n"
-        f"Prezzo rilevato: *${price}*"
+        f"{order_type} @ ${_fmt(entry)} eseguito\n"
+        f"Prezzo rilevato: *${_fmt(price)}*"
     )
 
 
 def msg_limit_cancelled(entry, price, _distance, signal="", timeframe="") -> str:
     return (
         f"⌛ *PENDING SCADUTO — {signal} {_tf_label(timeframe)}*\n"
-        f"Entry: ${entry} | Prezzo: ${price}\n"
+        f"Entry: ${_fmt(entry)} | Prezzo: ${_fmt(price)}\n"
         "Setup non più valido: ordine archiviato."
     )
 
@@ -1302,7 +1352,7 @@ def msg_limit_cancelled(entry, price, _distance, signal="", timeframe="") -> str
 def msg_be_closed(entry, signal="", timeframe="") -> str:
     return (
         f"⚖️ *BREAK EVEN RAGGIUNTO — {signal} {_tf_label(timeframe)}*\n"
-        f"Il prezzo è tornato all'entry *${entry}*.\n"
+        f"Il prezzo è tornato all'entry *${_fmt(entry)}*.\n"
         "Trade virtuale chiuso a pareggio; i TP già raggiunti restano registrati."
     )
 
@@ -1310,38 +1360,38 @@ def msg_be_closed(entry, signal="", timeframe="") -> str:
 def msg_be_armed_early(entry, level, price, signal="", timeframe="") -> str:
     return (
         f"🛡️ *BREAK EVEN ANTICIPATO — {signal} {_tf_label(timeframe)}*\n"
-        f"Prezzo *${price}* ha rotto il livello strutturale ${level} prima di TP1.\n"
-        f"Protezione a pareggio attivata in anticipo su entry ${entry}."
+        f"Prezzo *${_fmt(price)}* ha rotto il livello strutturale ${_fmt(level)} prima di TP1.\n"
+        f"Protezione a pareggio attivata in anticipo su entry ${_fmt(entry)}."
     )
 
 
 def msg_tp1(entry, tp2, price, signal="", timeframe="") -> str:
     return (
         f"🎯 *TP1 — {signal} {_tf_label(timeframe)}*\n"
-        f"Entry: ${entry} | Prezzo: *${price}*\n"
-        f"Trade monitorato verso TP2 @ ${tp2}; protezione a BE attiva."
+        f"Entry: ${_fmt(entry)} | Prezzo: *${_fmt(price)}*\n"
+        f"Trade monitorato verso TP2 @ ${_fmt(tp2)}; protezione a BE attiva."
     )
 
 
 def msg_tp2(entry, tp3, price, signal="", timeframe="") -> str:
     return (
         f"🎯🎯 *TP2 — {signal} {_tf_label(timeframe)}*\n"
-        f"Entry: ${entry} | Prezzo: *${price}*\n"
-        f"Livello registrato; monitoraggio attivo verso TP3 @ ${tp3}."
+        f"Entry: ${_fmt(entry)} | Prezzo: *${_fmt(price)}*\n"
+        f"Livello registrato; monitoraggio attivo verso TP3 @ ${_fmt(tp3)}."
     )
 
 
 def msg_tp3(entry, price, signal="", timeframe="") -> str:
     return (
         f"🏆 *TP3 — {signal} {_tf_label(timeframe)}*\n"
-        f"Entry: ${entry} | Exit virtuale: *${price}* | Risultato: +3R"
+        f"Entry: ${_fmt(entry)} | Exit virtuale: *${_fmt(price)}* | Risultato: +3R"
     )
 
 
 def msg_sl(entry, price, signal="", timeframe="", after_tp1=False) -> str:
     return (
         f"❌ *STOP LOSS — {signal} {_tf_label(timeframe)}*\n"
-        f"Entry: ${entry} | SL raggiunto: *${price}* | Risultato: -1R"
+        f"Entry: ${_fmt(entry)} | SL raggiunto: *${_fmt(price)}* | Risultato: -1R"
     )
 
 
@@ -1401,24 +1451,25 @@ async def monitor_active_trade(bot, chat_id: str) -> None:
     trades = load_all_active_trades()
     if not trades:
         return
-    price = await get_current_price_async()
+    price, price_is_futures = await get_current_price_and_scale_async()
     if price <= 0:
         return
     # High/Low candela M5 in formazione: cattura le ombre intracandle
     # (il prezzo tocca SL/TP/BE e torna indietro prima del prossimo ciclo).
     # Aggiornato in memoria dal prezzo appena campionato, nessuna chiamata
     # di rete aggiuntiva (vedi _update_live_candle).
-    _update_live_candle(price)
+    _update_live_candle(price, price_is_futures)
     candle_high, candle_low = get_current_candle_range()
     for trade in trades:
         try:
-            await _monitor_single(bot, chat_id, trade, price, candle_high, candle_low)
+            await _monitor_single(bot, chat_id, trade, price, candle_high, candle_low, price_is_futures)
         except Exception:
             logger.exception("Errore monitor sul trade %s", trade.get("trade_id"))
 
 
 async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
-                           candle_high: float = 0.0, candle_low: float = 0.0) -> None:
+                           candle_high: float = 0.0, candle_low: float = 0.0,
+                           price_is_futures: bool = True) -> None:
     fresh = get_trade_by_id(trade.get("trade_id", ""))
     if not fresh or fresh.get("status") != "OPEN":
         return
@@ -1436,13 +1487,18 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
 
     # entry/sl/tp1/tp2/tp3 sono salvati in "equivalente spot" (vedi
     # open_trade in gold_bot.py: price_basis = GC=F - spot catturato
-    # all'apertura). Il prezzo live e il range candela arrivano invece in
-    # scala GC=F (fonte primaria del monitor) — li riportiamo alla stessa
-    # scala del trade sottraendo lo stesso basis, altrimenti si confronta
-    # un prezzo futures con livelli spot (il bug scoperto in produzione:
-    # il monitor perdeva TP1/SL/BE quando i due prezzi divergevano).
+    # all'apertura). Il prezzo live arriva in scala GC=F SOLO quando la
+    # fonte di questo ciclo è Yahoo (price_is_futures) — lo riportiamo alla
+    # stessa scala del trade sottraendo lo stesso basis. Se invece il
+    # monitor è caduto su una fonte di fallback (gold-api.com, Twelve Data,
+    # ...) il prezzo è già spot: sottrarre il basis lo sposterebbe una
+    # seconda volta nella stessa direzione. Bug reale in produzione il 2
+    # settembre 2026: un TP2 SELL D1 segnalato a un prezzo mai toccato dal
+    # mercato, perché il monitor era caduto su gold-api.com dopo un
+    # rate-limit di Yahoo e ha comunque sottratto il basis come se il
+    # prezzo fosse ancora futures.
     basis = float(trade.get("price_basis") or 0)
-    if basis:
+    if basis and price_is_futures:
         price = price - basis
         if candle_high > 0:
             candle_high = candle_high - basis
