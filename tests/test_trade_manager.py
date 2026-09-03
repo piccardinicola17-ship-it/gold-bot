@@ -1,0 +1,253 @@
+"""
+Test per trade_manager.py — copre il ciclo di vita del trade (apertura,
+chiusura, cancellazione, invalidazione pending) e in particolare le race
+condition e i bug di correttezza trovati e corretti nella sessione del
+2026-09-03: guardia status='OPEN' su _update_trade/close_trade, rowcount
+non verificato su close_trade, soglia di invalidazione pending per
+timeframe, dedup che ignora i CANCELLED.
+
+Ogni test usa un DB SQLite temporaneo isolato (mai il goldbot.db reale) —
+vedi setUp/tearDown.
+"""
+
+import os
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import trade_manager as tm
+
+
+def _base_trade_data(**overrides) -> dict:
+    data = {
+        "signal": "BUY", "order_type": "BUY LIMIT", "entry": 4329.31, "sl": 4299.11,
+        "tp1": 4359.51, "tp2": 4389.71, "tp3": 4425.95, "prob": 58, "regime": "NORMAL",
+        "timeframe": "4h", "price": 4426.60, "risk_pct": 1.0, "strategies": {},
+        "data_timestamp": "2026-09-03T11:00:00", "price_basis": 0.0, "early_be_level": 0,
+    }
+    data.update(overrides)
+    data["setup_key"] = tm.build_setup_key(data)
+    return data
+
+
+class TradeManagerTestCase(unittest.TestCase):
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        # ACTIVE_FILE è un path fisso calcolato una volta sola all'import
+        # (str(BOT_DIR / "active_trades.json")), NON derivato da DB_PATH:
+        # senza ripuntarlo anche lui, _sync_active_snapshot() (chiamata da
+        # open_trade/close_trade) scriverebbe nel vero file locale del
+        # progetto invece che in un file temporaneo — successo davvero
+        # scrivendo questi test, corretto qui.
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+
+    def tearDown(self):
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+
+class TestOpenCloseLifecycle(TradeManagerTestCase):
+    def test_open_and_close_win(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        self.assertTrue(tm.close_trade(trade_id, "WIN_TP1", data["tp1"], "test"))
+
+        # Rilettura diretta per non dipendere da funzioni di lettura extra
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
+        conn.close()
+        self.assertEqual(row["status"], "CLOSED")
+        self.assertEqual(row["result"], "WIN_TP1")
+        self.assertEqual(row["tp1_hit"], 1)
+        self.assertAlmostEqual(row["pnl_r"], 1.0)
+
+    def test_close_trade_twice_second_call_is_noop(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        self.assertTrue(tm.close_trade(trade_id, "WIN_TP1", data["tp1"], "first"))
+        # Un secondo close_trade sullo stesso trade_id non deve né sollevare
+        # eccezioni né sovrascrivere il risultato già registrato.
+        self.assertFalse(tm.close_trade(trade_id, "LOSS", data["sl"], "second"))
+
+    def test_close_trade_returns_false_if_row_vanishes_between_select_and_update(self):
+        """Simula la race trovata il 2026-09-03: la riga sparisce (es. un
+        DELETE concorrente, tipo /api/reset) tra la SELECT e la UPDATE
+        dentro close_trade. Prima del fix, close_trade tornava comunque
+        True senza verificare se l'UPDATE avesse davvero toccato una riga.
+
+        close_trade fa SELECT poi (tra le altre cose) chiama
+        calculate_trade_pips() PRIMA della UPDATE, sulla stessa connessione:
+        è il gancio giusto per iniettare, da una connessione separata, la
+        'cancellazione concorrente' esattamente nella finestra reale."""
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+
+        import sqlite3
+        real_calculate_pips = tm.calculate_trade_pips
+
+        def _calculate_pips_and_delete_concurrently(signal, entry, exit_price):
+            side_conn = sqlite3.connect(self.tmpdb)
+            side_conn.execute("DELETE FROM trades WHERE trade_id=?", (trade_id,))
+            side_conn.commit()
+            side_conn.close()
+            return real_calculate_pips(signal, entry, exit_price)
+
+        tm.calculate_trade_pips = _calculate_pips_and_delete_concurrently
+        try:
+            result = tm.close_trade(trade_id, "WIN_TP1", data["tp1"], "test")
+        finally:
+            tm.calculate_trade_pips = real_calculate_pips
+
+        self.assertFalse(result, "close_trade deve tornare False se l'UPDATE non ha toccato nessuna riga")
+
+
+class TestUpdateTradeOpenGuard(TradeManagerTestCase):
+    def test_mark_tp_hit_is_noop_on_closed_trade(self):
+        """_update_trade (usata da mark_tp1_hit/mark_tp2_hit/mark_tp3_hit)
+        deve ignorare un trade già CLOSED, non riscriverne i campi."""
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        self.assertTrue(tm.close_trade(trade_id, "LOSS", data["sl"], "test"))
+
+        tm.mark_tp3_hit(trade_id)  # non deve sollevare, e non deve avere effetto
+
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
+        conn.close()
+        self.assertEqual(row["result"], "LOSS")
+        self.assertEqual(
+            row["tp3_hit"], 0,
+            "mark_tp3_hit su un trade già chiuso come LOSS non deve settare tp3_hit=1 "
+            "(altrimenti risultato incoerente: LOSS con TP3 raggiunto)",
+        )
+
+    def test_mark_tp_hit_works_on_open_trade(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        tm.mark_tp1_hit(trade_id)
+
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
+        conn.close()
+        self.assertEqual(row["tp1_hit"], 1)
+
+
+class TestSetupDedup(TradeManagerTestCase):
+    def test_cancelled_setup_can_be_retried(self):
+        """Fix del 2026-09-03: un pending CANCELLED (prezzo troppo lontano,
+        mai partito) non deve bloccare un nuovo tentativo sullo stesso setup
+        più tardi nella stessa candela — solo un WIN/LOSS/BE reale blocca."""
+        data = _base_trade_data()
+        self.assertFalse(tm.was_setup_seen(data["setup_key"]))
+
+        trade_id_1 = tm.open_trade(data)
+        tm.close_trade(trade_id_1, "CANCELLED", data["entry"], "prezzo troppo lontano")
+        self.assertFalse(
+            tm.was_setup_seen(data["setup_key"]),
+            "un setup CANCELLED non deve risultare 'visto' — deve poter essere ritentato",
+        )
+
+        data2 = dict(data)
+        data2["sl"] = 4297.79  # leggermente diverso, come nel caso reale osservato
+        trade_id_2 = tm.open_trade(data2)  # non deve sollevare DuplicateSetupError
+        self.assertNotEqual(trade_id_1, trade_id_2)
+
+    def test_open_setup_blocks_duplicate(self):
+        """Un trade ancora OPEN (o con esito reale WIN/LOSS/BE) DEVE
+        continuare a bloccare un secondo tentativo identico."""
+        data = _base_trade_data()
+        tm.open_trade(data)
+        self.assertTrue(tm.was_setup_seen(data["setup_key"]))
+        with self.assertRaises(tm.DuplicateSetupError):
+            tm.open_trade(dict(data))
+
+    def test_win_setup_blocks_duplicate_forever(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "WIN_TP3", data["tp3"], "test")
+        self.assertTrue(
+            tm.was_setup_seen(data["setup_key"]),
+            "un esito reale (WIN/LOSS/BE) deve restare bloccato per sempre, mai CANCELLED",
+        )
+
+
+class TestPendingInvalidation(TradeManagerTestCase):
+    def _pending_trade(self, timeframe: str, signal: str = "BUY", order_type: str = "BUY LIMIT",
+                        entry: float = 4329.31, sl: float = 4299.11, minutes_ago: float = 1.0) -> dict:
+        ts = (datetime.now(tm.TIMEZONE) - timedelta(minutes=minutes_ago)).isoformat()
+        return {
+            "timestamp": ts, "timeframe": timeframe, "signal": signal,
+            "order_type": order_type, "entry": entry, "sl": sl,
+        }
+
+    def test_h4_tolerates_further_adverse_move_than_m15(self):
+        """Caso reale del 2026-09-03: un BUY LIMIT H4 a 3.7x la distanza
+        entry-SL non deve invalidarsi (soglia H4 = 4.0x), mentre lo stesso
+        identico scarto su M15 (soglia 1.5x) deve invalidarsi."""
+        entry, sl = 4329.31, 4299.11
+        sl_distance = entry - sl  # 30.20
+        price = entry + 3.7 * sl_distance  # adverso di 3.7x
+
+        h4_trade = self._pending_trade("4h", entry=entry, sl=sl)
+        self.assertFalse(
+            tm.check_limit_invalidation(h4_trade, price),
+            "un BUY LIMIT H4 a 3.7x la distanza entry-SL non deve invalidarsi (soglia 4.0x)",
+        )
+
+        m15_trade = self._pending_trade("15min", entry=entry, sl=sl)
+        self.assertTrue(
+            tm.check_limit_invalidation(m15_trade, price),
+            "lo stesso scarto su M15 (soglia 1.5x) deve invalidarsi",
+        )
+
+    def test_expires_by_time_regardless_of_price(self):
+        trade = self._pending_trade("15min", minutes_ago=200)  # oltre i 90 min di TTL per 15min
+        self.assertTrue(tm.check_limit_invalidation(trade, price=4329.31))  # prezzo = entry, nessuno scarto
+
+    def test_adverse_distance_direction_buy_limit(self):
+        # BUY LIMIT aspetta un ribasso: allontanarsi = prezzo sale sopra l'entry.
+        trade = {"signal": "BUY", "order_type": "BUY LIMIT", "entry": 100.0}
+        self.assertEqual(tm._pending_adverse_distance(trade, 105.0), 5.0)
+        self.assertEqual(tm._pending_adverse_distance(trade, 95.0), 0.0)  # verso l'attivazione, non avverso
+
+    def test_adverse_distance_direction_sell_limit(self):
+        # SELL LIMIT aspetta un rialzo: allontanarsi = prezzo scende sotto l'entry.
+        trade = {"signal": "SELL", "order_type": "SELL LIMIT", "entry": 100.0}
+        self.assertEqual(tm._pending_adverse_distance(trade, 95.0), 5.0)
+        self.assertEqual(tm._pending_adverse_distance(trade, 105.0), 0.0)
+
+
+class TestCalculateTradePips(unittest.TestCase):
+    def test_buy_direction(self):
+        self.assertAlmostEqual(tm.calculate_trade_pips("BUY", 4300.00, 4310.00), 100.0, places=1)
+        self.assertAlmostEqual(tm.calculate_trade_pips("BUY", 4300.00, 4290.00), -100.0, places=1)
+
+    def test_sell_direction(self):
+        self.assertAlmostEqual(tm.calculate_trade_pips("SELL", 4300.00, 4290.00), 100.0, places=1)
+        self.assertAlmostEqual(tm.calculate_trade_pips("SELL", 4300.00, 4310.00), -100.0, places=1)
+
+    def test_case_insensitive_signal(self):
+        self.assertAlmostEqual(
+            tm.calculate_trade_pips("buy", 4300.00, 4310.00),
+            tm.calculate_trade_pips("BUY", 4300.00, 4310.00),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
