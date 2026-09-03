@@ -220,23 +220,68 @@ def init_reactions_table(db_path: str = HIST_DB_PATH) -> None:
         )
 
 
-def run_pilot(categories=PILOT_CATEGORIES, limit: int | None = None, db_path: str = HIST_DB_PATH) -> dict:
-    """Calcola le feature di reazione per gli eventi delle categorie indicate, saltando quelli già fatti (ripartibile)."""
+# Copertura estesa (3 settembre 2026): tutte le serie con numero reale
+# (actual+forecast) e un campione statisticamente utilizzabile (n>=20 righe
+# in macro_events) — così la Fase 2 non va rifatta una serie alla volta se
+# la Fase 3/4 rivela un edge altrove. Filtrato per event_name esatto, non
+# per macro_category: molte di queste serie sono taggate "OTHER" insieme a
+# eventi che non vogliamo (Crude Oil Inventories escluso deliberatamente,
+# più rilevante per il petrolio che per l'oro — l'utente ha confermato di
+# escluderlo). Le serie con n<20 (Housing Starts, Industrial Production,
+# ecc.) restano fuori: troppo poche occorrenze "high impact" nella fonte
+# per validare comunque, indipendentemente da quanti tick si scaricano.
+EXTENDED_EVENT_NAMES = (
+    "Unemployment Claims", "Unemployment Rate", "Core Retail Sales m/m",
+    "Retail Sales m/m", "ISM Manufacturing PMI", "ISM Services PMI",
+    "Core CPI m/m", "PPI m/m", "ADP Non-Farm Employment Change",
+    "CB Consumer Confidence", "Core Durable Goods Orders m/m",
+    "Prelim UoM Consumer Sentiment", "Building Permits", "CPI m/m",
+    "Average Hourly Earnings m/m", "Trade Balance", "Pending Home Sales m/m",
+    "New Home Sales", "Philly Fed Manufacturing Index", "Existing Home Sales",
+    "Advance GDP q/q", "Federal Funds Rate", "Prelim GDP q/q",
+    "TIC Long-Term Purchases", "Core PCE Price Index m/m", "JOLTS Job Openings",
+    "Flash Manufacturing PMI", "Flash Services PMI", "Final GDP q/q",
+    "Core PPI m/m", "Empire State Manufacturing Index", "CPI y/y",
+    "Non-Farm Employment Change",
+)
+
+
+def run_pilot(categories=None, event_names: tuple | None = None,
+              limit: int | None = None, db_path: str = HIST_DB_PATH) -> dict:
+    """
+    Calcola le feature di reazione per gli eventi indicati, saltando quelli
+    già fatti (ripartibile). event_names filtra per nome esatto (usato per
+    la copertura estesa, dato che molte serie sono taggate macro_category
+    "OTHER" insieme ad altre che non interessano); categories filtra per
+    macro_category (comportamento originale del pilota NFP+CPI+FOMC). Se
+    entrambi sono None usa PILOT_CATEGORIES per compatibilità.
+    """
     init_reactions_table(db_path)
-    placeholders = ",".join("?" for _ in categories)
+    if event_names:
+        placeholders = ",".join("?" for _ in event_names)
+        filter_clause = f"event_name IN ({placeholders})"
+        filter_params = event_names
+        filter_desc = f"{len(event_names)} serie per nome"
+    else:
+        categories = categories or PILOT_CATEGORIES
+        placeholders = ",".join("?" for _ in categories)
+        filter_clause = f"macro_category IN ({placeholders})"
+        filter_params = categories
+        filter_desc = f"categorie: {categories}"
+
     with _connect(db_path) as conn:
         query = (
             f"SELECT event_uid, datetime_utc, event_name FROM macro_events "
-            f"WHERE macro_category IN ({placeholders}) "
+            f"WHERE {filter_clause} "
             f"AND event_uid NOT IN (SELECT event_uid FROM event_price_reactions) "
             f"ORDER BY datetime_utc"
         )
         if limit:
             query += f" LIMIT {int(limit)}"
-        todo = conn.execute(query, categories).fetchall()
+        todo = conn.execute(query, filter_params).fetchall()
 
     total = len(todo)
-    logger.info(f"Da processare: {total} eventi (categorie: {categories})")
+    logger.info(f"Da processare: {total} eventi ({filter_desc})")
     done, empty, errors = 0, 0, 0
 
     for i, row in enumerate(todo):
@@ -275,8 +320,13 @@ def run_pilot(categories=PILOT_CATEGORIES, limit: int | None = None, db_path: st
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Fase 2: feature di reazione-prezzo dai tick Dukascopy")
-    parser.add_argument("--categories", nargs="+", default=list(PILOT_CATEGORIES))
+    parser.add_argument("--categories", nargs="+", default=None)
+    parser.add_argument("--extended", action="store_true",
+                         help="Copertura estesa: tutte le serie con n>=20 (vedi EXTENDED_EVENT_NAMES), non solo NFP/CPI/FOMC")
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
-    result = run_pilot(categories=tuple(args.categories), limit=args.limit)
+    if args.extended:
+        result = run_pilot(event_names=EXTENDED_EVENT_NAMES, limit=args.limit)
+    else:
+        result = run_pilot(categories=tuple(args.categories) if args.categories else None, limit=args.limit)
     print(result)
