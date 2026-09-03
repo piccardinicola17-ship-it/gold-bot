@@ -330,6 +330,22 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status)"
         )
 
+        if not _migration_done(conn, "setup_key_ignore_cancelled_v1"):
+            # was_setup_seen() ora ignora i CANCELLED (vedi commento lì), ma
+            # l'indice UNIQUE su setup_key era rimasto con la vecchia
+            # definizione — "IF NOT EXISTS" non lo aggiorna su un DB già
+            # esistente. Risultato osservato in produzione il 2026-09-03: il
+            # controllo applicativo lasciava passare il retry, il messaggio
+            # SEGNALE partiva, ma l'INSERT falliva sull'indice ancora vecchio
+            # (IntegrityError -> "Setup già registrato") — segnale fantasma
+            # su Telegram senza nessun trade aperto dietro.
+            conn.execute("DROP INDEX IF EXISTS idx_trades_setup_key")
+            conn.execute(
+                "CREATE UNIQUE INDEX idx_trades_setup_key ON trades(setup_key) "
+                "WHERE setup_key IS NOT NULL AND (result IS NULL OR result != 'CANCELLED')"
+            )
+            _mark_migration(conn, "setup_key_ignore_cancelled_v1")
+
         migrated = _migrate_legacy_signals(conn)
         migrated = _migrate_legacy_active_file(conn) or migrated
         if not _migration_done(conn, "fix_be_semantics_v1"):
