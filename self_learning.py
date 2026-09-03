@@ -97,6 +97,15 @@ def _get_closed_trades(days: Optional[int] = None) -> list:
         return []
 
 
+def _is_win(t: dict) -> bool:
+    """Stesso criterio di dashboard.py compute_stats: un WIN_BE con TP1 già
+    raggiunto conta come vittoria (profitto parziale incassato), non viene
+    escluso dal win rate come i BE "puri" (mai arrivati a TP1)."""
+    return t.get("result") != "LOSS" and (
+        bool(t.get("tp1_hit")) or t.get("result") in ("WIN_TP1", "WIN_TP2", "WIN_TP3")
+    )
+
+
 def _call_groq(system: str, user: str, max_tokens: int = 500) -> str:
     if not GROQ_API_KEY:
         return "{}"
@@ -153,9 +162,10 @@ def analyze_last_trade(trade_id: str = "") -> str:
     timestamp = (trade.get("timestamp") or "")[:16]
 
     all_trades = _get_closed_trades()
-    decisivi   = [t for t in all_trades if t.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3","LOSS")]
-    n          = len(decisivi)
-    wins_all   = sum(1 for t in decisivi if "WIN" in t.get("result",""))
+    wins_all_l = [t for t in all_trades if _is_win(t)]
+    losses_all = [t for t in all_trades if t.get("result") == "LOSS"]
+    n          = len(wins_all_l) + len(losses_all)
+    wins_all   = len(wins_all_l)
     wr_all     = round(wins_all / n * 100, 1) if n > 0 else 0
 
     # Mappa result → descrizione chiara per l'AI
@@ -183,7 +193,7 @@ Exit: ${exit_price} | P&L: {pnl_r:+.1f}R
 Tappe raggiunte: {tp1_txt} | {be_txt}
 Confidenza bot: {prob}% (score qualitativo, non probabilità statistica)
 Orario: {timestamp}
-Storico sistema: {n} trade decisivi, WR {wr_all}% (esclusi BE)
+Storico sistema: {n} trade decisivi, WR {wr_all}%
 
 Rispondi SOLO con questa struttura (adatta il contenuto al fatto che il trade ha {esito_label}):
 
@@ -220,10 +230,10 @@ def weekly_review() -> str:
     if not trades:
         return "Nessun trade nell'ultima settimana."
 
-    decisivi = [t for t in trades if t.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3","LOSS")]
-    wins     = [t for t in decisivi if "WIN" in t.get("result","")]
-    losses   = [t for t in decisivi if t.get("result") == "LOSS"]
+    wins     = [t for t in trades if _is_win(t)]
+    losses   = [t for t in trades if t.get("result") == "LOSS"]
     be_list  = [t for t in trades if t.get("result") == "WIN_BE"]
+    decisivi = wins + losses
     wr       = round(len(wins) / len(decisivi) * 100, 1) if decisivi else 0
     pnl_r    = sum(t.get("pnl_r") or 0 for t in trades)
 
@@ -232,7 +242,7 @@ def weekly_review() -> str:
         r = t.get("regime", "?")
         regime_stats.setdefault(r, {"wins":0,"total":0})
         regime_stats[r]["total"] += 1
-        if "WIN" in t.get("result",""): regime_stats[r]["wins"] += 1
+        if _is_win(t): regime_stats[r]["wins"] += 1
     regime_txt = "\n".join(f"  {r}: {d['wins']}/{d['total']} ({round(d['wins']/d['total']*100)}%)" for r,d in regime_stats.items()) or "  Nessun dato"
 
     tf_stats = {}
@@ -240,7 +250,7 @@ def weekly_review() -> str:
         tf = t.get("timeframe","?")
         tf_stats.setdefault(tf, {"wins":0,"total":0})
         tf_stats[tf]["total"] += 1
-        if "WIN" in t.get("result",""): tf_stats[tf]["wins"] += 1
+        if _is_win(t): tf_stats[tf]["wins"] += 1
     tf_txt = "\n".join(f"  {tf}: {d['wins']}/{d['total']} ({round(d['wins']/d['total']*100)}%)" for tf,d in tf_stats.items()) or "  Nessun dato"
 
     dir_stats = {}
@@ -248,7 +258,7 @@ def weekly_review() -> str:
         sig = t.get("signal","?")
         dir_stats.setdefault(sig, {"wins":0,"total":0})
         dir_stats[sig]["total"] += 1
-        if "WIN" in t.get("result",""): dir_stats[sig]["wins"] += 1
+        if _is_win(t): dir_stats[sig]["wins"] += 1
     dir_txt = "\n".join(f"  {sig}: {d['wins']}/{d['total']} ({round(d['wins']/d['total']*100)}%)" for sig,d in dir_stats.items()) or "  Nessun dato"
 
     user = f"""REVIEW SETTIMANALE XAU/USD:
@@ -285,7 +295,9 @@ Fornisci:
 
 def optimize_strategy_weights() -> dict:
     trades   = _get_closed_trades()
-    decisivi = [t for t in trades if t.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3","LOSS")]
+    wins_l   = [t for t in trades if _is_win(t)]
+    losses_l = [t for t in trades if t.get("result") == "LOSS"]
+    decisivi = wins_l + losses_l
 
     if len(decisivi) < MIN_TRADES_FOR_LEARNING:
         return {"status":"insufficient_data", "message":f"Servono almeno {MIN_TRADES_FOR_LEARNING} trade decisivi ({len(decisivi)} disponibili).", "weights":{}}
@@ -295,7 +307,7 @@ def optimize_strategy_weights() -> dict:
         r = t.get("regime","UNKNOWN")
         regime_wr.setdefault(r, {"wins":0,"total":0})
         regime_wr[r]["total"] += 1
-        if "WIN" in t.get("result",""): regime_wr[r]["wins"] += 1
+        if _is_win(t): regime_wr[r]["wins"] += 1
     regime_performance = {r: round(d["wins"]/d["total"]*100,1) for r,d in regime_wr.items() if d["total"] >= MIN_TRADES_PER_STRATEGY}
 
     tf_wr = {}
@@ -303,7 +315,7 @@ def optimize_strategy_weights() -> dict:
         tf = t.get("timeframe","?")
         tf_wr.setdefault(tf, {"wins":0,"total":0})
         tf_wr[tf]["total"] += 1
-        if "WIN" in t.get("result",""): tf_wr[tf]["wins"] += 1
+        if _is_win(t): tf_wr[tf]["wins"] += 1
     tf_performance = {tf: round(d["wins"]/d["total"]*100,1) for tf,d in tf_wr.items() if d["total"] >= MIN_TRADES_PER_STRATEGY}
 
     dir_wr = {}
@@ -311,7 +323,7 @@ def optimize_strategy_weights() -> dict:
         sig = t.get("signal","?")
         dir_wr.setdefault(sig, {"wins":0,"total":0})
         dir_wr[sig]["total"] += 1
-        if "WIN" in t.get("result",""): dir_wr[sig]["wins"] += 1
+        if _is_win(t): dir_wr[sig]["wins"] += 1
     dir_performance = {sig: round(d["wins"]/d["total"]*100,1) for sig,d in dir_wr.items() if d["total"] >= MIN_TRADES_PER_STRATEGY}
 
     regime_r_values = {}

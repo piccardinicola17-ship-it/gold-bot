@@ -683,17 +683,32 @@ async def cmd_report(update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update): return
     try:
         trades   = _get_closed_trades()
-        decisivi = [t for t in trades if t.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3","LOSS")]
+
+        def _is_win(t):
+            # Stesso criterio della dashboard: un WIN_BE con TP1 già raggiunto
+            # conta come vittoria (profitto parziale incassato), non viene
+            # escluso come i BE "puri" (mai arrivati a TP1).
+            return t.get("result") != "LOSS" and (
+                bool(t.get("tp1_hit")) or t.get("result") in ("WIN_TP1", "WIN_TP2", "WIN_TP3")
+            )
+
+        wins_l   = [t for t in trades if _is_win(t)]
+        losses_l = [t for t in trades if t.get("result") == "LOSS"]
+        decisivi = wins_l + losses_l
         if not decisivi:
             await update.message.reply_text("📭 Nessun trade chiuso nel database.")
             return
 
-        r_map    = {"WIN_TP1": 1, "WIN_TP2": 2, "WIN_TP3": 3, "LOSS": -1}
-        r_values = [r_map.get(t["result"], 0) for t in decisivi]
+        # R-multiple reali (compreso 0R dei BE) su tutti i trade chiusi non
+        # annullati, non solo sui decisivi — coerente col total_r della
+        # dashboard (che esclude solo i CANCELLED).
+        r_values = [
+            float(t.get("pnl_r") or 0) for t in trades if t.get("result") != "CANCELLED"
+        ]
 
         total    = len(decisivi)
-        wins     = sum(1 for v in r_values if v > 0)
-        losses   = sum(1 for v in r_values if v < 0)
+        wins     = len(wins_l)
+        losses   = len(losses_l)
         win_rate = round(wins / total * 100, 1)
         total_r  = round(sum(r_values), 1)
 
@@ -723,7 +738,7 @@ async def cmd_report(update, context: ContextTypes.DEFAULT_TYPE):
             tf = TF_LABEL.get(t.get("timeframe",""), t.get("timeframe","?"))
             by_tf.setdefault(tf, {"w": 0, "n": 0})
             by_tf[tf]["n"] += 1
-            if "WIN" in t["result"]: by_tf[tf]["w"] += 1
+            if _is_win(t): by_tf[tf]["w"] += 1
         tf_txt = "\n".join(
             f"  • {tf}: {d['w']}/{d['n']} ({round(d['w']/d['n']*100,1)}%)"
             for tf, d in sorted(by_tf.items())
@@ -748,7 +763,7 @@ async def cmd_report(update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"*Per timeframe:*\n{tf_txt}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Win Rate calcolato su trade decisivi (WIN/LOSS). WIN\\_BE escluso._"
+            f"_Win Rate: WIN o WIN\\_BE con TP1 raggiunto contano come vittoria; BE puri esclusi._"
         )
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
