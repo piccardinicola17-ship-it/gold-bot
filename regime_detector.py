@@ -141,5 +141,14 @@ def format_regime_message(regime_data: dict) -> str:
         msg += f"_Dettagli: {details}_\n"
 
     msg += f"━━━━━━━━━━━━━━━━━━━━\n"
+    # Questo classificatore (EMA/ATR/range%) è usato SOLO da questo comando
+    # e dal backtest — è indipendente da quello che guida davvero le
+    # decisioni di trading live (analyzer._detect_market_regime_fallback,
+    # basato su ADX/Bollinger-width/ROC, con soglie diverse). Possono dare
+    # risultati diversi per lo stesso momento di mercato: nessun bug, sono
+    # due sistemi separati per design — ma senza dirlo esplicitamente
+    # l'utente può ragionevolmente pensare che questo sia "il regime" su
+    # cui il bot sta decidendo, quando non è detto lo sia.
+    msg += f"_Nota: regime indicativo (comando /regime), calcolato con una logica indipendente — non è necessariamente quello su cui il bot sta basando le decisioni di trading live in questo momento._\n"
     msg += f"_Aggiornato: {datetime.now(TIMEZONE).strftime('%H:%M IT')}_"
     return msg

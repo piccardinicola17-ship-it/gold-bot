@@ -94,8 +94,19 @@ def _new_release_mom_pct(series_id: str, last_seen: dict) -> tuple[str, float] |
     if pd.isna(previous_value) or previous_value == 0:
         return None
 
-    mom_pct = (current_value - previous_value) / previous_value * 100
-    return latest_date.isoformat(), round(float(mom_pct), 3)
+    # Arrotondato a 1 decimale come il BLS/calendario (0.2%, 0.3%...), non 3
+    # decimali: dare più precisione di quella che la fonte può davvero
+    # garantire è falsa precisione. Verificato empiricamente il 2026-09-03
+    # confrontando 10 mesi FRED-ricalcolati con l'actual ufficiale salvato
+    # nel dataset di training (stessa fonte/metodo usato per allenare il
+    # modello): 8/10 coincidono, ma 2/10 hanno uno scarto reale di 0.1pp
+    # (es. FRED ricalcola 0.255% → arrotonda a 0.3%, l'ufficiale era 0.2%) —
+    # dovuto a revisioni dell'indice FRED successive alla pubblicazione
+    # originale. Nessun fix pulito possibile senza cambiare fonte (servirebbe
+    # ALFRED, dati vintage point-in-time, non ancora integrato): il margine
+    # d'errore va solo dichiarato onestamente, vedi format_prediction().
+    mom_pct = round((current_value - previous_value) / previous_value * 100, 1)
+    return latest_date.isoformat(), float(mom_pct)
 
 
 def predict_reaction(event_name: str, forecast_raw: str) -> dict | None:
@@ -159,5 +170,7 @@ def format_prediction(pred: dict) -> str:
         f"Actual {pred['actual_pct']:+.2f}% vs Prev {pred['forecast_pct']:+.2f}% "
         f"(sorpresa z={pred['surprise_zscore']:+.1f})\n"
         f"Reazione attesa: *{pred['predicted_reaction_usd']:+.2f}$* — {direction}\n"
-        f"_Stima statistica su dati storici, non una garanzia — margine d'errore reale, vedi Fase 4._"
+        f"_Stima statistica su dati storici, non una garanzia — margine d'errore reale, vedi Fase 4._\n"
+        f"_L'actual è ricalcolato da FRED, non letto dal comunicato ufficiale: può differire di "
+        f"±0.1pp in rari casi di revisione dell'indice — verificato empiricamente, ~20% dei mesi._"
     )
