@@ -592,11 +592,21 @@ def build_setup_key(data: dict) -> str:
 
 
 def was_setup_seen(setup_key: str) -> bool:
+    """True se questo esatto setup (stesso TF/segnale/entry/candela) è già
+    stato aperto e non è finito CANCELLED. Un WIN/LOSS/BE è un esito reale e
+    completo, va bloccato per sempre — un CANCELLED invece significa solo
+    "il prezzo si è allontanato troppo, mai partito": la zona strutturale
+    può restare valida, quindi non blocca un nuovo tentativo più tardi
+    nella stessa candela se il prezzo rientra nel range accettabile (vedi
+    Regola 5bis in agent_orchestrator.py). Un trade ancora OPEN (result
+    NULL) resta bloccante, per non aprirne uno doppio mentre l'altro è
+    ancora attivo. Cambiato il 2026-09-03."""
     if not setup_key:
         return False
     with _connect() as conn:
         return conn.execute(
-            "SELECT 1 FROM trades WHERE setup_key=?", (setup_key,)
+            "SELECT 1 FROM trades WHERE setup_key=? AND (result IS NULL OR result != 'CANCELLED')",
+            (setup_key,),
         ).fetchone() is not None
 
 
