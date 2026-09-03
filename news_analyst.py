@@ -121,6 +121,29 @@ def format_news_message(news: list, current_price: float = 0) -> str:
     return msg[:2000] if len(msg) > 2000 else msg
 
 
+def get_bias_briefing(news: list, current_price: float = 0) -> str:
+    """Bias giornaliero sintetico (2 righe: Bias + Motivo) per il report
+    mattutino unico — niente titoli di notizie, niente livello di prezzo
+    (l'utente non li vuole nel report combinato, vedi format_news_message
+    per la versione con notizie e livello usata altrove)."""
+    if not news:
+        return "Bias: NEUTRALE\nMotivo: notizie non disponibili."
+
+    news_plain = "\n".join(
+        str(n).replace("*","").replace("_","").replace("`","")[:120]
+        for n in news[:5]
+    )
+    return _call_groq(
+        system=(
+            "Analista XAU/USD. Rispondi SOLO con:\n"
+            "Bias: BULLISH / BEARISH / NEUTRALE\n"
+            "Motivo: [max 10 parole]"
+        ),
+        user=f"Prezzo: ${current_price}\nNotizie:\n{news_plain}",
+        max_tokens=40,
+    )
+
+
 def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str = "N/A", actual: str = "N/A", current_price: float = 0) -> str:
     """
     Bias direzionale corto pre-evento — niente pip/livelli/TP/SL inventati.

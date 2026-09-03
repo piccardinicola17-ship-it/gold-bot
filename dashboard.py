@@ -115,7 +115,11 @@ def _get_trades() -> list[dict]:
         trades = [dict(row) for row in rows]
         for trade in trades:
             if trade.get("status") == "CLOSED":
-                trade["pips"] = _trade_pips(trade)
+                # Un CANCELLED non ha un P&L reale (sempre 0R) — i pip salvati
+                # sono solo la distanza ipotetica fino al prezzo di
+                # cancellazione e confondono in dashboard. Solo visivo: il
+                # dato salvato in DB resta intatto.
+                trade["pips"] = 0.0 if trade.get("result") == "CANCELLED" else _trade_pips(trade)
         return trades
     except sqlite3.Error:
         logger.exception("Lettura trade dashboard fallita")

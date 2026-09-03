@@ -27,7 +27,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_data_success
 from agent_orchestrator import run_pipeline, format_pipeline_report
-from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news
+from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
 # ORB rimosso — gestito manualmente dall'utente
 from regime_detector import format_regime_message
 from self_learning import analyze_last_trade, weekly_review, optimize_strategy_weights, format_learning_report
@@ -1440,29 +1440,30 @@ async def send_morning_report(bot: Bot):
             asyncio.to_thread(get_news_sentiment),
             asyncio.to_thread(get_economic_events),
         )
-        s_label   = sentiment.get("label","NEUTRAL")
-        s_score   = sentiment.get("score",0)
-        s_emoji   = "🟢" if s_label == "BULLISH" else "🔴" if s_label == "BEARISH" else "⚪"
-        events    = cal.get("events",[])
+        s_label = sentiment.get("label","NEUTRAL")
+        s_emoji = "🟢" if s_label == "BULLISH" else "🔴" if s_label == "BEARISH" else "⚪"
+        events  = cal.get("events",[])
 
-        macro_txt = await asyncio.to_thread(get_macro_briefing, events, price)
-        msg1 = (
-            f"🌅 *BUONGIORNO — {today}*\n"
-            f"💰 XAU/USD: *${_fmt(price)}*\n"
-            f"{s_emoji} Sentiment: *{s_label}* ({s_score:+d})\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            + macro_txt
-        )
-        if len(msg1) > 4000: msg1 = msg1[:3950] + "\n_[Troncato]_"
-        await bot.send_message(chat_id=CHAT_ID, text=msg1, parse_mode="Markdown")
+        if events:
+            events_txt = "📅 *EVENTI MACRO OGGI:*\n" + "\n".join(
+                f"• {_escape_md(ev.get('title','?'))} — {ev.get('time','?')} IT"
+                for ev in events[:8]
+            )
+        else:
+            events_txt = "Nessun evento macro ad alto impatto oggi."
 
-        if news:
-            msg2 = format_news_message(news, current_price=price)
-            if len(msg2) > 4000: msg2 = msg2[:3950] + "\n_[Troncato]_"
-            await bot.send_message(chat_id=CHAT_ID, text=msg2, parse_mode="Markdown")
+        bias_txt = await asyncio.to_thread(get_bias_briefing, news, price)
 
         ny_time = _ny_open_time_it()
-        kill_zones = (
+        msg = (
+            f"🌅 *BUONGIORNO — {today}*\n"
+            f"💰 XAU/USD: *${_fmt(price)}*\n"
+            f"{s_emoji} Sentiment: *{s_label}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{events_txt}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{bias_txt}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
             f"⏰ *KILL ZONES OGGI:*\n"
             f"• 🇬🇧 Londra: 09:00–11:00\n"
             f"• 🇺🇸 NY Open: {ny_time}–16:00\n"
@@ -1471,7 +1472,8 @@ async def send_morning_report(bot: Bot):
             f"_Usa /macro per analisi evento specifico_\n"
             f"_Buon trading! 📈_"
         )
-        await bot.send_message(chat_id=CHAT_ID, text=kill_zones, parse_mode="Markdown")
+        if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
+        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
         logger.info("Report mattutino inviato")
     except Exception as e:
         logger.error(f"Errore report mattutino: {e}")
