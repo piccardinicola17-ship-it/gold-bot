@@ -1375,6 +1375,23 @@ async def check_macro_alerts(bot):
                 )
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
+
+                # Fase 5 progetto dati storici: previsione statistica reale,
+                # solo per le serie validate in Fase 4 (oggi: Core CPI m/m).
+                # Silenziosa se non applicabile (evento diverso, FRED non
+                # ancora aggiornato, forecast non numerico) — mai forzata.
+                try:
+                    from macro_predictor import predict_reaction, format_prediction
+                    prediction = await asyncio.to_thread(
+                        predict_reaction, ev["title"], ev.get("forecast", "N/A")
+                    )
+                    if prediction:
+                        await bot.send_message(
+                            chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
+                        )
+                except Exception as e:
+                    logger.debug(f"[{ev['title']}] Previsione statistica non disponibile: {e}")
+
                 if len(news_analysis) > 4000: news_analysis = news_analysis[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=news_analysis, parse_mode="Markdown")
 

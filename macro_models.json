@@ -1,0 +1,13 @@
+{
+  "Core CPI m/m": {
+    "event_name": "Core CPI m/m",
+    "horizon": "reaction_30m",
+    "slope": -0.3761126501798617,
+    "intercept": 0.15717968509518981,
+    "surprise_mean": -0.0010695187165775427,
+    "surprise_std": 0.11071095020820515,
+    "surprise_zscore_clip": 4.0,
+    "n": 187,
+    "fitted_at": "2026-09-03T06:05:22.425567+00:00"
+  }
+}

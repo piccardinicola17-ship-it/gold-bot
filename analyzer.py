@@ -984,6 +984,7 @@ def get_upcoming_events(days_ahead: int = 7, hours_lookback: float = 0.0) -> lis
                 "impact":     "HIGH",
                 "forecast":   ev.get("forecast", "N/A"),
                 "previous":   ev.get("previous", "N/A"),
+                "actual":     ev.get("actual", "N/A"),
                 "hours_away": round(diff_h, 1) if diff_h < 999 else None,
             })
 

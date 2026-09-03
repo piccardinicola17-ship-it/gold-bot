@@ -228,6 +228,73 @@ def summarize(results: pd.DataFrame) -> None:
         print(f"  {event_name:32s} {verdict}")
 
 
+DEPLOY_HORIZON = "reaction_30m"
+
+
+def fit_final_model(event_name: str, horizon: str = DEPLOY_HORIZON, db_path: str = HIST_DB_PATH) -> dict:
+    """
+    Calibra il modello da usare in produzione (Fase 5): pendenza Theil-Sen
+    fittata su TUTTI i dati storici disponibili (non uno split di
+    validazione — qui non stiamo più misurando quanto sia buono, quello
+    l'ha già fatto run_all()/summarize(), stiamo preparando l'artefatto
+    da usare davvero). Include anche media e deviazione standard storica
+    della sorpresa grezza (actual-forecast): servono al bot live per
+    calcolare lo z-score di un evento NUOVO con la stessa normalizzazione
+    usata in Fase 3, dato che quell'evento non esiste ancora in
+    event_features quando arriva in tempo reale.
+    """
+    with _connect(db_path) as conn:
+        raw = pd.read_sql_query(
+            "SELECT surprise_raw, surprise_zscore, " + horizon + " AS y "
+            "FROM event_features WHERE event_name=? AND surprise_zscore IS NOT NULL",
+            conn, params=(event_name,),
+        )
+    raw = raw.dropna(subset=["surprise_zscore", "y"])
+    if len(raw) < 20:
+        raise ValueError(f"Dati insufficienti per calibrare {event_name} (n={len(raw)})")
+
+    x = np.clip(raw["surprise_zscore"].to_numpy(), -SURPRISE_ZSCORE_CLIP, SURPRISE_ZSCORE_CLIP)
+    y = raw["y"].to_numpy()
+    slope, intercept = _theil_sen_fit(x, y)
+
+    return {
+        "event_name": event_name,
+        "horizon": horizon,
+        "slope": slope,
+        "intercept": intercept,
+        "surprise_mean": float(raw["surprise_raw"].mean()),
+        "surprise_std": float(raw["surprise_raw"].std()),
+        "surprise_zscore_clip": SURPRISE_ZSCORE_CLIP,
+        "n": int(len(raw)),
+        "fitted_at": pd.Timestamp.utcnow().isoformat(),
+    }
+
+
+DEPLOYED_EVENTS = ("Core CPI m/m",)  # solo le serie con edge validato in Fase 4
+
+
+def regenerate_deployed_models(db_path: str = HIST_DB_PATH) -> None:
+    """
+    Rigenera macro_models.json (nella root del progetto, NON in data/ che è
+    gitignored — questo file va invece committato e deployato col codice,
+    lo legge macro_predictor.py in produzione). Da rilanciare se si
+    aggiungono eventi alla Fase 2/3 o si estende DEPLOYED_EVENTS dopo aver
+    validato una nuova serie in Fase 4.
+    """
+    import json
+    from pathlib import Path
+
+    models = {name: fit_final_model(name, db_path=db_path) for name in DEPLOYED_EVENTS}
+    out_path = Path(__file__).resolve().parent / "macro_models.json"
+    out_path.write_text(json.dumps(models, indent=2))
+    logger.info(f"Modelli deployati rigenerati: {list(models)} -> {out_path}")
+
+
 if __name__ == "__main__":
-    results = run_all()
-    summarize(results)
+    import sys
+
+    if "--regenerate-models" in sys.argv:
+        regenerate_deployed_models()
+    else:
+        results = run_all()
+        summarize(results)
