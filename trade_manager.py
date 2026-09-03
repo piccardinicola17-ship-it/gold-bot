@@ -1337,7 +1337,20 @@ def check_order_activation(trade: dict, price: float) -> bool:
     return False
 
 
-PENDING_MAX_ADVERSE_SL_MULTIPLE = 2.0
+# Soglia di cancellazione differenziata per timeframe, come PENDING_TTL_MINUTES
+# sopra — un pending H4/D1 è naturalmente più volatile e va tenuto più a
+# lungo di uno M5/M15 anche in termini di quanto il prezzo può allontanarsi
+# prima di considerarlo ormai superato (non solo di quanto tempo aspettare).
+# Prima era un unico 2.0x fisso per tutti i TF: un BUY LIMIT H4 aperto a
+# $111 dall'entry (3.7x la distanza entry-SL) veniva cancellato dal monitor
+# pochi secondi dopo l'apertura — corretto il 2026-09-03.
+PENDING_MAX_ADVERSE_SL_MULTIPLE = {
+    "5min":  1.5,
+    "15min": 1.5,
+    "1h":    2.5,
+    "4h":    4.0,
+    "1day":  5.0,
+}
 
 
 def _pending_adverse_distance(trade: dict, price: float) -> float:
@@ -1387,7 +1400,8 @@ def check_limit_invalidation(trade: dict, price: float) -> bool:
     sl_distance = abs(float(trade.get("entry", 0)) - float(trade.get("sl", 0)))
     if sl_distance > 0 and price > 0:
         adverse = _pending_adverse_distance(trade, price)
-        if adverse > PENDING_MAX_ADVERSE_SL_MULTIPLE * sl_distance:
+        max_multiple = PENDING_MAX_ADVERSE_SL_MULTIPLE.get(trade.get("timeframe", "15min"), 2.0)
+        if adverse > max_multiple * sl_distance:
             return True
 
     return False

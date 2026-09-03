@@ -336,7 +336,7 @@ async def agent_risk(state: TradingState) -> AgentResult:
         state.add_log(
             "⚖️ RiskAgent",
             f"{'✅ OK' if state.risk_ok else '🛑 BLOCCATO'} | "
-            f"Trade oggi: {state.trades_today}/3 | "
+            f"Trade oggi: {state.trades_today} | "
             f"Loss consecutive: {state.consecutive_loss} | "
             f"Risk: {state.risk_pct}%"
         )
