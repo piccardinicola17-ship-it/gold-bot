@@ -1861,9 +1861,14 @@ async def main():
         id="macro_alerts"
     )
 
-    # Breaking news Fed (non programmate) ogni 10 minuti
+    # Breaking news Fed (non programmate) ogni 2 minuti — prima 10, troppo
+    # lento: un discorso Fed non programmato può muovere il prezzo in pochi
+    # minuti e il bot lo segnalava solo al giro successivo, a mossa già
+    # fatta (visto in produzione il 2026-09-03, discorso Waller). La
+    # classificazione è a parole chiave (nessuna chiamata Groq se non trova
+    # nulla di nuovo), quindi accorciare l'intervallo non aumenta i costi.
     scheduler.add_job(
-        check_breaking_news_job, "interval", minutes=10, args=[app.bot],
+        check_breaking_news_job, "interval", minutes=2, args=[app.bot],
         id="breaking_news"
     )
 
