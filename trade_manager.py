@@ -1369,6 +1369,34 @@ def save_fred_last_seen(state: dict) -> None:
         )
 
 
+def load_breaking_news_pending() -> dict:
+    """
+    Bias+prezzo catturati all'invio di un breaking alert (Fed non
+    programmato), in attesa del confronto oggettivo ~10 minuti dopo — stesso
+    principio di load_macro_alert_state/pre_event_bias, ma per le notizie
+    non programmate (che non hanno un orario noto in anticipo). Persistito
+    per sopravvivere a un riavvio/deploy a metà finestra. Chiave: item_id
+    del breaking alert (vedi breaking_news._item_id).
+    """
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM bot_state WHERE key='breaking_news_pending'"
+            ).fetchone()
+        return json.loads(row["value"]) if row else {}
+    except Exception:
+        return {}
+
+
+def save_breaking_news_pending(pending: dict) -> None:
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO bot_state(key, value) VALUES('breaking_news_pending', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(pending),),
+        )
+
+
 def check_order_activation(trade: dict, price: float) -> bool:
     signal = trade.get("signal")
     order_type = str(trade.get("order_type", signal)).upper()

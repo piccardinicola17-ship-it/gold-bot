@@ -1235,7 +1235,11 @@ async def check_breaking_news_job(bot):
     if is_bot_paused():
         return
     try:
-        from trade_manager import load_breaking_news_seen, save_breaking_news_seen
+        import re
+        from trade_manager import (
+            load_breaking_news_seen, save_breaking_news_seen,
+            load_breaking_news_pending, save_breaking_news_pending,
+        )
         import breaking_news
 
         seen_ids, is_first_run = await asyncio.to_thread(load_breaking_news_seen)
@@ -1247,6 +1251,8 @@ async def check_breaking_news_job(bot):
             await asyncio.to_thread(save_breaking_news_seen, new_seen)
             logger.info(f"Breaking news: baseline iniziale salvata ({len(new_seen)} item)")
             return
+
+        pending = await asyncio.to_thread(load_breaking_news_pending)
 
         for alert in alerts:
             if alert["source"] == "fed_press" and alert["classification"]["label"] == "NEUTRO":
@@ -1280,6 +1286,80 @@ async def check_breaking_news_job(bot):
             except Exception:
                 logger.exception("Invio breaking news fallito")
 
+            # Cattura bias+prezzo per il confronto oggettivo ~10 minuti dopo
+            # (stesso principio del post-evento macro in check_macro_alerts,
+            # ma qui l'orario non è noto in anticipo — si parte dall'invio
+            # dell'alert). Solo se l'AI ha dato un bias direzionale reale:
+            # NEUTRO/nessuna risposta non ha nulla da confermare.
+            if ai_analysis and price > 0:
+                m = re.search(r"Per l'oro:\s*(BUY|SELL)", ai_analysis)
+                if m:
+                    item_id = breaking_news._item_id(alert["source"], alert)
+                    pending[item_id] = {
+                        "title": alert["title"],
+                        "bias": m.group(1),
+                        "price": price,
+                        "sent_at": datetime.now(TIMEZONE).isoformat(),
+                    }
+
+        # Confronto oggettivo ~10 minuti dopo: prezzo reale vs bias previsto.
+        # Calcolo aritmetico sui prezzi, non una seconda opinione dell'AI —
+        # stesso principio del POST-EVENTO macro. Scarta anche le voci più
+        # vecchie di 60 minuti mai risolte (es. prezzo live irraggiungibile
+        # per un'ora), per non far crescere pending all'infinito.
+        CONFIRM_THRESHOLD_USD = 2.0
+        resolved = []
+        for item_id, info in pending.items():
+            try:
+                sent_at = datetime.fromisoformat(info["sent_at"])
+                if sent_at.tzinfo is None:
+                    sent_at = TIMEZONE.localize(sent_at)
+                age_minutes = (datetime.now(TIMEZONE) - sent_at.astimezone(TIMEZONE)).total_seconds() / 60
+            except Exception:
+                resolved.append(item_id)
+                continue
+
+            if age_minutes >= 60:
+                resolved.append(item_id)
+                continue
+            if age_minutes < 10:
+                continue
+
+            try:
+                price_now = await get_current_price_async()
+            except Exception:
+                price_now = 0.0
+            if price_now <= 0:
+                continue
+
+            change = price_now - info["price"]
+            bias = info["bias"]
+            if abs(change) < CONFIRM_THRESHOLD_USD:
+                esito = "➖ *Movimento non significativo* — prezzo praticamente invariato"
+            elif bias == "BUY":
+                esito = "✅ *CONFERMATO*" if change > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+            else:  # SELL
+                esito = "✅ *CONFERMATO*" if change < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+            segno = "+" if change >= 0 else ""
+
+            msg_post = (
+                f"📊 *POST-BREAKING NEWS — {info['title']}*\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 XAU/USD: *${_fmt(price_now)}*\n"
+                f"🎯 Bias previsto: *{bias}* (era ${_fmt(info['price'])})\n"
+                f"{esito}\n"
+                f"📐 Variazione: *{segno}{change:.2f}$*"
+            )
+            try:
+                await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
+            except Exception:
+                logger.exception("Invio post-breaking-news fallito")
+            resolved.append(item_id)
+
+        for item_id in resolved:
+            pending.pop(item_id, None)
+
+        await asyncio.to_thread(save_breaking_news_pending, pending)
         await asyncio.to_thread(save_breaking_news_seen, new_seen)
     except Exception as e:
         logger.error(f"Errore breaking news: {e}")
