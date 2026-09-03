@@ -350,7 +350,7 @@ def optimize_strategy_weights() -> dict:
 
     groq_raw = _call_groq(
         system="Sei un quantitative analyst su XAU/USD. Rispondi SOLO con JSON valido, zero testo extra.",
-        user=f"Performance reali:\n{perf_summary}\n\nRestituisci SOLO questo JSON:\n{{\n  \"regime_multipliers\": {{\"TRENDING_DOWN\": 1.2}},\n  \"direction_bias\": {{\"BUY\": 1.0, \"SELL\": 1.1}},\n  \"preferred_timeframe\": \"1h\",\n  \"rationale\": \"max 2 righe\"\n}}\nValori tra 0.5 e 1.5. WR>65% e avg_r>0.5 → 1.2-1.4. WR<50% → 0.6-0.8. Non decidere quali regimi bloccare: ci pensa il codice con una soglia più severa.",
+        user=f"Performance reali:\n{perf_summary}\n\nRestituisci SOLO questo JSON:\n{{\n  \"regime_multipliers\": {{\"TRENDING_DOWN\": 1.2}},\n  \"direction_bias\": {{\"BUY\": 1.0, \"SELL\": 1.1}},\n  \"preferred_timeframe\": \"1h\",\n  \"rationale\": \"max 2 righe\"\n}}\nValori tra 0.85 e 1.15 per regime_multipliers, tra 0.90 e 1.10 per direction_bias (sono i limiti reali applicati in produzione, vedi analyzer.py). WR>65% e avg_r>0.5 → verso il massimo. WR<50% → verso il minimo. Non decidere quali regimi bloccare: ci pensa il codice con una soglia più severa.",
         max_tokens=450,
     )
 
@@ -359,6 +359,20 @@ def optimize_strategy_weights() -> dict:
         learned = json.loads(clean)
     except Exception:
         learned = {}
+
+    # Clamp alla STESSA banda che analyzer.py applica davvero in produzione
+    # (regime 0.85-1.15, direzione 0.90-1.10) — prima venivano salvati e
+    # mostrati all'utente (via /learn) i valori grezzi dell'LLM, anche fuori
+    # da quella banda: il numero comunicato non corrispondeva a quello
+    # effettivamente in vigore sul bot live. Bug reale trovato 2026-09-03.
+    learned["regime_multipliers"] = {
+        regime: round(min(1.15, max(0.85, float(value))), 2)
+        for regime, value in (learned.get("regime_multipliers") or {}).items()
+    }
+    learned["direction_bias"] = {
+        direction: round(min(1.10, max(0.90, float(value))), 2)
+        for direction, value in (learned.get("direction_bias") or {}).items()
+    }
 
     # Sovrascrive sempre qualunque "blocked_regimes" l'LLM avesse comunque
     # restituito nonostante il prompt — la decisione è solo quella calcolata

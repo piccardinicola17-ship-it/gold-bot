@@ -353,7 +353,11 @@ async def _run_analysis(update, timeframe: str):
             await update.message.reply_text(
                 f"⛔ *Nessuna apertura {tf_label}*\n"
                 f"Decisione: *{state.final_decision}*\n"
-                f"Motivo: {state.decision_reason}",
+                # decision_reason può contenere testo di un'eccezione esterna
+                # (risk_reason/news_reason su errore) con caratteri Markdown
+                # non bilanciati — va escapato come i titoli di notizie,
+                # altrimenti l'invio fallisce con "Can't parse entities".
+                f"Motivo: {_escape_md(state.decision_reason)}",
                 parse_mode="Markdown"
             )
             return
@@ -1452,7 +1456,11 @@ async def send_morning_report(bot: Bot):
         else:
             events_txt = "Nessun evento macro ad alto impatto oggi."
 
-        bias_txt = await asyncio.to_thread(get_bias_briefing, news, price)
+        # Testo generato da Groq: può contenere caratteri Markdown non
+        # bilanciati (underscore, asterisco...) — va escapato prima di
+        # finire in un messaggio parse_mode="Markdown", altrimenti l'intero
+        # report mattutino unico non arriva.
+        bias_txt = _escape_md(await asyncio.to_thread(get_bias_briefing, news, price))
 
         ny_time = _ny_open_time_it()
         msg = (

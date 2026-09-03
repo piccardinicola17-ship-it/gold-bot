@@ -35,7 +35,14 @@ def _is_loopback() -> bool:
 
 @app.before_request
 def protect_dashboard():
-    if request.path == "/health" or _is_loopback():
+    if request.path == "/health":
+        return None
+    # /api/reset cancella tutti i trade: richiede sempre il token, anche da
+    # loopback. L'esenzione loopback esiste per comodità di lettura locale,
+    # non deve coprire un endpoint distruttivo — altrimenti qualunque
+    # processo nello stesso container (non solo l'utente) potrebbe azzerare
+    # il DB senza presentare alcuna credenziale. Bug reale trovato 2026-09-03.
+    if request.path != "/api/reset" and _is_loopback():
         return None
     if not DASHBOARD_TOKEN:
         abort(503, "Configura DASHBOARD_TOKEN nelle variabili Railway")

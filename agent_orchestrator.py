@@ -64,6 +64,12 @@ class TradingState:
 
     # Agente 1 — dati mercato
     current_price: float        = 0.0
+    # True solo se current_price viene da Yahoo/GC=F (scala futures, la
+    # stessa fonte primaria di analyzer.get_data()/full_analyze()). False se
+    # arriva da un fallback spot (gold-api/Twelve Data/Stooq/metals.live) —
+    # in quel caso non sappiamo se `entry` (calcolato da full_analyze) sia
+    # nella stessa scala, quindi non è affidabile confrontarli direttamente.
+    current_price_is_futures: bool = False
     market_data:   dict         = field(default_factory=dict)
     data_timestamp: str         = ""
 
@@ -135,14 +141,19 @@ async def agent_data_collector(state: TradingState) -> AgentResult:
     """
     state.add_log("📊 DataCollector", "Raccolta dati multi-TF...")
     try:
-        from trade_manager import get_current_price_async
+        from trade_manager import get_current_price_and_scale_async
         from analyzer import get_data, compute_indicators
 
-        # Prezzo live — non bloccante
-        price = await get_current_price_async()
+        # Prezzo live — non bloccante. Usa la variante che espone anche la
+        # scala (futures GC=F vs spot): senza saperlo, Regola 5 in
+        # agent_decision_maker rischierebbe di confrontare current_price e
+        # state.entry su scale diverse — stessa classe di bug del falso TP
+        # del 2 settembre, già corretta nel monitor ma non qui.
+        price, is_futures = await get_current_price_and_scale_async()
         if price <= 0:
             raise ValueError("Prezzo live non disponibile")
         state.current_price = price
+        state.current_price_is_futures = is_futures
         state.timestamp = datetime.now(TIMEZONE).isoformat()
 
         # Stessi outputsize di analyzer.get_multi_timeframe_data() (usata da
@@ -467,17 +478,67 @@ async def agent_decision_maker(state: TradingState) -> AgentResult:
     # L'oro si può muovere di $3-8 in 5 minuti tra analisi e esecuzione.
     # Con MAX=15 si bloccava il 90% dei MARKET order — portato a 50.
     MAX_SLIPPAGE_PIPS = 50
-    if "LIMIT" not in state.order_type.upper() and "STOP" not in state.order_type.upper():
-        if state.current_price > 0 and state.entry > 0:
-            distance_usd  = abs(state.current_price - state.entry)
-            distance_pips = distance_usd * 10
-            if distance_pips > MAX_SLIPPAGE_PIPS:
+    is_market_order = "LIMIT" not in state.order_type.upper() and "STOP" not in state.order_type.upper()
+    if is_market_order:
+        # Fail-safe, non fail-open: se il prezzo non è disponibile o la sua
+        # scala non è verificabile (fallback spot, mentre `entry` viene da
+        # full_analyze che parte da yfinance/GC=F futures) il controllo non
+        # può dare un esito affidabile — meglio bloccare il MARKET order che
+        # eseguirlo senza nessuna verifica di slippage. Prima: con
+        # current_price=0 (fetch fallito) la condizione sotto era semplicemente
+        # falsa e si passava dritti a EXECUTE, saltando il controllo invece
+        # di fallire in modo prudente.
+        if state.current_price <= 0 or state.entry <= 0:
+            state.final_decision  = "SKIP"
+            state.decision_reason = "Prezzo live non disponibile — impossibile verificare lo slippage per un MARKET order"
+            state.decision_conf   = 90.0
+            state.add_log("🎯 DecisionMaker", f"⏭️ SKIP — {state.decision_reason}")
+            return AgentResult(success=True, data={"decision": "SKIP"})
+        if not state.current_price_is_futures:
+            state.final_decision  = "SKIP"
+            state.decision_reason = (
+                f"Prezzo live (${state.current_price}) da fonte fallback spot — "
+                f"scala non verificabile rispetto all'entry, slippage non controllabile"
+            )
+            state.decision_conf   = 90.0
+            state.add_log("🎯 DecisionMaker", f"⏭️ SKIP — {state.decision_reason}")
+            return AgentResult(success=True, data={"decision": "SKIP"})
+
+        distance_usd  = abs(state.current_price - state.entry)
+        distance_pips = distance_usd * 10
+        if distance_pips > MAX_SLIPPAGE_PIPS:
+            state.final_decision  = "SKIP"
+            state.decision_reason = (
+                f"Entry ${state.entry} troppo lontana dal prezzo attuale "
+                f"${state.current_price} ({distance_usd:.1f}$ = {distance_pips:.0f} pip)"
+            )
+            state.decision_conf = 95.0
+            state.add_log("🎯 DecisionMaker", f"⏭️ SKIP — {state.decision_reason}")
+            return AgentResult(success=True, data={"decision": "SKIP"})
+
+    else:
+        # Regola 5bis — un pending LIMIT/STOP è per natura lontano dal
+        # prezzo attuale (è il punto), ma non deve nascere già oltre la
+        # soglia che il monitor userebbe comunque per cancellarlo poco dopo
+        # (check_limit_invalidation, stessa soglia per-timeframe). Prima
+        # questo controllo esisteva SOLO nel monitor periodico, mai prima di
+        # aprire l'ordine: il bot poteva mandare un segnale e cancellarlo da
+        # solo pochi secondi dopo — visto in produzione il 2026-09-03 (BUY
+        # LIMIT H4 già a 3.7x la distanza entry-SL al momento dell'apertura).
+        if state.current_price > 0 and state.entry > 0 and state.sl > 0 and state.current_price_is_futures:
+            from trade_manager import _pending_adverse_distance, PENDING_MAX_ADVERSE_SL_MULTIPLE
+            pseudo_trade = {"signal": state.signal, "order_type": state.order_type, "entry": state.entry}
+            adverse = _pending_adverse_distance(pseudo_trade, state.current_price)
+            sl_distance = abs(state.entry - state.sl)
+            max_multiple = PENDING_MAX_ADVERSE_SL_MULTIPLE.get(state.timeframe, 2.0)
+            if sl_distance > 0 and adverse > max_multiple * sl_distance:
                 state.final_decision  = "SKIP"
                 state.decision_reason = (
-                    f"Entry ${state.entry} troppo lontana dal prezzo attuale "
-                    f"${state.current_price} ({distance_usd:.1f}$ = {distance_pips:.0f} pip)"
+                    f"Entry pending ${state.entry} già a {adverse:.1f}$ dal prezzo "
+                    f"attuale ${state.current_price} (> {max_multiple}x la distanza "
+                    f"entry-SL) — verrebbe cancellata subito dal monitor, non la apro"
                 )
-                state.decision_conf = 95.0
+                state.decision_conf = 90.0
                 state.add_log("🎯 DecisionMaker", f"⏭️ SKIP — {state.decision_reason}")
                 return AgentResult(success=True, data={"decision": "SKIP"})
 

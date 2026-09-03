@@ -775,7 +775,7 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
         else:
             pips = calculate_trade_pips(row["signal"], row["entry"], exit_price)
 
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE trades SET status='CLOSED', result=?, exit_price=?, pnl_r=?,
                               pips=?, closed_at=?, notes=?, counted_close=1,
@@ -798,6 +798,17 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
                 trade_id,
             ),
         )
+        # La SELECT sopra e questa UPDATE non sono un'unica transazione
+        # atomica (SQLite in modalità deferred apre la transazione solo al
+        # primo statement di scrittura) — un'altra scrittura concorrente
+        # (es. /api/reset della dashboard, altro processo) potrebbe aver
+        # tolto la riga nel frattempo. Senza questo controllo la funzione
+        # tornava sempre True e aggiornava comunque sessions sotto, anche se
+        # l'UPDATE non aveva toccato nessuna riga — un esito reale (SL/TP/BE
+        # appena accaduto) andava perso in silenzio. Bug reale trovato 2026-09-03.
+        if cursor.rowcount == 0:
+            logger.warning("close_trade: riga sparita tra SELECT e UPDATE per %s", trade_id)
+            return False
 
         if row["activated"] and result != "CANCELLED":
             today = now.strftime("%Y-%m-%d")
@@ -915,8 +926,14 @@ def _update_trade(trade_id: str, **fields) -> None:
         return
     assignments = ", ".join(f"{key}=?" for key in clean)
     with _write_lock, _connect() as conn:
+        # AND status='OPEN' come close_trade/activate_trade: senza questa
+        # guardia, un trade chiuso concorrentemente (es. /chiudi manuale)
+        # mentre il monitor è a metà di _monitor_single può ricevere comunque
+        # tp1_hit/tp2_hit/tp3_hit=1 DOPO essere già stato chiuso con un altro
+        # esito — un trade con result='LOSS' ma tp3_hit=1, statistiche
+        # incoerenti. Bug reale trovato il 2026-09-03.
         conn.execute(
-            f"UPDATE trades SET {assignments} WHERE trade_id=?",
+            f"UPDATE trades SET {assignments} WHERE trade_id=? AND status='OPEN'",
             (*clean.values(), trade_id),
         )
     _sync_active_snapshot()
@@ -1603,10 +1620,19 @@ def _apply_basis_rebase(trade: dict, delta: float, fresh_basis: float) -> None:
         fields["early_be_level"] = float(early) - delta
     assignments = ", ".join(f"{key}=?" for key in fields)
     with _write_lock, _connect() as conn:
-        conn.execute(
-            f"UPDATE trades SET {assignments} WHERE trade_id=?",
+        # AND status='OPEN': tra la lettura della lista trade aperti (sopra,
+        # in _rebase_open_trades) e questa UPDATE c'è una chiamata di rete a
+        # gold-api.com — un trade può chiudersi in quella finestra. Senza
+        # questa guardia il ribasamento riscriverebbe silenziosamente i
+        # livelli di un trade ormai CLOSED, con un basis diverso da quello
+        # già comunicato all'utente alla chiusura. Bug reale trovato 2026-09-03.
+        cursor = conn.execute(
+            f"UPDATE trades SET {assignments} WHERE trade_id=? AND status='OPEN'",
             (*fields.values(), trade_id),
         )
+        if cursor.rowcount == 0:
+            logger.info(f"Rebase basis {trade_id}: saltato, trade non più OPEN")
+            return
     _sync_active_snapshot()
     logger.info(
         f"Rebase basis {trade_id}: delta=${delta:+.2f} "
@@ -1793,6 +1819,7 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
         )
 
     tp3_reached = _target_reached(signal, favorable_price, tp3)
+    tp3_closed  = False
     if tp3_reached:
         if not trade.get("tp1_hit"):
             mark_tp1_hit(trade_id)
@@ -1801,20 +1828,27 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
             mark_tp2_hit(trade_id)
         if not trade.get("tp3_hit"):
             mark_tp3_hit(trade_id)
-        # NON aggiungere a messages — TP3 viene notificato dopo close_trade
-
-    # Manda TP1/TP2 (non chiudono il trade)
-    await _send_monitor_messages(bot, chat_id, messages, notified, trade_id)
-
-    # TP3 chiude il trade — chiudi DB prima, notifica dopo (stesso pattern SL/BE)
-    if tp3_reached:
-        closed = close_trade(
+        # Chiudi SUBITO, prima di qualunque await — tra i mark_tpX_hit sopra
+        # e questo close_trade non deve esserci nessun punto di sospensione:
+        # un /chiudi manuale concorrente potrebbe altrimenti chiudere il
+        # trade con un esito diverso (es. LOSS) mentre i flag tp*_hit sono
+        # già scritti, lasciando un risultato incoerente nelle statistiche
+        # (result=LOSS ma tp3_hit=1). Bug reale trovato il 2026-09-03 —
+        # stesso pattern già usato sopra per SL/BE, ora esteso a TP3.
+        tp3_closed = close_trade(
             trade_id,
             "WIN_TP3",
             tp3,
             "TP3 raggiunto dal monitor virtuale",
         )
-        if closed:
+        # NON aggiungere a messages — TP3 ha il suo messaggio dedicato sotto
+
+    # Da qui in poi è sicuro sospendere: il DB è già coerente.
+    # Manda TP1/TP2 (non chiudono il trade)
+    await _send_monitor_messages(bot, chat_id, messages, notified, trade_id)
+
+    if tp3_reached:
+        if tp3_closed:
             try:
                 await bot.send_message(
                     chat_id=chat_id,

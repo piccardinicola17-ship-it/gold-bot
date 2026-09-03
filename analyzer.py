@@ -1848,12 +1848,19 @@ def get_extended_news() -> list:
             r    = requests.get(url, params=params, timeout=10)
             data = r.json()
             if data.get("status") == "ok":
+                from news_analyst import _escape_md
                 for a in data.get("articles", []):
                     title  = a.get("title", "")
                     source = a.get("source", {}).get("name", "")
                     date   = a.get("publishedAt", "")[:10]
                     if title and source:
-                        all_articles.append(f"📰 *{source}* ({date})\n_{title}_")
+                        # Titolo/fonte sono testo esterno (NewsAPI): un
+                        # underscore/asterisco spaiato rompe il parsing
+                        # Markdown dell'intero messaggio /news — vanno
+                        # escapati come già fatto altrove per gli headline.
+                        all_articles.append(
+                            f"📰 *{_escape_md(source)}* ({date})\n_{_escape_md(title)}_"
+                        )
         seen, unique = set(), []
         for a in all_articles:
             if a not in seen:
@@ -2091,11 +2098,6 @@ def aggregate_strategies(strategies: dict, regime: dict, timeframe: str = "5min"
             "active": [],
             "filter_note": f"Regime {regime_name} bloccato dai dati reali",
         }
-
-    strategy_multipliers = learned.get("strategy_multipliers", {})
-    for name in w:
-        multiplier = float(strategy_multipliers.get(name, 1.0))
-        w[name] *= min(1.20, max(0.80, multiplier))
 
     regime_multiplier = float(
         learned.get("regime_multipliers", {}).get(regime_name, 1.0)
