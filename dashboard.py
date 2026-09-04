@@ -713,10 +713,6 @@ function tradeCard(trade) {
   const pipsClass = Number(trade.pips || 0) > 0
     ? "positive"
     : Number(trade.pips || 0) < 0 ? "negative" : "";
-  const beState = trade.be_hit
-    ? "hit"
-    : trade.be_armed && trade.status === "OPEN" ? "armed" : "waiting";
-  const slState = trade.result === "LOSS" ? "loss" : "waiting";
   const identifier = String(trade.trade_id || "—");
   const shortId = identifier.length > 12
     ? `${identifier.slice(0, 6)}…${identifier.slice(-4)}`
