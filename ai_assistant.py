@@ -61,11 +61,29 @@ def build_context_snapshot() -> str:
         from analyzer import get_upcoming_events
         cal = get_economic_events()
         if cal.get("high_impact_today"):
-            events_txt = "; ".join(
-                f"{ev['title']} alle {ev['time']} IT (prev: {ev['forecast']}, prec: {ev['previous']})"
-                for ev in cal.get("events", [])
-            )
-            parts.append(f"\nEventi OGGI ad alto impatto: {events_txt}")
+            # FIX: get_economic_events()["events"] contiene TUTTI gli eventi
+            # di oggi, anche quelli già usciti da ore — get_economic_events()
+            # calcola già separatamente "upcoming" (solo ev_it > now_it) ma
+            # prima non veniva usato qui. Il contesto passava alla lettera
+            # "Eventi OGGI ad alto impatto: NFP alle 14:30 IT..." anche
+            # quando erano le 16:00, e l'assistente ha risposto "tieni
+            # d'occhio l'NFP alle 14:30" un'ora e mezza dopo il rilascio.
+            # Bug reale osservato in produzione il 2026-09-04.
+            upcoming_today = cal.get("upcoming", [])
+            upcoming_keys = {(ev["title"], ev["time"]) for ev in upcoming_today}
+            gia_usciti = [ev for ev in cal.get("events", []) if (ev["title"], ev["time"]) not in upcoming_keys]
+            if gia_usciti:
+                testi = "; ".join(
+                    f"{ev['title']} (prev: {ev['forecast']}, prec: {ev['previous']}) — uscito alle {ev['time']} IT"
+                    for ev in gia_usciti
+                )
+                parts.append(f"\nEventi OGGI GIÀ USCITI (non aspettarli, sono già nel prezzo o in corso di digestione): {testi}")
+            if upcoming_today:
+                testi = "; ".join(
+                    f"{ev['title']} alle {ev['time']} IT (prev: {ev['forecast']}, prec: {ev['previous']})"
+                    for ev in upcoming_today
+                )
+                parts.append(f"\nEventi OGGI ANCORA DA USCIRE: {testi}")
         else:
             parts.append("\nNessun evento macro ad alto impatto oggi.")
 

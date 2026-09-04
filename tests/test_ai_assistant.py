@@ -75,6 +75,45 @@ class TestBuildContextSnapshotTradeState(unittest.TestCase):
         context = self._run(trade)
         self.assertIn("nessuno ancora", context)
 
+    def test_already_released_event_marked_as_such_not_upcoming(self):
+        """Il secondo bug reale della stessa sessione: get_economic_events()
+        ritornava sia gli eventi passati che futuri di oggi in "events",
+        senza distinguerli — l'NFP delle 14:30, alle 16:00, veniva ancora
+        presentato come "da tenere d'occhio". Ora deve comparire tra i
+        "GIÀ USCITI", non tra quelli "ANCORA DA USCIRE"."""
+        nfp_uscito = {
+            "title": "Non-Farm Employment Change", "time": "14:30",
+            "forecast": "55K", "previous": "-23K",
+        }
+        cal = {"high_impact_today": True, "events": [nfp_uscito], "upcoming": []}
+        with mock.patch("analyzer.full_analyze", side_effect=_fake_full_analyze), \
+             mock.patch("analyzer.get_news_sentiment", return_value={"label": "bearish", "score": -3}), \
+             mock.patch("analyzer.get_extended_news", return_value=[]), \
+             mock.patch("analyzer.get_economic_events", return_value=cal), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[]), \
+             mock.patch("trade_manager.load_active_trade", return_value={}):
+            context = aiasst.build_context_snapshot()
+        self.assertIn("GIÀ USCITI", context)
+        self.assertIn("Non-Farm Employment Change", context)
+        self.assertNotIn("ANCORA DA USCIRE", context)
+
+    def test_still_upcoming_event_marked_as_such(self):
+        pending_event = {
+            "title": "FOMC Statement", "time": "20:00",
+            "forecast": "N/A", "previous": "N/A",
+        }
+        cal = {"high_impact_today": True, "events": [pending_event], "upcoming": [pending_event]}
+        with mock.patch("analyzer.full_analyze", side_effect=_fake_full_analyze), \
+             mock.patch("analyzer.get_news_sentiment", return_value={"label": "bearish", "score": -3}), \
+             mock.patch("analyzer.get_extended_news", return_value=[]), \
+             mock.patch("analyzer.get_economic_events", return_value=cal), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[]), \
+             mock.patch("trade_manager.load_active_trade", return_value={}):
+            context = aiasst.build_context_snapshot()
+        self.assertIn("ANCORA DA USCIRE", context)
+        self.assertIn("FOMC Statement", context)
+        self.assertNotIn("GIÀ USCITI", context)
+
     def test_m5_signal_below_live_threshold_is_flagged(self):
         with mock.patch("analyzer.full_analyze", return_value={
             "price": 4411.82, "regime": "NORMAL", "signal": "SELL",
