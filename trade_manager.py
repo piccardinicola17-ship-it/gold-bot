@@ -54,6 +54,28 @@ RESULT_PNL = {
     "CANCELLED": 0.0,
 }
 
+def is_decisive_win(trade: dict) -> bool:
+    """Unico criterio di 'vittoria decisiva' per il win rate, usato ovunque
+    lo si calcoli (dashboard, /report, /stats, report giornaliero).
+
+    Un WIN_BE con TP1 già raggiunto (profitto parziale incassato prima del
+    rientro a breakeven) conta come vittoria; un BE "puro" (mai arrivato a
+    TP1) no — non è né una vittoria né una sconfitta, viene escluso dal
+    denominatore altrove.
+
+    FIX: questa stessa regola esisteva già duplicata in dashboard.py e
+    gold_bot.py:cmd_report (allineate una alla prima volta il 2026-09-XX),
+    ma cmd_stats e send_daily_report non erano mai stati aggiornati e
+    usavano ancora il criterio vecchio (WIN_BE sempre escluso) — stesso
+    stato del DB, win rate diverso a seconda del comando. Ora c'è una sola
+    definizione, importata ovunque, invece di quattro copie che possono
+    ridivergere.
+    """
+    return trade.get("result") != "LOSS" and (
+        bool(trade.get("tp1_hit")) or trade.get("result") in ("WIN_TP1", "WIN_TP2", "WIN_TP3")
+    )
+
+
 _write_lock = threading.RLock()
 _price_cache = {"price": 0.0, "ts": 0.0, "futures": False}
 

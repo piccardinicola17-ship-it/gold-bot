@@ -17,6 +17,8 @@ from pathlib import Path
 import pytz
 from flask import Flask, abort, g, jsonify, redirect, render_template_string, request
 
+from trade_manager import is_decisive_win
+
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
 TIMEZONE = pytz.timezone("Europe/Rome")
@@ -155,14 +157,7 @@ def compute_stats(trades: list[dict]) -> dict:
         if trade.get("status") == "CLOSED" and trade.get("result")
     ]
     losses = [trade for trade in closed if trade.get("result") == "LOSS"]
-    wins = [
-        trade for trade in closed
-        if trade.get("result") != "LOSS"
-        and (
-            bool(trade.get("tp1_hit"))
-            or trade.get("result") in ("WIN_TP1", "WIN_TP2", "WIN_TP3")
-        )
-    ]
+    wins = [trade for trade in closed if is_decisive_win(trade)]
     be_trades = [
         trade for trade in closed
         if bool(trade.get("be_hit")) or trade.get("result") == "WIN_BE"

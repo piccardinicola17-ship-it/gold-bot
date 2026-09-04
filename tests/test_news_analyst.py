@@ -55,6 +55,20 @@ class TestFindMacroDbInfo(unittest.TestCase):
         self.assertEqual(na._find_macro_db_info("Some Random Low-Impact Event"), {})
 
 
+class TestFormatNewsMessageHeadlineSanitization(unittest.TestCase):
+    """FIX: la sanificazione manuale delle headline in format_news_message
+    rimuoveva solo * _ ` ma non [ ] — a differenza di _escape_md (usata
+    altrove nello stesso file) che gestisce tutti e 5 i caratteri. Un
+    titolo con parentesi quadre poteva rompere il parsing Markdown di
+    Telegram. current_price=4400 (>100) per non innescare la chiamata di
+    rete a fxratesapi dentro format_news_message."""
+
+    def test_square_brackets_removed_from_headline(self):
+        result = na.format_news_message(["Fed [Update]: rates unchanged"], current_price=4400)
+        self.assertNotIn("[", result)
+        self.assertNotIn("]", result)
+
+
 class TestEmptyInputEarlyReturns(unittest.TestCase):
     def test_format_news_message_no_news(self):
         self.assertEqual(na.format_news_message([]), "Nessuna notizia disponibile al momento.")

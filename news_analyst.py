@@ -104,10 +104,15 @@ def format_news_message(news: list, current_price: float = 0) -> str:
         max_tokens=60,
     )
 
-    # Max 4 titoli, plain text, escape caratteri Markdown
+    # Max 4 titoli, plain text, escape caratteri Markdown.
+    # FIX: mancavano "[" "]" — _escape_md() (usata altrove in questo file,
+    # es. get_macro_briefing) li gestisce insieme a * _ `, ma questa
+    # sanificazione manuale ne copriva solo 3 su 5. Un titolo con parentesi
+    # quadre (es. "Fed [Update]") avrebbe potuto rompere il parsing
+    # Markdown di Telegram ("can't parse entities").
     headlines = []
     for n in news[:4]:
-        raw = str(n).replace("*","").replace("_"," ").replace("`","")
+        raw = str(n).replace("*","").replace("_"," ").replace("`","").replace("[","").replace("]","")
         first = raw.split("\n")[0].strip()[:90]
         headlines.append(f"• {first}")
 

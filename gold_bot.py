@@ -40,6 +40,7 @@ from trade_manager import (
     monitor_active_trade,
     get_current_price, get_current_price_async,
     is_authorized, build_setup_key, was_setup_seen, DuplicateSetupError,
+    is_decisive_win,
     _fmt,
     is_bot_paused, set_bot_paused,
     load_macro_alert_state, save_macro_alert_state,
@@ -59,6 +60,19 @@ NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "")
 TIMEZONE       = pytz.timezone("Europe/Rome")
 MIN_PROB       = 55
 # ─────────────────────────────────────────────
+
+
+def _live_min_prob_for_tf(interval: str) -> int:
+    """Stessa soglia usata dalla pipeline live (agent_orchestrator.py:259-263):
+    65% per M1/M5/M15, altrimenti 55% (o override via env MIN_PROB).
+    FIX: /backtest passava sempre MIN_PROB=55 fisso a run_backtest per
+    qualunque timeframe, mentre il testo mostrato a schermo dichiarava
+    "Soglia prob: M5/M15 >= 65% | H1/H4/D1 >= 55%" — il backtest valutava
+    quindi una popolazione di setup M5/M15 più ampia e di qualità inferiore
+    di quella che il bot live prende davvero (che richiede prob >= 65% lì)."""
+    if interval in ("5min", "1min", "15min"):
+        return 65
+    return int(os.environ.get("MIN_PROB", "55"))
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -578,14 +592,18 @@ async def cmd_macro(update, context: ContextTypes.DEFAULT_TYPE):
             event_data = next(
                 (e for e in events if event_name.lower() in e.get("title","").lower()), {}
             )
-            msg = await asyncio.to_thread(
+            # _escape_md: analyze_macro_event ritorna testo AI libero (a
+            # differenza di get_macro_briefing sopra, che internamente
+            # escapa già solo i titoli evento) — nessun escape qui prima,
+            # rischio "can't parse entities" sotto parse_mode="Markdown".
+            msg = _escape_md(await asyncio.to_thread(
                 analyze_macro_event,
                 event_data.get("title", event_name),
                 event_data.get("forecast", "N/A"),
                 event_data.get("previous", "N/A"),
                 actual,
                 price,
-            )
+            ))
         if len(msg) > 4000:
             msg = msg[:3950] + "\n_[Troncato]_"
         await update.message.reply_text(msg, parse_mode="Markdown")
@@ -597,9 +615,13 @@ async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update): return
     try:
         trades = _get_closed_trades()
-        decisivi = [t for t in trades if t.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3","LOSS")]
-        wins   = [t for t in decisivi if "WIN" in t["result"]]
-        losses = [t for t in decisivi if t["result"] == "LOSS"]
+        # FIX: usava un criterio diverso da /report e dalla dashboard
+        # (escludeva ogni WIN_BE dal win rate, anche quelli con TP1 già
+        # raggiunto) — stesso DB, numeri diversi a seconda del comando.
+        # Ora tutti e tre condividono is_decisive_win() da trade_manager.py.
+        wins     = [t for t in trades if is_decisive_win(t)]
+        losses   = [t for t in trades if t.get("result") == "LOSS"]
+        decisivi = wins + losses
         be_t   = [t for t in trades if t.get("result") == "WIN_BE"]
         total  = len(decisivi)
         wr     = round(len(wins) / total * 100, 1) if total > 0 else 0
@@ -688,15 +710,10 @@ async def cmd_report(update, context: ContextTypes.DEFAULT_TYPE):
     try:
         trades   = _get_closed_trades()
 
-        def _is_win(t):
-            # Stesso criterio della dashboard: un WIN_BE con TP1 già raggiunto
-            # conta come vittoria (profitto parziale incassato), non viene
-            # escluso come i BE "puri" (mai arrivati a TP1).
-            return t.get("result") != "LOSS" and (
-                bool(t.get("tp1_hit")) or t.get("result") in ("WIN_TP1", "WIN_TP2", "WIN_TP3")
-            )
-
-        wins_l   = [t for t in trades if _is_win(t)]
+        # Stesso criterio della dashboard/is_decisive_win() (trade_manager.py):
+        # un WIN_BE con TP1 già raggiunto conta come vittoria (profitto
+        # parziale incassato), non viene escluso come i BE "puri".
+        wins_l   = [t for t in trades if is_decisive_win(t)]
         losses_l = [t for t in trades if t.get("result") == "LOSS"]
         decisivi = wins_l + losses_l
         if not decisivi:
@@ -940,7 +957,7 @@ async def cmd_backtest(update, context: ContextTypes.DEFAULT_TYPE):
             barre = min(barre, _BAR_CAP.get(tf, 4500))
             try:
                 stats = await asyncio.to_thread(
-                    run_backtest, interval=tf, bars=barre, min_prob=MIN_PROB
+                    run_backtest, interval=tf, bars=barre, min_prob=_live_min_prob_for_tf(tf)
                 )
                 if stats.get("total", 0) == 0:
                     # Niente trade non è per forza "0 segnali validi": può essere
@@ -1007,7 +1024,7 @@ async def cmd_backtest(update, context: ContextTypes.DEFAULT_TYPE):
     )
     try:
         stats = await asyncio.to_thread(
-            run_backtest, interval=interval, bars=bars, min_prob=MIN_PROB
+            run_backtest, interval=interval, bars=bars, min_prob=_live_min_prob_for_tf(interval)
         )
         msg = format_backtest_report(stats, interval)
         await update.message.reply_text(msg[:4000])
@@ -1391,7 +1408,6 @@ async def check_macro_alerts(bot):
 
             # PRE-EVENTO (30 min prima)
             if 25 <= mins_away <= 35 and ev_key not in _sent_event_alerts:
-                _sent_event_alerts.add(ev_key)
                 price = await get_current_price_async()
                 analysis = await asyncio.to_thread(
                     analyze_macro_event,
@@ -1408,13 +1424,21 @@ async def check_macro_alerts(bot):
                         motivo = line.split(":", 1)[1].strip()
                 bias_line = f"📈 XAU/USD bias: *{bias}*"
                 if motivo:
-                    bias_line += f"\n_{motivo}_"
+                    bias_line += f"\n_{_escape_md(motivo)}_"
                 _pre_event_bias[ev_key] = {"bias": bias, "price": price}
 
+                # FIX: ev['title'] (dal calendario esterno) non era mai
+                # escapato qui, a differenza di send_morning_report e
+                # get_macro_briefing che lo fanno già per lo stesso campo —
+                # un titolo con caratteri Markdown speciali poteva far
+                # fallire il send. E il dedup veniva marcato PRIMA del send:
+                # un fallimento (es. proprio per questo) perdeva l'alert
+                # (incluso il blackout trading) per sempre, senza retry al
+                # giro successivo. Ora si marca solo dopo un send riuscito.
                 msg = (
                     f"⚠️ *ALERT MACRO — TRA 30 MINUTI*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📅 *{ev['title']}*\n"
+                    f"📅 *{_escape_md(ev['title'])}*\n"
                     f"🕐 Orario: *{ev['time']} IT*\n"
                     f"📊 Prev: `{ev.get('forecast','N/A')}` | Prec: `{ev.get('previous','N/A')}`\n"
                     f"💰 XAU/USD: *${_fmt(price)}*\n"
@@ -1425,11 +1449,11 @@ async def check_macro_alerts(bot):
                 )
                 if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+                _sent_event_alerts.add(ev_key)
 
             # POST-EVENTO (10 min dopo)
             post_key = f"POST_{ev_key}"
             if -15 <= mins_away <= -8 and post_key not in _sent_post_event_alerts:
-                _sent_post_event_alerts.add(post_key)
                 price = await get_current_price_async()
                 try:
                     news = await asyncio.to_thread(get_extended_news)
@@ -1442,7 +1466,12 @@ async def check_macro_alerts(bot):
                 # di prezzo reale — confronto aritmetico sui prezzi, non una
                 # seconda opinione dell'AI (che tra l'altro non avrebbe
                 # comunque l'actual numerico reale a disposizione qui).
-                pre = _pre_event_bias.pop(ev_key, None)
+                # .get() e non .pop(): con il dedup ora marcato solo dopo un
+                # send riuscito (vedi sopra), un fallimento fa ritentare
+                # questo blocco al giro successivo — un .pop() qui l'avrebbe
+                # già consumato al primo tentativo fallito, perdendo il bias
+                # pre-evento anche se poi disponibile per il retry.
+                pre = _pre_event_bias.get(ev_key)
                 CONFIRM_THRESHOLD_USD = 2.0
                 if pre:
                     change = price - pre["price"]
@@ -1464,8 +1493,12 @@ async def check_macro_alerts(bot):
                 else:
                     resoconto = "_Bias pre-evento non disponibile (bot riavviato nel frattempo)._"
 
+                # Stesso fix del blocco pre-evento: titolo escapato, dedup
+                # marcato solo dopo il send principale riuscito (i due send
+                # successivi — previsione statistica e news — sono già
+                # protetti da try/except propri e non condizionano post_key).
                 msg_post = (
-                    f"📊 *POST-EVENTO — {ev['title']}*\n"
+                    f"📊 *POST-EVENTO — {_escape_md(ev['title'])}*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"💰 XAU/USD: *${_fmt(price)}*\n"
                     f"🚦 *Blackout terminato — trading riaperto*\n"
@@ -1474,6 +1507,8 @@ async def check_macro_alerts(bot):
                 )
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
+                _sent_post_event_alerts.add(post_key)
+                _pre_event_bias.pop(ev_key, None)
 
                 # Fase 5 progetto dati storici: previsione statistica reale,
                 # solo per le serie validate in Fase 4 (oggi: Core CPI m/m).
@@ -1573,14 +1608,21 @@ async def send_daily_report(bot: Bot):
         all_t  = _get_closed_trades()
         today_t = _get_trades_today()
 
-        decisivi_today = [t for t in today_t if t.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3","LOSS")]
-        wins_t  = sum(1 for t in decisivi_today if "WIN" in t.get("result",""))
-        loss_t  = sum(1 for t in decisivi_today if t.get("result") == "LOSS")
+        # Stesso criterio di /report e della dashboard (is_decisive_win in
+        # trade_manager.py) — prima escludeva ogni WIN_BE, anche quelli con
+        # TP1 già raggiunto, e divergeva dagli altri due.
+        wins_today_l   = [t for t in today_t if is_decisive_win(t)]
+        losses_today_l = [t for t in today_t if t.get("result") == "LOSS"]
+        decisivi_today = wins_today_l + losses_today_l
+        wins_t  = len(wins_today_l)
+        loss_t  = len(losses_today_l)
         pnl_t   = sum(t.get("pnl_r") or 0 for t in today_t if t.get("status") == "CLOSED")
         wr_t    = round(wins_t / len(decisivi_today) * 100, 1) if decisivi_today else 0
 
-        decisivi_all = [t for t in all_t if t.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3","LOSS")]
-        wins_all = sum(1 for t in decisivi_all if "WIN" in t.get("result",""))
+        wins_all_l   = [t for t in all_t if is_decisive_win(t)]
+        losses_all_l = [t for t in all_t if t.get("result") == "LOSS"]
+        decisivi_all = wins_all_l + losses_all_l
+        wins_all = len(wins_all_l)
         wr_all   = round(wins_all / len(decisivi_all) * 100, 1) if decisivi_all else 0
         pnl_all  = sum(t.get("pnl_r") or 0 for t in all_t if t.get("status") == "CLOSED")
 
@@ -1826,9 +1868,16 @@ async def _check_single_timeframe(bot: Bot, tf: str):
             logger.error(f"[{tf_label_str}] Segnale inviato ma open_trade fallito: {e}")
             # Notifica l'errore in chat
             try:
+                # FIX: {e} (testo di eccezione, può contenere setup_key con
+                # underscore/altri caratteri Markdown) andava in un messaggio
+                # parse_mode="Markdown" senza escape — proprio questa
+                # notifica (segnale annunciato ma trade mai aperto nel DB,
+                # il caso "segnale fantasma" della sessione del 3 settembre)
+                # poteva fallire silenziosamente nell'except sotto, lasciando
+                # l'operatore senza alcun avviso del disallineamento.
                 await bot.send_message(
                     chat_id=CHAT_ID,
-                    text=f"⚠️ Segnale {tf_label_str} inviato ma errore apertura trade nel DB: {e}",
+                    text=f"⚠️ Segnale {tf_label_str} inviato ma errore apertura trade nel DB: {_escape_md(str(e))}",
                     parse_mode="Markdown"
                 )
             except Exception:
