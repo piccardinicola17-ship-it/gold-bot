@@ -25,12 +25,21 @@ def build_context_snapshot() -> str:
     now   = datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M")
     parts = [f"Data e ora attuali: {now} (Europe/Rome)."]
 
+    current_price = None
     try:
         data = full_analyze(timeframe_focus="5min")
-        parts.append(f"\nPrezzo XAU/USD attuale: ${data.get('price')}")
+        current_price = data.get("price")
+        parts.append(f"\nPrezzo XAU/USD attuale: ${current_price}")
         parts.append(f"Regime di mercato M5: {data.get('regime')}")
         if data.get("signal") != "NEUTRAL":
-            parts.append(f"Segnale M5 attivo: {data['signal']} {data.get('order_type')} @ {data.get('entry')} — prob {data.get('prob')}%")
+            # M5 richiede prob >= 65% per essere eseguito dal vivo
+            # (agent_orchestrator.py MIN_PROB) — sotto quella soglia questo
+            # segnale non diventerà mai un trade reale, solo informativo.
+            # Senza dirlo esplicitamente l'AI lo presenta come un segnale
+            # "attivo" a tutti gli effetti, fuorviante per chi legge.
+            prob = data.get("prob", 0)
+            sotto_soglia = " (sotto la soglia 65% richiesta dal vivo su M5: NON diventerà un trade)" if prob < 65 else ""
+            parts.append(f"Segnale M5 (informativo, non ancora un trade): {data['signal']} {data.get('order_type')} @ {data.get('entry')} — prob {prob}%{sotto_soglia}")
         else:
             parts.append(f"Nessun segnale M5. BUY: {data.get('buy_count',0)}, SELL: {data.get('sell_count',0)}.")
         mtf = data.get("mtf_trends", {})
@@ -75,9 +84,35 @@ def build_context_snapshot() -> str:
     try:
         trade = load_active_trade()
         if trade:
+            # FIX: il contesto prima non diceva se il trade fosse già
+            # attivato (entry_filled) o ancora un ordine pending mai
+            # scattato, né quali target fossero stati davvero raggiunti
+            # (tp1_hit/tp2_hit/tp3_hit). Senza questa informazione l'AI
+            # indovinava lo stato confrontando il prezzo attuale con i
+            # livelli TP — e ha inventato "ha già superato TP1 ed è vicino
+            # a TP2" per un ordine SELL LIMIT MAI ATTIVATO (entry_filled=0),
+            # semplicemente perché il prezzo corrente era già sotto quei
+            # livelli. Bug reale osservato in produzione il 2026-09-04.
+            stato = "ATTIVO (posizione aperta)" if trade.get("activated") else "IN ATTESA (ordine pending, entry non ancora raggiunta — nessun target può essere stato toccato)"
+            progresso = ""
+            if trade.get("activated"):
+                hit = [
+                    label for label, flag in (
+                        ("TP1", trade.get("tp1_hit")),
+                        ("TP2", trade.get("tp2_hit")),
+                        ("TP3", trade.get("tp3_hit")),
+                    ) if flag
+                ]
+                progresso = f" — target già raggiunti: {', '.join(hit) if hit else 'nessuno ancora'}"
+            distanza = ""
+            if not trade.get("activated") and current_price:
+                try:
+                    distanza = f" — distanza prezzo attuale da entry: {float(current_price) - float(trade.get('entry', 0)):+.2f}$"
+                except (TypeError, ValueError):
+                    pass
             parts.append(
-                f"\nTrade attivo: {trade.get('signal')} {trade.get('order_type')} "
-                f"@ {trade.get('entry')} [{trade.get('timeframe','').upper()}] — "
+                f"\nTrade: {trade.get('signal')} {trade.get('order_type')} "
+                f"@ {trade.get('entry')} [{trade.get('timeframe','').upper()}] — Stato: {stato}{progresso}{distanza}\n"
                 f"SL {trade.get('sl')}, TP1 {trade.get('tp1')}, TP2 {trade.get('tp2')}, TP3 {trade.get('tp3')}"
             )
         else:
@@ -89,15 +124,14 @@ def build_context_snapshot() -> str:
 
 
 SYSTEM_PROMPT = """Sei l'assistente AI integrato in un bot di trading Telegram specializzato su XAU/USD (Oro).
-Rispondi in italiano, in modo diretto, colloquiale e competente, come un trader esperto.
+Rispondi in italiano, in modo diretto, secco e competente, come un trader esperto che non ha tempo da perdere.
 
 REGOLE:
-- Usa SEMPRE i dati di contesto forniti (prezzo, regime, strategie, notizie, calendario, trade attivo).
-- Se ti chiedono dei prossimi eventi macro, usa i dati nel contesto.
-- Spiega sempre l'impatto atteso di ogni evento su XAU/USD.
-- Sii sintetico: 6-8 righe per risposta.
-- Non inventare dati — se mancano davvero, dillo.
-- Non dare consigli assoluti: presenta dati e lascia la decisione all'utente."""
+- Massimo 4-5 righe. Vai dritto alla risposta, senza premesse o ricapitolazioni del contesto che l'utente ha già sotto gli occhi.
+- Una domanda diretta ("fino a dove può arrivare", "conviene entrare") merita una risposta diretta — un numero, un livello, una direzione. Non elencare scenari ipotetici multipli ("se i dati escono deboli... se escono forti...") a meno che l'utente chieda esplicitamente "cosa succede se X". Prendi posizione sui dati che hai adesso.
+- Usa SEMPRE i dati di contesto forniti (prezzo, regime, strategie, notizie, calendario, trade). Non inventare mai un dato assente dal contesto — se manca, dillo in una frase, non aggirarlo con un'ipotesi.
+- Sul trade in corso: guarda il campo "Stato". Se dice "IN ATTESA", l'ordine non è mai scattato e NESSUN target può essere stato raggiunto — non dire mai che un TP è stato toccato o è vicino a meno che compaia esplicitamente tra i "target già raggiunti".
+- Niente consigli assoluti (compra/vendi ora): presenta il dato e lascia la decisione all'utente, senza girarci troppo intorno."""
 
 
 async def ask_ai(question: str) -> str:
@@ -121,7 +155,11 @@ async def ask_ai(question: str) -> str:
                     {"role": "user",   "content": f"CONTESTO:\n{context}\n\nDOMANDA:\n{question}"}
                 ],
                 "temperature": 0.4,
-                "max_tokens":  500,
+                # Ridotto da 500: la regola "massimo 4-5 righe" nel prompt
+                # non bastava da sola a tenere le risposte brevi — un limite
+                # più stretto fa da argine anche quando il modello non la
+                # rispetta.
+                "max_tokens":  250,
             },
             timeout=20,
         )
