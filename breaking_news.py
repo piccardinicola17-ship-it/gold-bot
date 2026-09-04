@@ -199,6 +199,16 @@ def check_breaking_news(seen_ids: set) -> tuple[list[dict], set]:
 
             text = f"{item.get('title','')} {item.get('summary','')}"
             classification = classify_fn(text)
+            # FIX (audit 2026-09-04): classify_fiscal_text() era definito,
+            # pesato e persino letto da format_breaking_alert() (c["shock_detected"])
+            # ma non veniva mai chiamato qui — nessun alert su debt ceiling/
+            # shutdown/downgrade/deficit poteva mai scattare, nonostante siano
+            # esattamente il tipo di notizia non programmata che questo modulo
+            # dovrebbe coprire (vedi docstring del file).
+            fiscal = classify_fiscal_text(text)
+            if fiscal["shock_detected"]:
+                classification["shock_detected"] = True
+                classification["matched"] = classification.get("matched", []) + fiscal["matched"]
             geo = classify_geopolitical_text(text)
 
             alerts.append({
