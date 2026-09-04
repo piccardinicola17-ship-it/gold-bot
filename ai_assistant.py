@@ -8,7 +8,7 @@ import re
 import logging
 import requests
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 logger   = logging.getLogger(__name__)
@@ -32,6 +32,37 @@ _STATED_POSITION_RE = re.compile(
     r".{0,25}?(\d{3,5}(?:[.,]\d+)?)",
     re.IGNORECASE,
 )
+
+
+# Memoria conversazionale leggera, in RAM: ogni ask_ai() prima era
+# completamente stateless, senza alcun ricordo dello scambio precedente.
+# FIX: trovato in produzione il 2026-09-04 — l'utente ha descritto la sua
+# posizione (BUY 4394) in un messaggio, poi in quello successivo ha
+# chiesto "il mio TP a 4460 verrà raggiunto?" senza ripetere i dettagli,
+# assumendo (ragionevolmente, è una conversazione) che il bot se li
+# ricordasse. Senza storico l'LLM non aveva idea di cosa "il mio TP"
+# volesse dire ed è andato in confusione, rispondendo sul trade SBAGLIATO
+# (il SELL LIMIT del bot). Il bot ha un solo chat_id autorizzato (vedi
+# is_authorized), quindi uno storico globale in memoria è sufficiente,
+# non serve tenerlo per utente. TTL breve e pochi turni: un contesto di
+# mercato vecchio di ore è fuorviante, non va portato avanti a lungo.
+_CONVERSATION_TTL_MINUTES = 30
+_CONVERSATION_MAX_TURNS   = 6
+_conversation_history: list[dict] = []
+
+
+def _record_conversation_turn(question: str, answer: str) -> None:
+    _conversation_history.append({
+        "question": question, "answer": answer, "ts": datetime.now(TIMEZONE),
+    })
+    del _conversation_history[:-_CONVERSATION_MAX_TURNS]
+
+
+def _recent_conversation_turns() -> list[dict]:
+    cutoff = datetime.now(TIMEZONE) - timedelta(minutes=_CONVERSATION_TTL_MINUTES)
+    fresh = [t for t in _conversation_history if t["ts"] >= cutoff]
+    _conversation_history[:] = fresh
+    return fresh
 
 
 def _stated_position_note(question: str) -> str:
@@ -198,16 +229,30 @@ async def ask_ai(question: str) -> str:
 
     question_note = _stated_position_note(question)
 
+    # Turni recenti come veri messaggi user/assistant alternati — più
+    # naturale per un modello di chat che infilare tutto come testo in un
+    # unico messaggio, e il modello segue meglio il filo del discorso.
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for turn in _recent_conversation_turns():
+        messages.append({"role": "user", "content": turn["question"]})
+        messages.append({"role": "assistant", "content": turn["answer"]})
+    messages.append({
+        "role": "user",
+        "content": (
+            f"CONTESTO AGGIORNATO — usa SEMPRE questi dati (prezzo, livelli, "
+            f"stato del trade), non quelli citati nei tuoi messaggi precedenti "
+            f"qui sopra: potrebbero essere cambiati nel frattempo.\n{context}\n\n"
+            f"DOMANDA:\n{question}{question_note}"
+        ),
+    })
+
     def _request():
         response = requests.post(
             GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
             json={
                 "model": GROQ_MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": f"CONTESTO:\n{context}\n\nDOMANDA:\n{question}{question_note}"}
-                ],
+                "messages": messages,
                 "temperature": 0.4,
                 # Ridotto da 500: la regola "massimo 4-5 righe" nel prompt
                 # non bastava da sola a tenere le risposte brevi — un limite
@@ -223,6 +268,7 @@ async def ask_ai(question: str) -> str:
     try:
         data   = await asyncio.to_thread(_request)
         answer = data["choices"][0]["message"]["content"].strip()
+        _record_conversation_turn(question, answer)
         return answer
     except Exception as e:
         logger.error(f"Errore Groq: {e}")

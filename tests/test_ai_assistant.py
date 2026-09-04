@@ -15,6 +15,7 @@ costruito, non le vere chiamate di rete/LLM.
 import os
 import sys
 import unittest
+from datetime import timedelta
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -165,6 +166,91 @@ class TestStatedPositionNote(unittest.TestCase):
     def test_note_tells_model_to_ignore_bot_trade_field(self):
         note = aiasst._stated_position_note("Ho un buy da 4394, dove metto i TP?")
         self.assertIn("ignora del tutto il campo 'Trade'", note)
+
+
+class TestConversationMemory(unittest.TestCase):
+    """Quarto bug della stessa sessione, e il più fondativo: ask_ai() era
+    completamente stateless. L'utente ha descritto la sua posizione (BUY
+    4394) in un messaggio, poi in quello successivo ha chiesto "il mio TP
+    a 4460 verrà raggiunto?" senza ripetere i dettagli — assumendo
+    ragionevolmente che il bot ricordasse. Senza storico l'LLM ha risposto
+    sul trade sbagliato (il SELL LIMIT del bot) e ha persino detto di non
+    avere il prezzo attuale, pur essendo sempre nel CONTESTO. Verificato
+    dal vivo con Groq: con lo storico, la stessa domanda di follow-up
+    ottiene una risposta coerente sulla posizione giusta."""
+
+    def setUp(self):
+        aiasst._conversation_history.clear()
+
+    def tearDown(self):
+        aiasst._conversation_history.clear()
+
+    def test_turn_recorded_and_retrievable(self):
+        aiasst._record_conversation_turn("domanda 1", "risposta 1")
+        turns = aiasst._recent_conversation_turns()
+        self.assertEqual(len(turns), 1)
+        self.assertEqual(turns[0]["question"], "domanda 1")
+        self.assertEqual(turns[0]["answer"], "risposta 1")
+
+    def test_trims_to_max_turns(self):
+        for i in range(aiasst._CONVERSATION_MAX_TURNS + 3):
+            aiasst._record_conversation_turn(f"q{i}", f"a{i}")
+        self.assertLessEqual(len(aiasst._conversation_history), aiasst._CONVERSATION_MAX_TURNS)
+        # deve tenere le più recenti, non le più vecchie
+        self.assertEqual(aiasst._conversation_history[-1]["question"], f"q{aiasst._CONVERSATION_MAX_TURNS + 2}")
+
+    def test_stale_turns_pruned_by_ttl(self):
+        aiasst._record_conversation_turn("vecchia", "risposta vecchia")
+        aiasst._conversation_history[0]["ts"] -= timedelta(minutes=aiasst._CONVERSATION_TTL_MINUTES + 5)
+        aiasst._record_conversation_turn("nuova", "risposta nuova")
+
+        turns = aiasst._recent_conversation_turns()
+        questions = [t["question"] for t in turns]
+        self.assertNotIn("vecchia", questions)
+        self.assertIn("nuova", questions)
+
+    def test_ask_ai_includes_history_as_alternating_messages(self):
+        aiasst._record_conversation_turn("domanda precedente", "risposta precedente")
+        captured = {}
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["messages"] = json["messages"]
+            resp = mock.Mock()
+            resp.raise_for_status = lambda: None
+            resp.json = lambda: {"choices": [{"message": {"content": "nuova risposta"}}]}
+            return resp
+
+        with mock.patch.object(aiasst, "GROQ_API_KEY", "fake-key"), \
+             mock.patch.object(aiasst, "requests") as mock_requests, \
+             mock.patch.object(aiasst, "build_context_snapshot", return_value="(contesto finto)"):
+            mock_requests.post = fake_post
+            import asyncio
+            asyncio.run(aiasst.ask_ai("nuova domanda"))
+
+        messages = captured["messages"]
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1], {"role": "user", "content": "domanda precedente"})
+        self.assertEqual(messages[2], {"role": "assistant", "content": "risposta precedente"})
+        self.assertEqual(messages[3]["role"], "user")
+        self.assertIn("nuova domanda", messages[3]["content"])
+
+    def test_ask_ai_records_the_new_turn_after_success(self):
+        def fake_post(url, headers=None, json=None, timeout=None):
+            resp = mock.Mock()
+            resp.raise_for_status = lambda: None
+            resp.json = lambda: {"choices": [{"message": {"content": "risposta generata"}}]}
+            return resp
+
+        with mock.patch.object(aiasst, "GROQ_API_KEY", "fake-key"), \
+             mock.patch.object(aiasst, "requests") as mock_requests, \
+             mock.patch.object(aiasst, "build_context_snapshot", return_value="(contesto finto)"):
+            mock_requests.post = fake_post
+            import asyncio
+            asyncio.run(aiasst.ask_ai("una domanda"))
+
+        self.assertEqual(len(aiasst._conversation_history), 1)
+        self.assertEqual(aiasst._conversation_history[0]["question"], "una domanda")
+        self.assertEqual(aiasst._conversation_history[0]["answer"], "risposta generata")
 
 
 if __name__ == "__main__":
