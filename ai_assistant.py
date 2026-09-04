@@ -109,6 +109,11 @@ def build_context_snapshot() -> str:
         if mtf:
             parts.append(f"Trend MTF: {', '.join(f'{tf}:{t}' for tf,t in mtf.items())}")
     except Exception as e:
+        # FIX: nessuno di questi except loggava — un fallimento era visibile
+        # solo indirettamente, nella risposta dell'assistente ("dati non
+        # disponibili"), mai nei log di Railway. Trovato mentre si
+        # indagava proprio un caso così, il 2026-09-04.
+        logger.warning(f"Analisi mercato non disponibile per l'assistente AI: {e}")
         parts.append(f"(Analisi mercato non disponibile: {e})")
 
     # LIVELLI TECNICI REALI multi-timeframe (supporto/resistenza calcolati
@@ -127,7 +132,19 @@ def build_context_snapshot() -> str:
         from analyzer import get_data, compute_indicators, get_support_resistance
         livelli_tf = []
         for tf in ("1h", "4h"):
-            tf_df = get_data(interval=tf, outputsize=200, bypass_cache=True)
+            # FIX: bypass_cache=True qui era sbagliato — oltre a essere
+            # inutile (per supporto/resistenza non serve il tick più
+            # fresco, la cache 1h/4h dura 1-2 ore, vedi CACHE_TTL, ed è
+            # già tenuta calda dal ciclo live che controlla questi stessi
+            # timeframe ogni 5 minuti) SALTAVA anche la protezione
+            # anti-rate-limit di get_data() (il controllo backoff è
+            # dentro "if not bypass_cache"). Osservato in produzione il
+            # 2026-09-04: durante un rate-limit transitorio della fonte
+            # dati, questa chiamata martellava comunque la fonte invece
+            # di rispettare il backoff, fallendo e facendo rispondere
+            # l'assistente "dati non disponibili" invece di riusare la
+            # cache già calda della pipeline live.
+            tf_df = get_data(interval=tf, outputsize=200)
             tf_df = compute_indicators(tf_df.copy())
             sr = get_support_resistance(tf_df)
             livelli_tf.append(
@@ -135,13 +152,14 @@ def build_context_snapshot() -> str:
                 f"resistenza {sr.get('r_near')} / {sr.get('resistance')} (pivot {sr.get('pivot')})"
             )
         parts.append(
-            "\nLIVELLI TECNICI REALI (supporto/resistenza calcolati ORA, multi-timeframe — "
+            "\nLIVELLI TECNICI REALI (supporto/resistenza multi-timeframe — "
             "usa SEMPRE e SOLO questi per rispondere a domande su dove potrebbe arrivare il "
             "prezzo o dove piazzare i TP di una posizione dell'utente. MAI i TP1/TP2/TP3 del "
             "campo 'Trade aperto dal BOT' più sotto: appartengono a un trade diverso, possono "
             "avere direzione opposta):\n" + "\n".join(livelli_tf)
         )
     except Exception as e:
+        logger.warning(f"Livelli tecnici non disponibili per l'assistente AI: {e}")
         parts.append(f"(Livelli tecnici non disponibili: {e})")
 
     try:
@@ -151,6 +169,7 @@ def build_context_snapshot() -> str:
         if news:
             parts.append(f"Ultime notizie:\n" + "\n".join(n.replace("*","").replace("_","") for n in news[:5]))
     except Exception as e:
+        logger.warning(f"Notizie non disponibili per l'assistente AI: {e}")
         parts.append(f"(Notizie non disponibili: {e})")
 
     try:
@@ -193,6 +212,7 @@ def build_context_snapshot() -> str:
             )
             parts.append(f"\nProssimi eventi macro settimana: {future_txt}")
     except Exception as e:
+        logger.warning(f"Calendario non disponibile per l'assistente AI: {e}")
         parts.append(f"(Calendario non disponibile: {e})")
 
     try:
@@ -236,6 +256,7 @@ def build_context_snapshot() -> str:
         else:
             parts.append("\nNessun trade attivo al momento.")
     except Exception as e:
+        logger.warning(f"Stato trade non disponibile per l'assistente AI: {e}")
         parts.append(f"(Stato trade non disponibile: {e})")
 
     return "\n".join(parts)
