@@ -180,7 +180,20 @@ def run_all(db_path: str = HIST_DB_PATH) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def summarize(results: pd.DataFrame) -> None:
+def _total_n_for_series(group: pd.DataFrame) -> int:
+    """Campione totale disponibile per una serie, sul suo orizzonte
+    migliore. n_train+n_test è costante DENTRO uno stesso orizzonte
+    (dipende solo da quante righe hanno dati validi per quell'orizzonte,
+    non dal punto di split train/test) — prendere .max() indipendente
+    sulle due colonne (bug corretto qui) le mescola tra orizzonte/split
+    diversi e sovrastima il campione reale."""
+    n_by_horizon = group.groupby("horizon").apply(
+        lambda g: int(g["n_train"].iloc[0] + g["n_test"].iloc[0])
+    )
+    return int(n_by_horizon.max())
+
+
+def summarize(results: pd.DataFrame, all_series: list[str] | None = None) -> None:
     if results.empty:
         print("Nessun risultato (dati insufficienti ovunque).")
         return
@@ -214,8 +227,10 @@ def summarize(results: pd.DataFrame) -> None:
     # Federal Funds Rate (n totale 61) è troppo piccolo per un giudizio, a
     # differenza di NFP/CPI (111-220) dove un "nessun edge" pulito è un
     # risultato vero, non un limite di campionamento.
+    series_with_results = set()
     for event_name, group in results.groupby("event_name"):
-        total_n = int(group["n_train"].max() + group["n_test"].max())
+        series_with_results.add(event_name)
+        total_n = _total_n_for_series(group)
         n_horizons_ok = (
             group.groupby("horizon")["beats_naive"].agg(lambda s: s.all()).sum()
         )
@@ -226,6 +241,17 @@ def summarize(results: pd.DataFrame) -> None:
         else:
             verdict = f"NESSUN EDGE — risultato pulito e affidabile (n={total_n})"
         print(f"  {event_name:32s} {verdict}")
+
+    # FIX: una serie che non supera MAI la soglia minima per split
+    # (n_train>=20/n_test>=10, vedi _evaluate_split) non compare in
+    # `results` e prima spariva silenziosamente dal report — indistin-
+    # guibile da "mai considerata". Ora, se il chiamante passa
+    # all_series (l'universo completo da event_features), le serie
+    # mancanti vengono elencate esplicitamente.
+    if all_series is not None:
+        missing = sorted(set(all_series) - series_with_results)
+        for event_name in missing:
+            print(f"  {event_name:32s} DATI INSUFFICIENTI (nessuno split valido, n troppo piccolo per ogni orizzonte)")
 
 
 DEPLOY_HORIZON = "reaction_30m"
@@ -284,7 +310,26 @@ def regenerate_deployed_models(db_path: str = HIST_DB_PATH) -> None:
     import json
     from pathlib import Path
 
-    models = {name: fit_final_model(name, db_path=db_path) for name in DEPLOYED_EVENTS}
+    # FIX: prima fittava sempre a DEPLOY_HORIZON alla cieca, senza
+    # verificare che fosse davvero l'orizzonte che ha superato la
+    # validazione (beats_naive su TUTTI gli split cronologici, vedi
+    # summarize()) per quella specifica serie — se una futura serie
+    # aggiunta a DEPLOYED_EVENTS validasse solo a un altro orizzonte (es.
+    # reaction_5m), qui si sarebbe comunque deployato un reaction_30m mai
+    # validato, senza alcun avviso. Ora fallisce rumorosamente invece.
+    results = run_all(db_path=db_path)
+    models = {}
+    for name in DEPLOYED_EVENTS:
+        subset = results[(results["event_name"] == name) & (results["horizon"] == DEPLOY_HORIZON)]
+        if subset.empty or not subset["beats_naive"].all():
+            raise ValueError(
+                f"{name} @ {DEPLOY_HORIZON}: non risulta validato su tutti gli split "
+                f"cronologici testati (vedi summarize()) — non lo deploy alla cieca. "
+                f"Se questa serie valida solo a un altro orizzonte, la costante globale "
+                f"DEPLOY_HORIZON non basta più: va gestito per-serie."
+            )
+        models[name] = fit_final_model(name, horizon=DEPLOY_HORIZON, db_path=db_path)
+
     out_path = Path(__file__).resolve().parent / "macro_models.json"
     out_path.write_text(json.dumps(models, indent=2))
     logger.info(f"Modelli deployati rigenerati: {list(models)} -> {out_path}")
@@ -296,5 +341,11 @@ if __name__ == "__main__":
     if "--regenerate-models" in sys.argv:
         regenerate_deployed_models()
     else:
+        with _connect(HIST_DB_PATH) as _conn:
+            all_series = [
+                r[0] for r in _conn.execute(
+                    "SELECT DISTINCT event_name FROM event_features WHERE surprise_zscore IS NOT NULL"
+                )
+            ]
         results = run_all()
-        summarize(results)
+        summarize(results, all_series=all_series)

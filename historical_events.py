@@ -211,6 +211,30 @@ def _normalize_hf(df: pd.DataFrame) -> pd.DataFrame:
 
     out["datetime_utc"] = pd.to_datetime(out["DateTime"], utc=True)
     out = out.dropna(subset=["datetime_utc"])
+
+    # FIX (audit 2026-09-04): il dataset HF usa offset locali insoliti
+    # (+03:30/+04:30, es. Teheran/Kabul — probabilmente il fuso del
+    # browser di chi ha fatto lo scraping) ma per l'ora dell'evento vera
+    # e propria usa "16:00:00"/"17:00:00" locali (che convertiti
+    # correttamente danno 12:30/13:30 UTC = 8:30am ET, l'orario reale di
+    # rilascio di CPI/NFP/Retail Sales/ecc.). Quando l'orario reale non
+    # era disponibile alla fonte, la riga ha invece "00:00:00" locale
+    # come segnaposto — che pd.to_datetime converte comunque "corretto"
+    # ma a un orario UTC totalmente fittizio (7h dopo quello vero, e sul
+    # giorno sbagliato). Verificato empiricamente sul CSV grezzo: SOLO le
+    # righe con "00:00:00" locale finiscono fuori dal cluster orario
+    # reale di ogni evento ricorrente — su Core CPI m/m il 57% delle 212
+    # righe era così (calibrando il modello già deployato in
+    # macro_models.json su rumore di prezzo, non su reazioni reali).
+    # Non è recuperabile (l'orario vero non è nella fonte): si scarta.
+    local_time = out["DateTime"].str.extract(r"T(\d{2}:\d{2}:\d{2})", expand=False)
+    placeholder_time = local_time == "00:00:00"
+    if placeholder_time.any():
+        logger.info(
+            f"HF: {placeholder_time.sum():,} righe con orario segnaposto "
+            f"(00:00:00 locale, orario reale non disponibile alla fonte) scartate"
+        )
+    out = out[~placeholder_time]
     out["date_utc"] = out["datetime_utc"].dt.strftime("%Y-%m-%d")
     out["datetime_utc"] = out["datetime_utc"].apply(lambda ts: ts.isoformat())
 
@@ -386,6 +410,37 @@ def validate(db_path: str = HIST_DB_PATH) -> bool:
 
         if nulls > 0 or dupes > 0:
             ok = False
+
+        # Plausibilità orario per eventi ricorrenti a orario fisso (es.
+        # CPI/NFP sempre alle 8:30am ET): se un evento con abbastanza
+        # campioni non si concentra in 1-2 fasce orarie UTC dominanti,
+        # è probabile un problema di timestamp alla fonte (come quello
+        # trovato e corretto in _normalize_hf il 2026-09-04) — solo un
+        # warning, non un fallimento, perché non tutti gli eventi hanno
+        # orario fisso (es. discorsi) e un residuo minore (es. bordi DST)
+        # può restare anche dopo il fix principale.
+        print("\nPlausibilità orario per eventi ricorrenti (n>=20):")
+        recurring = conn.execute(
+            "SELECT event_name, COUNT(*) n FROM macro_events "
+            "GROUP BY event_name HAVING n >= 20 ORDER BY n DESC"
+        ).fetchall()
+        suspect_found = False
+        for row in recurring:
+            hours = conn.execute(
+                "SELECT SUBSTR(datetime_utc, 12, 5) h, COUNT(*) n FROM macro_events "
+                "WHERE event_name = ? GROUP BY h ORDER BY n DESC",
+                (row["event_name"],),
+            ).fetchall()
+            top2 = sum(h["n"] for h in hours[:2])
+            frac = top2 / row["n"] if row["n"] else 0
+            if frac < 0.85:
+                suspect_found = True
+                print(
+                    f"  {row['event_name']:30s} n={row['n']:4d}  "
+                    f"top-2 fasce orarie={frac*100:.0f}% <-- SOSPETTO (orari dispersi)"
+                )
+        if not suspect_found:
+            print("  nessun evento ricorrente con orari sospettosamente dispersi")
 
         print("\nControlli puntuali NFP (crollo COVID, valori reali noti):")
         for year, month, expected_actual in KNOWN_NFP_CHECKS:
