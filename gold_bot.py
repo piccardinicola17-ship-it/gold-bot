@@ -41,6 +41,7 @@ from trade_manager import (
     get_current_price, get_current_price_async,
     is_authorized, build_setup_key, was_setup_seen, DuplicateSetupError,
     is_decisive_win, calculate_trade_pips,
+    get_recent_decisions as load_recent_decisions,
     _fmt,
     is_bot_paused, set_bot_paused,
     load_macro_alert_state, save_macro_alert_state,
@@ -343,6 +344,7 @@ async def cmd_start(update, context: ContextTypes.DEFAULT_TYPE):
         f"/news — Notizie oro\n"
         f"/macro — Briefing eventi macro\n"
         f"/regime — Regime di mercato\n"
+        f"/decisioni [tf] [n] — Log EXECUTE/WAIT/SKIP con motivazione\n"
         f"/lotto [capitale] [rischio%] — Calcolo lotti\n"
         f"/backtest [tf] [barre]\n"
         f"/posttrade — Analisi ultimo trade\n"
@@ -884,6 +886,47 @@ async def cmd_regime(update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Errore: {e}")
 
 
+_DECISION_ICON = {"EXECUTE": "✅", "WAIT": "⏳", "SKIP": "⏭️"}
+
+
+async def cmd_decisions(update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /decisioni [tf] [n] — ultime N decisioni EXECUTE/WAIT/SKIP della
+    pipeline, con motivazione. Log strutturato interrogabile (vedi
+    trade_manager.log_decision, chiamato da agent_orchestrator.run_pipeline
+    in un unico punto per non doverlo agganciare a ogni singolo agente).
+    """
+    if not is_authorized(update): return
+    args = context.args or []
+    tf = None
+    n = 15
+    for arg in args:
+        if arg.lower() in ("1h", "4h", "1day", "5min", "15min", "1min"):
+            tf = arg.lower()
+        elif arg.isdigit():
+            n = int(arg)
+
+    rows = load_recent_decisions(timeframe=tf, limit=n)
+    if not rows:
+        await update.message.reply_text("Nessuna decisione registrata ancora.")
+        return
+
+    tf_txt = f" [{TF_LABEL.get(tf, tf.upper())}]" if tf else ""
+    lines = [f"📋 *Ultime decisioni{tf_txt}*", "━━━━━━━━━━━━━━━━━━━━"]
+    for row in rows:
+        icon = _DECISION_ICON.get(row.get("decision"), "•")
+        ts = str(row.get("timestamp", ""))[:16].replace("T", " ")
+        tf_lbl = TF_LABEL.get(row.get("timeframe"), row.get("timeframe", "?"))
+        sig = row.get("signal") or "N/D"
+        prob_txt = f" {row['prob']}%" if row.get("prob") else ""
+        reason = _escape_md(str(row.get("reason") or "")[:120])
+        lines.append(
+            f"{icon} `{ts}` [{tf_lbl}] {sig}{prob_txt} — *{row.get('decision')}*\n"
+            f"   _{reason}_"
+        )
+    msg = "\n".join(lines)
+    if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 # Mapping periodo → barre per ogni timeframe
@@ -2018,6 +2061,7 @@ async def main():
     app.add_handler(CommandHandler("riprendisessione", cmd_riprendisessione))
     app.add_handler(CommandHandler("lotto",     cmd_lotto))
     app.add_handler(CommandHandler("regime",    cmd_regime))
+    app.add_handler(CommandHandler("decisioni", cmd_decisions))
     # Weekly review domenica 20:30
     app.add_handler(CommandHandler("macro",     cmd_macro))
     app.add_handler(CommandHandler("backtest",  cmd_backtest))

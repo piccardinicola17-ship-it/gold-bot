@@ -19,7 +19,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_orchestrator import TradingState, agent_decision_maker, agent_structure_analyst
+from agent_orchestrator import TradingState, agent_decision_maker, agent_structure_analyst, run_pipeline
+import agent_orchestrator
 
 
 def _valid_state(**overrides) -> TradingState:
@@ -205,6 +206,62 @@ class TestBlockedDirectionByRegime(unittest.IsolatedAsyncioTestCase):
             await agent_structure_analyst(state)
         self.assertEqual(state.final_decision, "SKIP")
         self.assertIn("TRENDING DOWN", state.decision_reason)
+
+
+class TestRunPipelineLogsDecision(unittest.IsolatedAsyncioTestCase):
+    """run_pipeline() deve loggare ESATTAMENTE una volta per esecuzione, nel
+    suo unico punto di uscita — non agganciato ai singoli return sparsi
+    dentro ogni agente (Fase A del 2026-09-04, vedi trade_manager.log_decision)."""
+
+    async def _stub_agent(self, state):
+        from agent_orchestrator import AgentResult
+        return AgentResult(success=True, data={})
+
+    async def _stub_structure_ok(self, state):
+        from agent_orchestrator import AgentResult
+        # Deve superare l'early-exit di run_pipeline ("nessun setup") per
+        # far proseguire la pipeline fino al DecisionMaker.
+        state.structure_ok = True
+        return AgentResult(success=True, data={})
+
+    async def test_logs_final_decision_once(self):
+        async def fake_decision_maker(state):
+            from agent_orchestrator import AgentResult
+            state.signal = "BUY"
+            state.regime = "NORMAL"
+            state.prob = 77
+            state.final_decision = "EXECUTE"
+            state.decision_reason = "tutto ok"
+            return AgentResult(success=True, data={})
+
+        with patch("agent_orchestrator.agent_data_collector", self._stub_agent), \
+             patch("agent_orchestrator.agent_structure_analyst", self._stub_structure_ok), \
+             patch("agent_orchestrator.agent_news", self._stub_agent), \
+             patch("agent_orchestrator.agent_risk", self._stub_agent), \
+             patch("agent_orchestrator.agent_decision_maker", fake_decision_maker), \
+             patch("trade_manager.log_decision") as mock_log:
+            state = await run_pipeline(timeframe="1h")
+
+        self.assertEqual(state.final_decision, "EXECUTE")
+        mock_log.assert_called_once_with(
+            timeframe="1h", signal="BUY", regime="NORMAL", prob=77,
+            decision="EXECUTE", reason="tutto ok",
+        )
+
+    async def test_logs_even_on_default_skip(self):
+        """Anche quando nessun agente popola esplicitamente final_decision
+        (default 'SKIP' del dataclass), la chiamata al log avviene comunque —
+        è il punto in cui TUTTI i percorsi confluiscono, per costruzione."""
+        with patch("agent_orchestrator.agent_data_collector", self._stub_agent), \
+             patch("agent_orchestrator.agent_structure_analyst", self._stub_agent), \
+             patch("agent_orchestrator.agent_news", self._stub_agent), \
+             patch("agent_orchestrator.agent_risk", self._stub_agent), \
+             patch("agent_orchestrator.agent_decision_maker", self._stub_agent), \
+             patch("trade_manager.log_decision") as mock_log:
+            state = await run_pipeline(timeframe="4h")
+
+        self.assertEqual(state.final_decision, "SKIP")
+        mock_log.assert_called_once()
 
 
 if __name__ == "__main__":

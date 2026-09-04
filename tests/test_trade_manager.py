@@ -358,6 +358,53 @@ class TestPendingInvalidation(TradeManagerTestCase):
         self.assertEqual(tm._pending_adverse_distance(trade, 105.0), 0.0)
 
 
+class TestDecisionLog(TradeManagerTestCase):
+    """Log strutturato interrogabile di ogni decisione EXECUTE/WAIT/SKIP
+    (Fase A del 2026-09-04: osservabilità pura, nessun impatto sul trading)."""
+
+    def test_log_and_retrieve_roundtrip(self):
+        tm.log_decision("1h", "BUY", "NORMAL", 72, "EXECUTE", "Setup valido")
+        rows = tm.get_recent_decisions(limit=10)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["timeframe"], "1h")
+        self.assertEqual(rows[0]["signal"], "BUY")
+        self.assertEqual(rows[0]["prob"], 72)
+        self.assertEqual(rows[0]["decision"], "EXECUTE")
+        self.assertEqual(rows[0]["reason"], "Setup valido")
+
+    def test_most_recent_first(self):
+        tm.log_decision("1h", "BUY", "NORMAL", 60, "SKIP", "primo")
+        tm.log_decision("1h", "SELL", "NORMAL", 60, "SKIP", "secondo")
+        rows = tm.get_recent_decisions(limit=10)
+        self.assertEqual(rows[0]["reason"], "secondo")
+        self.assertEqual(rows[1]["reason"], "primo")
+
+    def test_filter_by_timeframe(self):
+        tm.log_decision("1h", "BUY", "NORMAL", 60, "EXECUTE", "h1")
+        tm.log_decision("4h", "BUY", "NORMAL", 60, "EXECUTE", "h4")
+        rows = tm.get_recent_decisions(timeframe="4h", limit=10)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reason"], "h4")
+
+    def test_filter_by_decision(self):
+        tm.log_decision("1h", "BUY", "NORMAL", 60, "EXECUTE", "eseguito")
+        tm.log_decision("1h", "BUY", "RANGING", 60, "SKIP", "bloccato")
+        rows = tm.get_recent_decisions(decision="SKIP", limit=10)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reason"], "bloccato")
+
+    def test_limit_is_respected(self):
+        for i in range(5):
+            tm.log_decision("1h", "BUY", "NORMAL", 60, "SKIP", f"n{i}")
+        rows = tm.get_recent_decisions(limit=2)
+        self.assertEqual(len(rows), 2)
+
+    def test_does_not_raise_on_missing_prob(self):
+        tm.log_decision("1h", "NEUTRAL", "", None, "SKIP", "nessun segnale")
+        rows = tm.get_recent_decisions(limit=1)
+        self.assertIsNone(rows[0]["prob"])
+
+
 class TestCalculateTradePips(unittest.TestCase):
     def test_buy_direction(self):
         self.assertAlmostEqual(tm.calculate_trade_pips("BUY", 4300.00, 4310.00), 100.0, places=1)

@@ -613,6 +613,16 @@ async def run_pipeline(timeframe: str = "5min") -> TradingState:
             break
 
     state.add_log("🚀 Pipeline", f"Fine — Decisione: {state.final_decision}")
+
+    try:
+        from trade_manager import log_decision
+        log_decision(
+            timeframe=state.timeframe, signal=state.signal, regime=state.regime,
+            prob=state.prob, decision=state.final_decision, reason=state.decision_reason,
+        )
+    except Exception as e:
+        logger.warning(f"log_decision fallito: {e}")
+
     return state
 
 

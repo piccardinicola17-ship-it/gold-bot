@@ -342,10 +342,25 @@ def init_db() -> None:
                 key   TEXT PRIMARY KEY,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS decisions_log (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                signal    TEXT,
+                regime    TEXT,
+                prob      INTEGER,
+                decision  TEXT NOT NULL,
+                reason    TEXT
+            );
             """
         )
         _ensure_trade_columns(conn)
         _ensure_session_columns(conn)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_decisions_log_tf_ts "
+            "ON decisions_log(timeframe, timestamp)"
+        )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_trade_id "
             "ON trades(trade_id) WHERE trade_id IS NOT NULL"
@@ -1499,6 +1514,61 @@ def save_fred_last_seen(state: dict) -> None:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (json.dumps(state),),
         )
+
+
+_DECISIONS_LOG_RETENTION_DAYS = 30
+
+
+def log_decision(timeframe: str, signal: str, regime: str, prob,
+                  decision: str, reason: str) -> None:
+    """
+    Log strutturato e interrogabile di OGNI decisione EXECUTE/WAIT/SKIP
+    della pipeline (agent_orchestrator.run_pipeline). Chiamato in un unico
+    punto — la fine di run_pipeline(), dopo che tutti gli agenti hanno
+    girato — proprio per non dover agganciare un log a ciascuno dei tanti
+    return sparsi nei singoli agenti (stesso motivo per cui altri bug in
+    questo codebase nascono da più punti che dovrebbero restare sincronizzati
+    e non lo restano: un solo punto di scrittura, non tanti).
+    """
+    try:
+        with _write_lock, _connect() as conn:
+            conn.execute(
+                "INSERT INTO decisions_log(timestamp, timeframe, signal, regime, prob, decision, reason) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    datetime.now(TIMEZONE).isoformat(), timeframe, signal, regime,
+                    int(prob) if prob is not None else None, decision, reason,
+                ),
+            )
+            row = conn.execute("SELECT last_insert_rowid() AS id").fetchone()
+            if row and row["id"] % 500 == 0:
+                cutoff = (datetime.now(TIMEZONE) - timedelta(days=_DECISIONS_LOG_RETENTION_DAYS)).isoformat()
+                conn.execute("DELETE FROM decisions_log WHERE timestamp < ?", (cutoff,))
+    except Exception as e:
+        logger.error(f"log_decision fallito: {e}")
+
+
+def get_recent_decisions(timeframe: str | None = None, decision: str | None = None,
+                          limit: int = 50) -> list[dict]:
+    """Interroga il log decisionale, più recenti prima. Filtri opzionali su
+    timeframe (es. '1h') e/o decision ('EXECUTE'/'WAIT'/'SKIP')."""
+    query = "SELECT * FROM decisions_log WHERE 1=1"
+    params: list = []
+    if timeframe:
+        query += " AND timeframe=?"
+        params.append(timeframe)
+    if decision:
+        query += " AND decision=?"
+        params.append(decision)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, min(int(limit), 500)))
+    try:
+        with _connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"get_recent_decisions fallito: {e}")
+        return []
 
 
 def load_breaking_news_pending() -> dict:
