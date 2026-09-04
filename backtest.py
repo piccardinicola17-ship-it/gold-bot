@@ -59,6 +59,24 @@ MAX_PENDING_BARS = {
 MAX_TRADES_PER_DAY = 3
 MAX_CONSECUTIVE_LOSS = 3
 
+# Mirror ESATTO di agent_orchestrator.py (fonte di verità — vedi i commenti
+# lì per il ragionamento e i dati dietro ogni blocco, non duplicati qui per
+# evitare che i due file divergano nel commento pur restando allineati nel
+# valore). FIX (audit 2026-09-04): _make_setup() non applicava questi filtri
+# regime/direzione — agent_orchestrator.py li applica in produzione dal
+# 2026-09-03/04, ma il backtest non ne sapeva nulla. Ogni numero di backtest
+# fatto finora (incluso quello usato per giustificare il blocco SELL+NORMAL
+# su 1day) includeva trade che il bot live rifiuta categoricamente: stesso
+# pattern di "doppio meccanismo che diverge" trovato altre volte oggi.
+_BLOCKED_REGIMES_BY_TF = {
+    "1h":   ("RANGING", "TRENDING_UP"),
+    "4h":   ("RANGING",),
+    "1day": ("TRENDING_DOWN",),
+}
+_BLOCKED_REGIME_DIRECTION_BY_TF = {
+    "1day": {"SELL": ("NORMAL",)},
+}
+
 
 @dataclass
 class BarResult:
@@ -194,6 +212,12 @@ def _make_setup(window: pd.DataFrame, interval: str, min_prob: int) -> dict | No
         return None
 
     signal = aggregated["signal"]
+    _tf = interval.lower()
+    _regime_up = str(regime).upper().replace(" ", "_")
+    if _regime_up in _BLOCKED_REGIMES_BY_TF.get(_tf, ()):
+        return None
+    if _regime_up in _BLOCKED_REGIME_DIRECTION_BY_TF.get(_tf, {}).get(signal, ()):
+        return None
     # Nel backtest usiamo sempre MARKET entry:
     # il backtest valuta la qualità del segnale, non l'ottimizzazione dell'entry.
     # I LIMIT/STOP nel trading live aggiungono alpha sull'entry ma rendono
