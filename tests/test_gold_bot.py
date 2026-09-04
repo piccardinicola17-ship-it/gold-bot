@@ -251,5 +251,104 @@ class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):
         self.assertEqual(len(digest_calls), 0)
 
 
+class TestProtectiveCloseAgainstEventBias(GoldBotTestCase):
+    """Trovato in diretta il 2026-09-04 sull'NFP: un BUY 4h aperto dal
+    giorno prima è stato preso in pieno dallo SL 2 minuti dopo il
+    rilascio, mentre il bias pre-evento (SELL, poi confermato) andava
+    nella direzione opposta. Un trade controtrend a un catalizzatore
+    macro programmato va chiuso/cancellato in anticipo, non lasciato in
+    balìa dello SL."""
+
+    def _make_event(self, minutes_away: int, title: str) -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "N/A",
+            "previous": "N/A",
+        }
+
+    async def _run(self, event, bias: str):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4315.0), \
+             mock.patch("gold_bot.analyze_macro_event", return_value=f"Bias: {bias}\nMotivo: test"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_activated_trade_against_bias_is_closed_early(self):
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(30, "Non-Farm Employment Change")
+        asyncio.run(self._run(event, "SELL"))  # bias opposto al BUY aperto
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "CLOSED")
+        self.assertEqual(row["result"], "CLOSED_EARLY")
+        self.assertLess(row["pnl_r"], 0)
+        self.assertGreater(row["pnl_r"], -1.0)
+
+    def test_activated_trade_aligned_with_bias_stays_open(self):
+        import asyncio
+        data = _base_trade_data(signal="SELL", order_type="SELL", entry=4400.0, sl=4430.0)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(30, "Non-Farm Employment Change")
+        asyncio.run(self._run(event, "SELL"))  # stesso bias del trade: non si tocca
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "OPEN")
+
+    def test_pending_trade_against_bias_is_cancelled_not_closed_early(self):
+        """Un pending non attivato non ha capitale reale a rischio: si
+        cancella (CANCELLED, come un pending scaduto), non CLOSED_EARLY."""
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY LIMIT", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        # niente activate_trade: resta pending
+
+        event = self._make_event(30, "Non-Farm Employment Change")
+        asyncio.run(self._run(event, "SELL"))
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "CLOSED")
+        self.assertEqual(row["result"], "CANCELLED")
+
+    def test_neutral_bias_touches_nothing(self):
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(30, "Fed Chair Speech")
+        asyncio.run(self._run(event, "NEUTRO"))
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "OPEN")
+
+    def test_protective_close_sends_notification(self):
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(30, "Non-Farm Employment Change")
+        bot = asyncio.run(self._run(event, "SELL"))
+
+        protective_calls = [
+            c for c in bot.send_message.call_args_list
+            if "CHIUSURA PROTETTIVA" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(protective_calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

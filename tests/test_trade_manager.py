@@ -113,6 +113,69 @@ class TestOpenCloseLifecycle(TradeManagerTestCase):
         self.assertFalse(result, "close_trade deve tornare False se l'UPDATE non ha toccato nessuna riga")
 
 
+class TestCloseTradeEarly(TradeManagerTestCase):
+    """CLOSED_EARLY (aggiunto il 2026-09-04 per la chiusura protettiva
+    pre-evento): a differenza di tutti gli altri risultati (livelli fissi
+    TP1/TP2/TP3/SL/BE, R categorico) e di CANCELLED (0R fisso, nessun
+    rischio reale), qui il trade era davvero attivo e va chiuso a un
+    prezzo qualunque tra entry e sl — l'R deve riflettere quel prezzo
+    reale, non essere forzato a 0 come nasconderebbe un guadagno o una
+    perdita parziale veri."""
+
+    def test_buy_closed_early_computes_proportional_negative_r(self):
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+        exit_price = 4315.0  # tra entry e sl: sfavorevole ma sl non toccato
+        self.assertTrue(tm.close_trade(trade_id, "CLOSED_EARLY", exit_price, "test"))
+
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
+        conn.close()
+
+        self.assertEqual(row["result"], "CLOSED_EARLY")
+        expected_r = (exit_price - 4329.31) / (4329.31 - 4299.11)
+        self.assertAlmostEqual(row["pnl_r"], expected_r, places=3)
+        self.assertLess(row["pnl_r"], 0)
+        self.assertGreater(row["pnl_r"], -1.0)  # peggiore di 0 ma non un LOSS pieno
+        self.assertNotEqual(row["pips"], 0.0)   # pips reali, non azzerati come CANCELLED
+
+    def test_sell_closed_early_computes_proportional_positive_r(self):
+        data = _base_trade_data(signal="SELL", order_type="SELL", entry=4400.0, sl=4430.0)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+        exit_price = 4390.0  # favorevole per una SELL
+
+        self.assertTrue(tm.close_trade(trade_id, "CLOSED_EARLY", exit_price, "test"))
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
+        conn.close()
+
+        expected_r = -1 * (exit_price - 4400.0) / (4430.0 - 4400.0)
+        self.assertAlmostEqual(row["pnl_r"], expected_r, places=3)
+        self.assertGreater(row["pnl_r"], 0)
+
+    def test_closed_early_does_not_mark_any_target_hit(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+        self.assertTrue(tm.close_trade(trade_id, "CLOSED_EARLY", 4315.0, "test"))
+
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
+        conn.close()
+        self.assertEqual(row["tp1_hit"], 0)
+        self.assertEqual(row["tp2_hit"], 0)
+        self.assertEqual(row["tp3_hit"], 0)
+        self.assertEqual(row["be_hit"], 0)
+
+
 class TestUpdateTradeOpenGuard(TradeManagerTestCase):
     def test_mark_tp_hit_is_noop_on_closed_trade(self):
         """_update_trade (usata da mark_tp1_hit/mark_tp2_hit/mark_tp3_hit)

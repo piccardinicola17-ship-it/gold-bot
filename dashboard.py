@@ -664,6 +664,10 @@ function resultInfo(trade) {
     return [`CHIUSO · ${target ? target + " + " : ""}BE`, ""];
   }
   if (trade.result === "CANCELLED") return ["ANNULLATO", ""];
+  if (trade.result === "CLOSED_EARLY") {
+    const cls = Number(trade.pips || 0) > 0 ? "positive" : Number(trade.pips || 0) < 0 ? "negative" : "";
+    return ["CHIUSO · PRE-EVENTO", cls];
+  }
   const target = highestTarget(trade) || String(trade.result || "").replace("WIN_", "");
   return [`CHIUSO · ${target}`, "positive"];
 }

@@ -52,6 +52,12 @@ RESULT_PNL = {
     "WIN_BE": 0.0,
     "LOSS": -1.0,
     "CANCELLED": 0.0,
+    # Placeholder: mai usato per davvero — close_trade() calcola l'R reale
+    # in proporzione a entry/sl/exit invece di questo valore fisso (a
+    # differenza di CANCELLED, qui c'era rischio reale sul trade, quindi
+    # 0R fisso sarebbe fuorviante). Serve solo a superare il controllo di
+    # validità "result in RESULT_PNL" qui sotto.
+    "CLOSED_EARLY": 0.0,
 }
 
 def is_decisive_win(trade: dict) -> bool:
@@ -779,7 +785,6 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
     result = result.upper()
     if result not in RESULT_PNL:
         raise ValueError(f"Risultato non valido: {result}")
-    pnl_r = RESULT_PNL[result]
     now = datetime.now(TIMEZONE)
 
     with _write_lock, _connect() as conn:
@@ -788,6 +793,22 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
         ).fetchone()
         if not row:
             return False
+
+        if result == "CLOSED_EARLY":
+            # R reale in proporzione a quanto il prezzo si è mosso rispetto
+            # al rischio iniziale (entry-sl) — a differenza di tutti gli
+            # altri risultati (livelli fissi TP1/TP2/TP3/SL/BE), qui non è
+            # stato raggiunto alcun livello: il trade è stato chiuso per
+            # decisione (es. rischio evento macro), a un prezzo qualunque
+            # tra entry e sl. 0R fisso (come CANCELLED) nasconderebbe una
+            # perdita o un guadagno parziale reale.
+            direction = 1 if row["signal"] == "BUY" else -1
+            initial_risk = abs(float(row["entry"]) - float(row["sl"]))
+            pnl_r = round(
+                direction * (float(exit_price) - float(row["entry"])) / initial_risk, 3
+            ) if initial_risk > 0 else 0.0
+        else:
+            pnl_r = RESULT_PNL[result]
 
         tp1_hit = int(bool(row["tp1_hit"]))
         tp2_hit = int(bool(row["tp2_hit"]))

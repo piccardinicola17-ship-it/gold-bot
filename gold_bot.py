@@ -40,7 +40,7 @@ from trade_manager import (
     monitor_active_trade,
     get_current_price, get_current_price_async,
     is_authorized, build_setup_key, was_setup_seen, DuplicateSetupError,
-    is_decisive_win,
+    is_decisive_win, calculate_trade_pips,
     _fmt,
     is_bot_paused, set_bot_paused,
     load_macro_alert_state, save_macro_alert_state,
@@ -630,7 +630,12 @@ async def cmd_stats(update, context: ContextTypes.DEFAULT_TYPE):
         recent_txt = ""
         for t in reversed(trades[-5:]):
             res = t.get("result","?")
-            e   = "✅" if "WIN" in res and res != "WIN_BE" else "⚖️" if res == "WIN_BE" else "❌"
+            e   = (
+                "✅" if "WIN" in res and res != "WIN_BE" else
+                "⚖️" if res == "WIN_BE" else
+                "🛡️" if res == "CLOSED_EARLY" else
+                "❌"
+            )
             tf  = TF_LABEL.get(t.get("timeframe",""), "?")
             recent_txt += f"{e} {t.get('signal','?')} [{tf}] @ ${t.get('entry','?')} — {res}\n"
         if not recent_txt:
@@ -1428,6 +1433,63 @@ async def check_macro_alerts(bot):
                     bias_line += f"\n_{_escape_md(motivo)}_"
                 _pre_event_bias[ev_key] = {"bias": bias, "price": price}
 
+                # Chiusura protettiva dei trade aperti in direzione opposta
+                # al bias dell'evento in arrivo. Trovato in diretta il
+                # 2026-09-04 sull'NFP: un BUY 4h aperto dal giorno prima è
+                # stato preso in pieno dallo SL 2 minuti dopo il rilascio,
+                # mentre il bias pre-evento (SELL, poi confermato dal
+                # movimento reale) andava nella direzione opposta — non ha
+                # senso restare esposti controtrend a un catalizzatore
+                # programmato quando il bot ha già una view direzionale su
+                # quell'evento. Un pending non ancora attivato si cancella
+                # (nessun capitale reale a rischio); un trade già attivo si
+                # chiude al prezzo attuale con un R reale calcolato in
+                # proporzione a entry/sl/exit (non forzato a 0 come un
+                # CANCELLED — c'era rischio vero, va contabilizzato). Solo
+                # se il bias è direzionale: un NEUTRO non dà alcuna
+                # indicazione su cui agire, restano tutti aperti.
+                if bias in ("BUY", "SELL"):
+                    for open_trade in load_all_active_trades():
+                        trade_signal = open_trade.get("signal")
+                        if trade_signal not in ("BUY", "SELL") or trade_signal == bias:
+                            continue
+                        trade_id = open_trade.get("trade_id")
+                        tf_label = TF_LABEL.get(open_trade.get("timeframe", ""), "?")
+                        title_safe = _escape_md(ev["title"])
+                        if open_trade.get("activated"):
+                            if not close_trade(
+                                trade_id, "CLOSED_EARLY", price,
+                                f"Chiuso in anticipo: controtrend rispetto al bias pre-evento ({ev['title']})",
+                            ):
+                                continue
+                            pips = calculate_trade_pips(trade_signal, open_trade.get("entry"), price)
+                            protect_msg = (
+                                f"🛡️ *CHIUSURA PROTETTIVA PRE-EVENTO*\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
+                                f"💰 Chiuso a: ${_fmt(price)} ({pips:+.1f} pips)\n"
+                                f"📅 Evento tra ~30 min: *{title_safe}*\n"
+                                f"🎯 Bias evento: *{bias}* — il trade era controtrend\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"ID: `{trade_id}`"
+                            )
+                        else:
+                            if not close_trade(
+                                trade_id, "CANCELLED", price,
+                                f"Pending cancellato: controtrend rispetto al bias pre-evento ({ev['title']})",
+                            ):
+                                continue
+                            protect_msg = (
+                                f"🛡️ *PENDING CANCELLATO PRE-EVENTO*\n"
+                                f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
+                                f"📅 Evento tra ~30 min: *{title_safe}* — bias {bias}, trade controtrend\n"
+                                f"ID: `{trade_id}`"
+                            )
+                        try:
+                            await bot.send_message(chat_id=CHAT_ID, text=protect_msg, parse_mode="Markdown")
+                        except Exception as e:
+                            logger.error(f"Notifica chiusura protettiva fallita per {trade_id}: {e}")
+
                 # FIX: ev['title'] (dal calendario esterno) non era mai
                 # escapato qui, a differenza di send_morning_report e
                 # get_macro_briefing che lo fanno già per lo stesso campo —
@@ -1642,7 +1704,13 @@ async def send_daily_report(bot: Bot):
         signals_txt = ""
         for t in today_t:
             res = t.get("result","?")
-            e   = "✅" if "WIN" in res and res != "WIN_BE" else "⚖️" if res == "WIN_BE" else "❌" if res == "LOSS" else "🔵"
+            e   = (
+                "✅" if "WIN" in res and res != "WIN_BE" else
+                "⚖️" if res == "WIN_BE" else
+                "🛡️" if res == "CLOSED_EARLY" else
+                "❌" if res == "LOSS" else
+                "🔵"
+            )
             tf  = TF_LABEL.get(t.get("timeframe",""), "?")
             signals_txt += f"{e} {t.get('signal','?')} [{tf}] @ ${t.get('entry','?')} — {res}\n"
         if not signals_txt:
