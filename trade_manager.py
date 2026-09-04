@@ -202,6 +202,12 @@ def _ensure_trade_columns(conn: sqlite3.Connection) -> None:
         # invece di aspettare il target pieno. NULL/0 = non disponibile,
         # nessun cambiamento rispetto al comportamento precedente.
         "early_be_level": "REAL",
+        # Impronta della configurazione (soglie/blocchi regime-direzione)
+        # attiva nel momento in cui il trade e' stato aperto — vedi
+        # agent_orchestrator.get_strategy_fingerprint(). Permette di risalire
+        # sempre a quale versione delle regole ha generato un trade storico,
+        # anche dopo che le soglie sono cambiate piu' volte (Fase A, 2026-09-04).
+        "strategy_version": "TEXT",
     }
     existing = _column_names(conn, "trades")
     status_was_missing = "status" not in existing
@@ -684,6 +690,18 @@ def open_trade(data: dict) -> str:
     notified = data.get("notified") or {}
     strategies = data.get("strategies") or {}
 
+    strategy_version = data.get("strategy_version")
+    if not strategy_version:
+        # Calcolato qui (non ai due punti chiamanti in gold_bot.py) cosi' che
+        # nessuno dei due possa dimenticarsene — stesso motivo per cui
+        # log_decision e' agganciato in un unico punto in run_pipeline().
+        try:
+            from agent_orchestrator import get_strategy_fingerprint
+            strategy_version = get_strategy_fingerprint()
+        except Exception as e:
+            logger.warning(f"strategy_version non calcolabile: {e}")
+            strategy_version = "unknown"
+
     try:
         with _write_lock, _connect() as conn:
             conn.execute(
@@ -692,8 +710,8 @@ def open_trade(data: dict) -> str:
                     trade_id, setup_key, timestamp, signal, order_type, timeframe,
                     regime, entry, sl, tp1, tp2, tp3, be_price, prob, risk_pct,
                     lot_size, status, notified_json, strategies_json, data_timestamp,
-                    price_basis, early_be_level
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    price_basis, early_be_level, strategy_version
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     trade_id,
@@ -718,6 +736,7 @@ def open_trade(data: dict) -> str:
                     data.get("data_timestamp"),
                     float(data.get("price_basis", 0) or 0),
                     float(data.get("early_be_level") or 0) or None,
+                    strategy_version,
                 ),
             )
     except sqlite3.IntegrityError as exc:

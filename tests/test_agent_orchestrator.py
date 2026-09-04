@@ -264,5 +264,52 @@ class TestRunPipelineLogsDecision(unittest.IsolatedAsyncioTestCase):
         mock_log.assert_called_once()
 
 
+class TestStrategyFingerprint(unittest.TestCase):
+    """get_strategy_fingerprint() (Fase A, 2026-09-04): impronta calcolata
+    dai valori reali di configurazione, non un numero di versione mantenuto
+    a mano — deve cambiare da sola quando una soglia cambia."""
+
+    def test_deterministic_for_same_config(self):
+        self.assertEqual(
+            agent_orchestrator.get_strategy_fingerprint(),
+            agent_orchestrator.get_strategy_fingerprint(),
+        )
+
+    def test_changes_when_blocked_regimes_change(self):
+        before = agent_orchestrator.get_strategy_fingerprint()
+        original = agent_orchestrator._BLOCKED_REGIMES_BY_TF
+        try:
+            agent_orchestrator._BLOCKED_REGIMES_BY_TF = dict(original, **{"4h": ("RANGING", "NORMAL")})
+            after = agent_orchestrator.get_strategy_fingerprint()
+        finally:
+            agent_orchestrator._BLOCKED_REGIMES_BY_TF = original
+        self.assertNotEqual(before, after)
+
+    def test_changes_when_blocked_direction_changes(self):
+        before = agent_orchestrator.get_strategy_fingerprint()
+        original = agent_orchestrator._BLOCKED_REGIME_DIRECTION_BY_TF
+        try:
+            agent_orchestrator._BLOCKED_REGIME_DIRECTION_BY_TF = {"1day": {"SELL": ("NORMAL", "RANGING")}}
+            after = agent_orchestrator.get_strategy_fingerprint()
+        finally:
+            agent_orchestrator._BLOCKED_REGIME_DIRECTION_BY_TF = original
+        self.assertNotEqual(before, after)
+
+    def test_changes_when_ai_confidence_threshold_changes(self):
+        before = agent_orchestrator.get_strategy_fingerprint()
+        original = agent_orchestrator.AI_CONFIDENCE_THRESHOLD
+        try:
+            agent_orchestrator.AI_CONFIDENCE_THRESHOLD = original + 5
+            after = agent_orchestrator.get_strategy_fingerprint()
+        finally:
+            agent_orchestrator.AI_CONFIDENCE_THRESHOLD = original
+        self.assertNotEqual(before, after)
+
+    def test_returns_short_hex_string(self):
+        fp = agent_orchestrator.get_strategy_fingerprint()
+        self.assertEqual(len(fp), 12)
+        int(fp, 16)  # solleva ValueError se non è esadecimale
+
+
 if __name__ == "__main__":
     unittest.main()

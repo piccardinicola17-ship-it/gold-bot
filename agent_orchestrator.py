@@ -48,6 +48,82 @@ def _set_cached_data(interval: str, outputsize: int, df):
 # Soglia confidenza AI per eseguire il trade
 AI_CONFIDENCE_THRESHOLD = 65
 
+# Timeframe senza edge dimostrato a probabilita' basse — soglia piu' alta.
+_FAST_TIMEFRAMES = ("5min", "1min", "15min")
+_FAST_TF_MIN_PROB = 65
+
+# Regimi bloccati per timeframe — non e' lo stesso regime ovunque.
+# H1: RANGING resta il peggiore (WR 23.7%, avg -0.297R, n=38 su 1y).
+# TRENDING_UP aggiunto il 1 set 2026: negativo in modo coerente su
+# tre finestre annidate (3m WR 27.6% avg -0.052R n=29; 6m WR 28.0%
+# avg -0.074R n=50; 1y WR 27.4% avg -0.113R n=84) — non un fluke di
+# un solo campione.
+# H4: RANGING bloccato, ma il campione (n=7, avg positivo) e' troppo
+# piccolo per confermarlo o toglierlo — lasciato invariato finche'
+# non c'e' piu' storico.
+# D1: RANGING e' quasi inesistente come regime li' (sotto la soglia
+# minima di 3 trade sia su 5y sia su 20y); il regime davvero debole
+# e' TRENDING_DOWN, confermato su entrambi i campioni (WR 25-27%,
+# avg negativo, n=15 e n=67).
+# Mosso a livello modulo (era locale in agent_structure_analyst) cosi'
+# da poter essere letto anche da get_strategy_fingerprint() senza
+# duplicarne i valori altrove — stesso principio di backtest.py, che
+# mantiene un mirror ESATTO di questi due dizionari.
+_BLOCKED_REGIMES_BY_TF = {
+    "1h":   ("RANGING", "TRENDING_UP"),
+    "4h":   ("RANGING",),
+    "1day": ("TRENDING_DOWN",),
+}
+
+# Direzione bloccata per regime/timeframe — a differenza del blocco sopra
+# (che esclude l'intero regime), qui si esclude solo un lato.
+# D1 NORMAL+SELL: negativo o al pareggio su tre finestre annidate e
+# ampie (5y WR 29.3% avg -0.079R n=41; 10y WR 32.5% avg +0.025R n=80;
+# 20y WR 29.2% avg -0.096R n=192), mentre NORMAL+BUY nello stesso
+# regime e' solidamente positivo in tutte e tre (avg +0.43/+0.39/+0.29R)
+# — non e' un effetto di TRENDING_DOWN (gia' bloccato sopra), e'
+# specifico alla direzione SELL anche in regime neutro.
+_BLOCKED_REGIME_DIRECTION_BY_TF = {
+    "1day": {"SELL": ("NORMAL",)},
+}
+
+
+def get_strategy_fingerprint() -> str:
+    """
+    Impronta deterministica (12 hex) della configurazione che decide un
+    trade in questo momento: soglie di probabilita', blocchi regime/
+    direzione, R:R minimo, soglia di confidenza AI. CALCOLATA dai valori
+    reali (non mantenuta a mano come un numero di versione) cosi' da non
+    poter mai andare fuori sincrono da essi — lo stesso bug (due punti che
+    dovrebbero coincidere e non lo fanno) trovato piu' volte il 2026-09-04.
+    Cambia da sola ad ogni modifica di una di queste soglie, permettendo di
+    risalire sempre a quale configurazione ha generato un trade storico
+    (persistita come trades.strategy_version, vedi trade_manager.open_trade).
+    """
+    import hashlib
+    import json
+    import os as _os
+
+    try:
+        from risk_manager import MIN_RR
+    except Exception:
+        MIN_RR = None
+
+    config = {
+        "fast_tf_min_prob": _FAST_TF_MIN_PROB,
+        "fast_timeframes": sorted(_FAST_TIMEFRAMES),
+        "default_min_prob_env": int(_os.environ.get("MIN_PROB", "55")),
+        "blocked_regimes_by_tf": {k: sorted(v) for k, v in _BLOCKED_REGIMES_BY_TF.items()},
+        "blocked_regime_direction_by_tf": {
+            tf: {signal: sorted(regimes) for signal, regimes in directions.items()}
+            for tf, directions in _BLOCKED_REGIME_DIRECTION_BY_TF.items()
+        },
+        "min_rr": MIN_RR,
+        "ai_confidence_threshold": AI_CONFIDENCE_THRESHOLD,
+    }
+    digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
+    return digest[:12]
+
 
 # ── STATO CONDIVISO ───────────────────────────────────────────────────────────
 
@@ -255,31 +331,14 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
             diff_entry_tp = abs(state.tp2 - state.entry)
             state.rr = round(diff_entry_tp / diff_entry_sl, 2) if diff_entry_sl > 0 else 0
 
-        # Soglia prob differenziata per TF
+        # Soglia prob differenziata per TF (costanti a livello modulo, vedi
+        # get_strategy_fingerprint())
         _tf = state.timeframe.lower() if state.timeframe else ""
-        if _tf in ("5min", "1min", "15min"):
-            MIN_PROB = 65
+        if _tf in _FAST_TIMEFRAMES:
+            MIN_PROB = _FAST_TF_MIN_PROB
         else:
             MIN_PROB = int(__import__("os").environ.get("MIN_PROB", "55"))
 
-        # Regimi bloccati per timeframe — non è lo stesso regime ovunque.
-        # H1: RANGING resta il peggiore (WR 23.7%, avg -0.297R, n=38 su 1y).
-        # TRENDING_UP aggiunto il 1 set 2026: negativo in modo coerente su
-        # tre finestre annidate (3m WR 27.6% avg -0.052R n=29; 6m WR 28.0%
-        # avg -0.074R n=50; 1y WR 27.4% avg -0.113R n=84) — non un fluke di
-        # un solo campione.
-        # H4: RANGING bloccato, ma il campione (n=7, avg positivo) è troppo
-        # piccolo per confermarlo o toglierlo — lasciato invariato finché
-        # non c'è più storico.
-        # D1: RANGING è quasi inesistente come regime lì (sotto la soglia
-        # minima di 3 trade sia su 5y sia su 20y); il regime davvero debole
-        # è TRENDING_DOWN, confermato su entrambi i campioni (WR 25-27%,
-        # avg negativo, n=15 e n=67).
-        _BLOCKED_REGIMES_BY_TF = {
-            "1h":   ("RANGING", "TRENDING_UP"),
-            "4h":   ("RANGING",),
-            "1day": ("TRENDING_DOWN",),
-        }
         _regime_up = str(state.regime).upper().replace(" ","_")
         _blocked = _BLOCKED_REGIMES_BY_TF.get(_tf, ())
         if _regime_up in _blocked:
@@ -295,15 +354,6 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
 
         # Direzione bloccata per regime/timeframe — a differenza del blocco
         # sopra (che esclude l'intero regime), qui si esclude solo un lato.
-        # D1 NORMAL+SELL: negativo o al pareggio su tre finestre annidate e
-        # ampie (5y WR 29.3% avg -0.079R n=41; 10y WR 32.5% avg +0.025R n=80;
-        # 20y WR 29.2% avg -0.096R n=192), mentre NORMAL+BUY nello stesso
-        # regime è solidamente positivo in tutte e tre (avg +0.43/+0.39/+0.29R)
-        # — non è un effetto di TRENDING_DOWN (già bloccato sopra), è
-        # specifico alla direzione SELL anche in regime neutro.
-        _BLOCKED_REGIME_DIRECTION_BY_TF = {
-            "1day": {"SELL": ("NORMAL",)},
-        }
         _blocked_directions = _BLOCKED_REGIME_DIRECTION_BY_TF.get(_tf, {})
         if _regime_up in _blocked_directions.get(state.signal, ()):
             state.final_decision  = "SKIP"

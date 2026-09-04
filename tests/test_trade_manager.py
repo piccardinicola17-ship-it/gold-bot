@@ -405,6 +405,23 @@ class TestDecisionLog(TradeManagerTestCase):
         self.assertIsNone(rows[0]["prob"])
 
 
+class TestStrategyVersionOnOpenTrade(TradeManagerTestCase):
+    """open_trade() calcola strategy_version internamente se assente
+    (Fase A, 2026-09-04) — nessuno dei due punti chiamanti in gold_bot.py
+    deve doversene ricordare."""
+
+    def test_computes_fingerprint_when_not_provided(self):
+        import agent_orchestrator
+        trade_id = tm.open_trade(_base_trade_data())
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["strategy_version"], agent_orchestrator.get_strategy_fingerprint())
+
+    def test_respects_explicit_value_if_provided(self):
+        trade_id = tm.open_trade(_base_trade_data(strategy_version="custom-abc123"))
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["strategy_version"], "custom-abc123")
+
+
 class TestCalculateTradePips(unittest.TestCase):
     def test_buy_direction(self):
         self.assertAlmostEqual(tm.calculate_trade_pips("BUY", 4300.00, 4310.00), 100.0, places=1)

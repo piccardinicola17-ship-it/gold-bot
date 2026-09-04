@@ -59,23 +59,17 @@ MAX_PENDING_BARS = {
 MAX_TRADES_PER_DAY = 3
 MAX_CONSECUTIVE_LOSS = 3
 
-# Mirror ESATTO di agent_orchestrator.py (fonte di verità — vedi i commenti
-# lì per il ragionamento e i dati dietro ogni blocco, non duplicati qui per
-# evitare che i due file divergano nel commento pur restando allineati nel
-# valore). FIX (audit 2026-09-04): _make_setup() non applicava questi filtri
+# FIX (audit 2026-09-04): _make_setup() non applicava questi filtri
 # regime/direzione — agent_orchestrator.py li applica in produzione dal
 # 2026-09-03/04, ma il backtest non ne sapeva nulla. Ogni numero di backtest
 # fatto finora (incluso quello usato per giustificare il blocco SELL+NORMAL
 # su 1day) includeva trade che il bot live rifiuta categoricamente: stesso
 # pattern di "doppio meccanismo che diverge" trovato altre volte oggi.
-_BLOCKED_REGIMES_BY_TF = {
-    "1h":   ("RANGING", "TRENDING_UP"),
-    "4h":   ("RANGING",),
-    "1day": ("TRENDING_DOWN",),
-}
-_BLOCKED_REGIME_DIRECTION_BY_TF = {
-    "1day": {"SELL": ("NORMAL",)},
-}
+# Importati direttamente da agent_orchestrator.py (fonte di verità, vedi i
+# commenti lì per il ragionamento/dati dietro ogni blocco) invece di un
+# mirror a mano: un secondo dizionario copiato è esattamente il tipo di
+# duplicazione che ha causato questo bug la prima volta.
+from agent_orchestrator import _BLOCKED_REGIMES_BY_TF, _BLOCKED_REGIME_DIRECTION_BY_TF
 
 
 @dataclass
