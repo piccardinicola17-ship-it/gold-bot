@@ -293,6 +293,25 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
             state.add_log("🎯 DecisionMaker", f"SKIP — {_regime_up} bloccato su {state.timeframe}")
             return AgentResult(success=True, data={"decision": "SKIP"})
 
+        # Direzione bloccata per regime/timeframe — a differenza del blocco
+        # sopra (che esclude l'intero regime), qui si esclude solo un lato.
+        # D1 NORMAL+SELL: negativo o al pareggio su tre finestre annidate e
+        # ampie (5y WR 29.3% avg -0.079R n=41; 10y WR 32.5% avg +0.025R n=80;
+        # 20y WR 29.2% avg -0.096R n=192), mentre NORMAL+BUY nello stesso
+        # regime è solidamente positivo in tutte e tre (avg +0.43/+0.39/+0.29R)
+        # — non è un effetto di TRENDING_DOWN (già bloccato sopra), è
+        # specifico alla direzione SELL anche in regime neutro.
+        _BLOCKED_REGIME_DIRECTION_BY_TF = {
+            "1day": {"SELL": ("NORMAL",)},
+        }
+        _blocked_directions = _BLOCKED_REGIME_DIRECTION_BY_TF.get(_tf, {})
+        if _regime_up in _blocked_directions.get(state.signal, ()):
+            state.final_decision  = "SKIP"
+            state.decision_reason = f"{state.signal} in regime {_regime_up.replace('_', ' ')} bloccato per {state.timeframe}"
+            state.decision_conf   = 90.0
+            state.add_log("🎯 DecisionMaker", f"SKIP — {state.signal} in {_regime_up} bloccato su {state.timeframe}")
+            return AgentResult(success=True, data={"decision": "SKIP"})
+
         state.structure_ok = (
             state.signal != "NEUTRAL" and
             state.prob >= MIN_PROB and

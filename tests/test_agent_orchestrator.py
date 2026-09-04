@@ -15,10 +15,11 @@ così da isolare il comportamento della Regola 5/5bis.
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_orchestrator import TradingState, agent_decision_maker
+from agent_orchestrator import TradingState, agent_decision_maker, agent_structure_analyst
 
 
 def _valid_state(**overrides) -> TradingState:
@@ -145,6 +146,65 @@ class TestRegola5bisPendingOrders(unittest.IsolatedAsyncioTestCase):
         )
         await agent_decision_maker(state)
         self.assertEqual(state.final_decision, "SKIP")
+
+
+def _full_analyze_result(**overrides) -> dict:
+    base = {
+        "signal": "SELL",
+        "order_type": "SELL",
+        "entry": 4300.0,
+        "sl": 4330.0,
+        "tp1": 4290.0,
+        "tp2": 4260.0,
+        "tp3": 4220.0,
+        "prob": 70,
+        "regime": "NORMAL",
+        "strategies": {},
+        "data_timestamp": "2026-09-04",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestBlockedDirectionByRegime(unittest.IsolatedAsyncioTestCase):
+    """Copre il blocco direzionale aggiunto in agent_structure_analyst:
+    su 1day, SELL in regime NORMAL è strutturalmente debole/in perdita su
+    tre finestre ampie e indipendenti (5y/10y/20y, n=41-192) mentre BUY
+    nello stesso regime resta positivo — vedi backtest multi-anno di
+    questa sessione. Il blocco deve colpire solo SELL, non BUY, e solo
+    su 1day (non deve toccare altri timeframe)."""
+
+    async def test_sell_normal_1day_is_skipped(self):
+        state = TradingState(timeframe="1day")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(signal="SELL", regime="NORMAL")):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.final_decision, "SKIP")
+        self.assertIn("SELL", state.decision_reason)
+        self.assertIn("NORMAL", state.decision_reason)
+
+    async def test_buy_normal_1day_not_blocked(self):
+        state = TradingState(timeframe="1day")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(signal="BUY", order_type="BUY", regime="NORMAL")):
+            await agent_structure_analyst(state)
+        self.assertTrue(state.structure_ok)
+
+    async def test_sell_normal_other_timeframe_not_blocked(self):
+        """Il blocco è specifico per 1day: lo stesso SELL in regime NORMAL
+        su un altro timeframe non deve essere toccato da questa regola."""
+        state = TradingState(timeframe="4h")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(signal="SELL", regime="NORMAL")):
+            await agent_structure_analyst(state)
+        self.assertTrue(state.structure_ok)
+
+    async def test_sell_trending_down_1day_still_blocked_by_existing_rule(self):
+        """TRENDING_DOWN era già bloccato prima di questo intervento (per
+        entrambe le direzioni) — verifica che il nuovo blocco non abbia
+        rotto quello esistente."""
+        state = TradingState(timeframe="1day")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(signal="SELL", regime="TRENDING_DOWN")):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.final_decision, "SKIP")
+        self.assertIn("TRENDING DOWN", state.decision_reason)
 
 
 if __name__ == "__main__":
