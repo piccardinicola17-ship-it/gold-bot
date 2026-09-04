@@ -21,6 +21,7 @@ from backtest import (
     ENTRY_COST, EXIT_COST,
     _is_pending, _order_touched, _execution_entry, _execution_exit,
     _check_trade_bar, _r_result, _safe, _make_setup,
+    monte_carlo_drawdown, parameter_sensitivity_backtest,
 )
 
 
@@ -255,6 +256,83 @@ class TestMakeSetupRegimeDirectionBlocks(unittest.TestCase):
         with _mock_pipeline(regime="NORMAL", signal="BUY"):
             setup = _make_setup(_flat_window(), "1h", min_prob=50)
         self.assertIsNotNone(setup)
+
+
+class TestMonteCarloDrawdown(unittest.TestCase):
+    """Fase A (2026-09-04): distribuzione dei drawdown possibili sulla stessa
+    sequenza di trade, non solo l'ordine storico osservato."""
+
+    def test_empty_input_returns_zero_sims(self):
+        result = monte_carlo_drawdown([], n_sims=100)
+        self.assertEqual(result["n_sims"], 0)
+
+    def test_observed_drawdown_matches_manual_calculation(self):
+        # equity = [1, 0, -1, 0], picco corrente = [1,1,1,1], dd = [0,-1,-2,-1]
+        result = monte_carlo_drawdown([1.0, -1.0, -1.0, 1.0], n_sims=50, seed=1)
+        self.assertAlmostEqual(result["observed_max_drawdown_r"], -2.0, places=6)
+
+    def test_deterministic_with_seed(self):
+        r1 = monte_carlo_drawdown([1.0, -1.0, 0.5, -0.5, 2.0], n_sims=500, seed=42)
+        r2 = monte_carlo_drawdown([1.0, -1.0, 0.5, -0.5, 2.0], n_sims=500, seed=42)
+        self.assertEqual(r1, r2)
+
+    def test_percentiles_are_ordered(self):
+        result = monte_carlo_drawdown([1.0, -1.0, -1.0, 2.0, -0.5, 1.5], n_sims=1000, seed=7)
+        self.assertLessEqual(result["worst_simulated_dd_r"], result["p5_worst_case_dd_r"])
+        self.assertLessEqual(result["p5_worst_case_dd_r"], result["p25_dd_r"])
+        self.assertLessEqual(result["p25_dd_r"], result["median_dd_r"])
+        self.assertLessEqual(result["median_dd_r"], result["p75_dd_r"])
+        self.assertLessEqual(result["p75_dd_r"], result["p95_best_case_dd_r"])
+
+    def test_all_positive_results_have_zero_drawdown(self):
+        result = monte_carlo_drawdown([1.0, 2.0, 1.5], n_sims=200, seed=3)
+        self.assertEqual(result["median_dd_r"], 0.0)
+
+
+class TestParameterSensitivityBacktest(unittest.TestCase):
+    """Fase A (2026-09-04): piccole variazioni di min_prob non dovrebbero
+    cambiare drasticamente il risultato — altrimenti è overfitting sulla
+    soglia esatta in uso."""
+
+    def _stats_for(self, win_rate_by_prob: dict):
+        def _fake_run_backtest(interval, bars, min_prob):
+            return {
+                "concluded": 20, "win_rate": win_rate_by_prob.get(min_prob, 40),
+                "profit_factor": 1.2, "total_r": 3.0,
+            }
+        return _fake_run_backtest
+
+    def test_stable_when_win_rate_barely_moves(self):
+        fake = self._stats_for({45: 42, 50: 43, 55: 45, 60: 44, 65: 46})
+        with patch("backtest.run_backtest", side_effect=fake):
+            result = parameter_sensitivity_backtest(base_min_prob=55, deltas=(-10, -5, 0, 5, 10))
+        self.assertTrue(result["stable"])
+        self.assertLessEqual(result["win_rate_range"], 15)
+
+    def test_unstable_when_win_rate_swings(self):
+        fake = self._stats_for({45: 20, 50: 25, 55: 45, 60: 70, 65: 75})
+        with patch("backtest.run_backtest", side_effect=fake):
+            result = parameter_sensitivity_backtest(base_min_prob=55, deltas=(-10, -5, 0, 5, 10))
+        self.assertFalse(result["stable"])
+        self.assertGreater(result["win_rate_range"], 15)
+
+    def test_excludes_thresholds_with_too_few_trades(self):
+        def _fake_run_backtest(interval, bars, min_prob):
+            if min_prob == 45:
+                return {"concluded": 1, "win_rate": 100, "profit_factor": 0, "total_r": 0}
+            return {"concluded": 20, "win_rate": 50, "profit_factor": 1.1, "total_r": 2.0}
+        with patch("backtest.run_backtest", side_effect=_fake_run_backtest):
+            result = parameter_sensitivity_backtest(base_min_prob=55, deltas=(-10, -5, 0, 5, 10))
+        self.assertEqual(result["win_rate_range"], 0.0)
+        self.assertTrue(result["stable"])
+
+    def test_clamps_min_prob_to_valid_range(self):
+        with patch("backtest.run_backtest", return_value={
+            "concluded": 20, "win_rate": 50, "profit_factor": 1.0, "total_r": 1.0,
+        }) as mock_run:
+            parameter_sensitivity_backtest(base_min_prob=5, deltas=(-10, 0))
+        called_probs = [c.kwargs["min_prob"] for c in mock_run.call_args_list]
+        self.assertIn(1, called_probs)  # 5 + (-10) clampato a 1, non negativo
 
 
 if __name__ == "__main__":

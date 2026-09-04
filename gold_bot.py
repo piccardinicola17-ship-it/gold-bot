@@ -954,6 +954,8 @@ async def cmd_backtest(update, context: ContextTypes.DEFAULT_TYPE):
       /backtest [tf] 3m/6m/1y/2y/5y/10y/20y — backtest lungo
       /backtest tutti 3m/6m/1y/2y/5y/10y/20y — tutti i TF con statistiche comparate
       /backtest wf [tf] [barre]           — walk-forward
+      /backtest mc [tf] [barre]           — Monte Carlo sul drawdown
+      /backtest robust [tf] [barre]       — robustezza ai parametri
 
     NB: 5y/10y/20y sono storico affidabile solo su 1day/4h — le fonti gratuite
     (yfinance/Stooq) non hanno abbastanza storico intraday oltre ~2 anni.
@@ -980,6 +982,49 @@ async def cmd_backtest(update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg[:4000])
         except Exception as e:
             await update.message.reply_text(f"Errore walk-forward: {e}")
+        return
+
+    # /backtest mc [interval] [bars] — Monte Carlo sul drawdown
+    if args and args[0].lower() == "mc":
+        from backtest import run_backtest, monte_carlo_drawdown, format_monte_carlo_report
+        interval = args[1] if len(args) > 1 else "1day"
+        try: bars = int(args[2]) if len(args) > 2 else 2000
+        except ValueError: bars = 2000
+        valid = ["1min","5min","15min","1h","4h","1day"]
+        if interval not in valid:
+            await update.message.reply_text(f"TF non valido. Usa: {', '.join(valid)}")
+            return
+        await update.message.reply_text(f"Monte Carlo {interval} su {bars} candele... (1-2 min)")
+        try:
+            min_prob = _live_min_prob_for_tf(interval)
+            stats = await asyncio.to_thread(run_backtest, interval=interval, bars=bars, min_prob=min_prob)
+            mc = await asyncio.to_thread(monte_carlo_drawdown, stats.get("r_results", []))
+            msg = format_monte_carlo_report(mc, interval)
+            await update.message.reply_text(msg[:4000], parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"Errore Monte Carlo: {e}")
+        return
+
+    # /backtest robust [interval] [bars] — robustezza ai parametri
+    if args and args[0].lower() == "robust":
+        from backtest import parameter_sensitivity_backtest, format_sensitivity_report
+        interval = args[1] if len(args) > 1 else "1day"
+        try: bars = int(args[2]) if len(args) > 2 else 2000
+        except ValueError: bars = 2000
+        valid = ["1min","5min","15min","1h","4h","1day"]
+        if interval not in valid:
+            await update.message.reply_text(f"TF non valido. Usa: {', '.join(valid)}")
+            return
+        await update.message.reply_text(f"Test robustezza {interval} su {bars} candele (5 soglie)... (3-5 min)")
+        try:
+            base_prob = _live_min_prob_for_tf(interval)
+            sens = await asyncio.to_thread(
+                parameter_sensitivity_backtest, interval=interval, bars=bars, base_min_prob=base_prob
+            )
+            msg = format_sensitivity_report(sens, interval)
+            await update.message.reply_text(msg[:4000], parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"Errore test robustezza: {e}")
         return
 
     # /backtest tutti 3m/6m/1y/2y/5y/10y/20y — tutti i TF in sequenza

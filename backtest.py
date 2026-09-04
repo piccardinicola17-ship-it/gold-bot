@@ -465,6 +465,10 @@ def _compute_backtest_stats(
         "errors_count": 0,
         "tf_stats": {},
         "errors_count": errors_count,
+        # Usati da monte_carlo_drawdown() — la sequenza r_result nell'ordine
+        # storico osservato, unica tra le tante in cui quei trade potevano
+        # capitare.
+        "r_results": [float(v) for v in concluded["r_result"].tolist()] if len(concluded) else [],
     }
 
 
@@ -777,4 +781,133 @@ def format_walkforward_report(stats: dict, interval: str) -> str:
         f"Errori simulazione: *{stats['errors_count']}*\n\n"
         "_È un proxy single-timeframe: prima del live servono ancora walk-forward "
         "multi-timeframe e paper trading._"
+    )
+
+
+def monte_carlo_drawdown(r_results: list[float], n_sims: int = 2000, seed: int | None = None) -> dict:
+    """
+    Monte Carlo sulla sequenza di risultati R di un backtest: ricampiona con
+    reinserimento l'ordine dei trade N volte e misura il max drawdown di
+    ogni simulazione. L'ordine storico osservato in un backtest è solo UNA
+    delle tante sequenze possibili in cui quegli stessi trade potevano
+    capitare — un ordine sfortunato (più perdite consecutive vicine tra
+    loro) può produrre un drawdown peggiore di quello osservato, anche a
+    parità di win rate/edge medio complessivo. Fase A del 2026-09-04.
+    """
+    if not r_results or n_sims <= 0:
+        return {"n_sims": 0, "message": "Nessun trade concluso su cui simulare."}
+
+    rng = np.random.default_rng(seed)
+    arr = np.asarray(r_results, dtype=float)
+    n = len(arr)
+    max_dds = np.empty(n_sims)
+    for i in range(n_sims):
+        sample = rng.choice(arr, size=n, replace=True)
+        equity = np.cumsum(sample)
+        max_dds[i] = float((equity - np.maximum.accumulate(equity)).min())
+
+    observed_equity = np.cumsum(arr)
+    observed_dd = float((observed_equity - np.maximum.accumulate(observed_equity)).min())
+
+    p5, p25, p50, p75, p95 = (round(float(np.percentile(max_dds, p)), 2) for p in (5, 25, 50, 75, 95))
+    return {
+        "n_sims": n_sims,
+        "n_trades": n,
+        "observed_max_drawdown_r": round(observed_dd, 2),
+        # p5 = il 5% delle simulazioni ha fatto PEGGIO di questo (drawdown
+        # più negativo) — è il caso "quasi peggiore" da cui dimensionare il
+        # rischio, non il caso tipico.
+        "p5_worst_case_dd_r": p5,
+        "p25_dd_r": p25,
+        "median_dd_r": p50,
+        "p75_dd_r": p75,
+        "p95_best_case_dd_r": p95,
+        "worst_simulated_dd_r": round(float(max_dds.min()), 2),
+    }
+
+
+def format_monte_carlo_report(mc: dict, interval: str) -> str:
+    if mc.get("n_sims", 0) == 0:
+        return f"📊 Monte Carlo {interval}\n\n{mc.get('message', 'Nessun risultato.')}"
+    return (
+        f"🎲 *MONTE CARLO DRAWDOWN — {interval}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{mc['n_sims']} simulazioni su {mc['n_trades']} trade (ricampionati con reinserimento)\n\n"
+        f"Drawdown osservato nel backtest: *{mc['observed_max_drawdown_r']:.2f}R*\n"
+        f"Mediana simulata: *{mc['median_dd_r']:.2f}R*\n"
+        f"Caso quasi peggiore (5° percentile): *{mc['p5_worst_case_dd_r']:.2f}R*\n"
+        f"Peggiore tra tutte le simulazioni: *{mc['worst_simulated_dd_r']:.2f}R*\n"
+        f"Caso quasi migliore (95° percentile): *{mc['p95_best_case_dd_r']:.2f}R*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        "_L'ordine storico è solo UNA delle sequenze possibili in cui questi "
+        "trade potevano capitare — dimensiona il rischio sul 5° percentile, "
+        "non sul drawdown osservato._"
+    )
+
+
+def parameter_sensitivity_backtest(
+    interval: str = "1day", bars: int = 2000, base_min_prob: int = 55,
+    deltas: tuple = (-10, -5, 0, 5, 10),
+) -> dict:
+    """
+    Test di robustezza ai parametri: rilancia lo stesso backtest facendo
+    variare min_prob di pochi punti attorno al valore in uso. Se piccole
+    variazioni di soglia cambiano drasticamente il risultato (win rate,
+    profit factor), è un segnale di overfitting sul valore esatto usato
+    finora — un edge robusto non dovrebbe dipendere da una soglia precisa
+    al punto percentuale. Fase A del 2026-09-04.
+    """
+    results = []
+    for delta in deltas:
+        prob = max(1, min(99, base_min_prob + delta))
+        stats = run_backtest(interval=interval, bars=bars, min_prob=prob)
+        results.append({
+            "min_prob": prob,
+            "delta": delta,
+            "concluded": stats.get("concluded", 0),
+            "win_rate": stats.get("win_rate", 0),
+            "profit_factor": stats.get("profit_factor", 0),
+            "total_r": stats.get("total_r", 0),
+        })
+
+    # Soglia dichiarata, non nascosta: un'oscillazione di win rate > 15
+    # punti percentuali per uno spostamento di poche unità di min_prob è
+    # considerata instabile — un edge reale dovrebbe degradare gradualmente,
+    # non ribaltarsi.
+    usable = [r for r in results if r["concluded"] >= 5]
+    win_rates = [r["win_rate"] for r in usable]
+    win_rate_range = round(max(win_rates) - min(win_rates), 1) if len(win_rates) >= 2 else None
+    stable = (win_rate_range is not None and win_rate_range <= 15)
+
+    return {
+        "interval": interval,
+        "base_min_prob": base_min_prob,
+        "results": results,
+        "win_rate_range": win_rate_range,
+        "stable": stable if win_rate_range is not None else None,
+    }
+
+
+def format_sensitivity_report(sens: dict, interval: str) -> str:
+    rows = "\n".join(
+        f"  min_prob {r['min_prob']:>2} ({r['delta']:+d}): WR {r['win_rate']}% | "
+        f"PF {r['profit_factor']} | {r['total_r']:+.1f}R (n={r['concluded']})"
+        for r in sens["results"]
+    )
+    if sens["win_rate_range"] is None:
+        verdict = "Campione troppo piccolo su alcune soglie per un verdetto."
+    elif sens["stable"]:
+        verdict = f"✅ Stabile — oscillazione WR di {sens['win_rate_range']} punti sulle soglie testate."
+    else:
+        verdict = (
+            f"⚠️ Instabile — oscillazione WR di {sens['win_rate_range']} punti: "
+            "possibile overfitting sulla soglia esatta in uso."
+        )
+    return (
+        f"🔬 *ROBUSTEZZA PARAMETRI — {interval}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Soglia base: min_prob={sens['base_min_prob']}\n\n"
+        f"{rows}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{verdict}"
     )
