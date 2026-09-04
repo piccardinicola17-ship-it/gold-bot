@@ -176,6 +176,68 @@ class TestCloseTradeEarly(TradeManagerTestCase):
         self.assertEqual(row["be_hit"], 0)
 
 
+class TestAmendClosedTrade(TradeManagerTestCase):
+    """amend_closed_trade: correzione amministrativa di un trade GIA'
+    chiuso (es. LOSS reale preso da uno SL durante un evento macro,
+    corretto a posteriori a CLOSED_EARLY come se la chiusura protettiva
+    pre-evento del 2026-09-04 fosse esistita già a quel momento) — a
+    differenza di close_trade() (solo su status='OPEN'), richiede il
+    trade già CLOSED e ricalcola anche i contatori di sessione."""
+
+    def test_amends_result_price_pips_and_r(self):
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4481.19, sl=4447.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+        tm.close_trade(trade_id, "LOSS", 4447.11, "Stop loss raggiunto")
+
+        self.assertTrue(tm.amend_closed_trade(trade_id, "CLOSED_EARLY", 4469.0, "Corretto a posteriori"))
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["result"], "CLOSED_EARLY")
+        self.assertEqual(row["exit_price"], 4469.0)
+        expected_r = (4469.0 - 4481.19) / (4481.19 - 4447.11)
+        self.assertAlmostEqual(row["pnl_r"], expected_r, places=3)
+        expected_pips = (4469.0 - 4481.19) / 0.10
+        self.assertAlmostEqual(row["pips"], round(expected_pips, 1), places=1)
+
+    def test_rejects_trade_still_open(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        # non chiuso: deve rifiutare, non correggere un trade ancora vivo
+        self.assertFalse(tm.amend_closed_trade(trade_id, "CLOSED_EARLY", 4315.0, "test"))
+
+    def test_rejects_unknown_trade_id(self):
+        self.assertFalse(tm.amend_closed_trade("non-esiste", "CLOSED_EARLY", 4315.0, "test"))
+
+    def test_session_loss_counter_corrected_when_loss_becomes_non_loss(self):
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4481.19, sl=4447.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+        tm.close_trade(trade_id, "LOSS", 4447.11, "Stop loss raggiunto")
+
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        today = conn.execute("SELECT * FROM sessions ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(today["losses"], 1)
+        self.assertEqual(today["consecutive_losses"], 1)
+        self.assertAlmostEqual(today["pnl_r"], -1.0)
+        conn.close()
+
+        tm.amend_closed_trade(trade_id, "CLOSED_EARLY", 4469.0, "Corretto")
+
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        after = conn.execute("SELECT * FROM sessions ORDER BY id DESC LIMIT 1").fetchone()
+        conn.close()
+        # CLOSED_EARLY non e' una LOSS: il contatore va decrementato, non
+        # lasciato a 1 come se il trade fosse ancora classificato perdente.
+        self.assertEqual(after["losses"], 0)
+        self.assertEqual(after["consecutive_losses"], 0)
+        expected_r = (4469.0 - 4481.19) / (4481.19 - 4447.11)
+        self.assertAlmostEqual(after["pnl_r"], expected_r, places=3)
+
+
 class TestUpdateTradeOpenGuard(TradeManagerTestCase):
     def test_mark_tp_hit_is_noop_on_closed_trade(self):
         """_update_trade (usata da mark_tp1_hit/mark_tp2_hit/mark_tp3_hit)

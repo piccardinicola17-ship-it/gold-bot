@@ -17,7 +17,7 @@ from pathlib import Path
 import pytz
 from flask import Flask, abort, g, jsonify, redirect, render_template_string, request
 
-from trade_manager import is_decisive_win
+from trade_manager import is_decisive_win, amend_closed_trade, RESULT_PNL
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -39,12 +39,15 @@ def _is_loopback() -> bool:
 def protect_dashboard():
     if request.path == "/health":
         return None
-    # /api/reset cancella tutti i trade: richiede sempre il token, anche da
+    # /api/reset cancella tutti i trade e /api/correct-trade altera un
+    # risultato/pnl_r già registrato: richiedono sempre il token, anche da
     # loopback. L'esenzione loopback esiste per comodità di lettura locale,
-    # non deve coprire un endpoint distruttivo — altrimenti qualunque
-    # processo nello stesso container (non solo l'utente) potrebbe azzerare
-    # il DB senza presentare alcuna credenziale. Bug reale trovato 2026-09-03.
-    if request.path != "/api/reset" and _is_loopback():
+    # non deve coprire un endpoint che scrive/distrugge dati — altrimenti
+    # qualunque processo nello stesso container (non solo l'utente)
+    # potrebbe azzerare il DB o falsificare un trade senza presentare
+    # alcuna credenziale. Bug reale trovato 2026-09-03 (per /api/reset).
+    _WRITE_ENDPOINTS = ("/api/reset", "/api/correct-trade")
+    if request.path not in _WRITE_ENDPOINTS and _is_loopback():
         return None
     if not DASHBOARD_TOKEN:
         abort(503, "Configura DASHBOARD_TOKEN nelle variabili Railway")
@@ -209,6 +212,35 @@ def api_data():
             "updated": datetime.now(TIMEZONE).strftime("%H:%M:%S"),
         }
     )
+
+
+@app.route("/api/correct-trade", methods=["POST"])
+def api_correct_trade():
+    """Correzione amministrativa di un trade già chiuso — es. un LOSS preso
+    da uno SL durante un evento macro, da correggere a CLOSED_EARLY come se
+    la chiusura protettiva pre-evento (2026-09-04) fosse già esistita a
+    quel momento. Protetto dallo stesso token di tutta la dashboard
+    (before_request) — non serve un flag separato come ALLOW_RESET perché,
+    a differenza del reset, qui non si cancella nulla: resta sempre
+    tracciabile e reversibile con un'altra correzione."""
+    payload = request.get_json(silent=True) or {}
+    trade_id = str(payload.get("trade_id", "")).strip()
+    result = str(payload.get("result", "")).strip().upper()
+    notes = str(payload.get("notes", "Corretto manualmente"))
+    try:
+        exit_price = float(payload.get("exit_price"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "exit_price mancante o non numerico"}), 400
+    if not trade_id or result not in RESULT_PNL:
+        return jsonify({"status": "error", "message": f"trade_id o result non validi (result deve essere uno tra {sorted(RESULT_PNL)})"}), 400
+    try:
+        ok = amend_closed_trade(trade_id, result, exit_price, notes)
+    except Exception as exc:
+        logger.exception("Correzione trade fallita")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+    if not ok:
+        return jsonify({"status": "error", "message": "Trade non trovato o non ancora chiuso"}), 404
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/reset", methods=["POST"])

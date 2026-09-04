@@ -102,5 +102,93 @@ class TestCancelledPipsDisplay(unittest.TestCase):
         )
 
 
+class TestApiCorrectTrade(unittest.TestCase):
+    """/api/correct-trade: correzione amministrativa di un trade già
+    chiuso (es. LOSS reale preso da uno SL durante un evento macro,
+    corretto a posteriori come se la chiusura protettiva pre-evento del
+    2026-09-04 fosse già esistita a quel momento). Come /api/reset, deve
+    richiedere il token anche da loopback (prima di questo endpoint solo
+    /api/reset era escluso dall'esenzione loopback)."""
+
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+        db.DB_PATH = self.tmpdb
+        self._orig_token = db.DASHBOARD_TOKEN
+        db.DASHBOARD_TOKEN = "test-token-123"
+        self.client = db.app.test_client()
+
+    def tearDown(self):
+        db.DASHBOARD_TOKEN = self._orig_token
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+    def _seed_loss_trade(self) -> str:
+        data = {
+            "signal": "BUY", "order_type": "BUY", "entry": 4481.19, "sl": 4447.11,
+            "tp1": 4515.27, "tp2": 4549.35, "tp3": 4590.25, "prob": 85, "regime": "NORMAL",
+            "timeframe": "4h", "price": 4481.19, "risk_pct": 1.0, "strategies": {},
+            "data_timestamp": "2026-09-03T14:00:00", "price_basis": 0.0, "early_be_level": 0,
+        }
+        data["setup_key"] = tm.build_setup_key(data)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+        tm.close_trade(trade_id, "LOSS", 4447.11, "Stop loss raggiunto dal monitor virtuale")
+        return trade_id
+
+    def test_requires_token_even_from_loopback(self):
+        trade_id = self._seed_loss_trade()
+        resp = self.client.post("/api/correct-trade", json={
+            "trade_id": trade_id, "result": "CLOSED_EARLY", "exit_price": 4469.0,
+        })
+        self.assertEqual(resp.status_code, 401)
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["result"], "LOSS", "senza token il trade non deve essere toccato")
+
+    def test_corrects_trade_with_valid_token(self):
+        trade_id = self._seed_loss_trade()
+        resp = self.client.post(
+            "/api/correct-trade?token=test-token-123",
+            json={"trade_id": trade_id, "result": "CLOSED_EARLY", "exit_price": 4469.0,
+                  "notes": "Corretto: la chiusura protettiva pre-evento non esisteva ancora"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["result"], "CLOSED_EARLY")
+        self.assertEqual(row["exit_price"], 4469.0)
+        expected_r = (4469.0 - 4481.19) / (4481.19 - 4447.11)
+        self.assertAlmostEqual(row["pnl_r"], expected_r, places=3)
+
+    def test_rejects_invalid_result(self):
+        trade_id = self._seed_loss_trade()
+        resp = self.client.post(
+            "/api/correct-trade?token=test-token-123",
+            json={"trade_id": trade_id, "result": "NOT_A_REAL_RESULT", "exit_price": 4469.0},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_rejects_missing_exit_price(self):
+        trade_id = self._seed_loss_trade()
+        resp = self.client.post(
+            "/api/correct-trade?token=test-token-123",
+            json={"trade_id": trade_id, "result": "CLOSED_EARLY"},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_unknown_trade_id_returns_404(self):
+        resp = self.client.post(
+            "/api/correct-trade?token=test-token-123",
+            json={"trade_id": "non-esiste", "result": "CLOSED_EARLY", "exit_price": 4469.0},
+        )
+        self.assertEqual(resp.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

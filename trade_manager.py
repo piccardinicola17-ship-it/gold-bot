@@ -906,6 +906,95 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
     return True
 
 
+def amend_closed_trade(trade_id: str, result: str, exit_price: float, notes: str = "") -> bool:
+    """Corregge il risultato di un trade GIÀ chiuso (uso amministrativo,
+    non nel flusso normale) — es. un trade preso in pieno dallo stop loss
+    durante un evento macro prima che esistesse la chiusura protettiva
+    pre-evento, da correggere a posteriori come se quella logica ci fosse
+    già stata. A differenza di close_trade() (che opera solo su
+    status='OPEN'), questa richiede che il trade sia già CLOSED, e
+    ricalcola anche i contatori aggregati della sessione del giorno in cui
+    è stato chiuso in origine (pnl_r, wins/losses, perdite consecutive) —
+    altrimenti resterebbero sballati rispetto al nuovo risultato, es. un
+    "consecutive_losses" gonfiato da una LOSS che non è più tale.
+    """
+    result = result.upper()
+    if result not in RESULT_PNL:
+        raise ValueError(f"Risultato non valido: {result}")
+    now = datetime.now(TIMEZONE)
+
+    with _write_lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM trades WHERE trade_id=? AND status='CLOSED'", (trade_id,)
+        ).fetchone()
+        if not row:
+            return False
+
+        old_result = row["result"]
+        old_pnl_r = float(row["pnl_r"] or 0.0)
+
+        if result == "CLOSED_EARLY":
+            direction = 1 if row["signal"] == "BUY" else -1
+            initial_risk = abs(float(row["entry"]) - float(row["sl"]))
+            pnl_r = round(
+                direction * (float(exit_price) - float(row["entry"])) / initial_risk, 3
+            ) if initial_risk > 0 else 0.0
+        else:
+            pnl_r = RESULT_PNL[result]
+
+        tp1_hit = int(result in ("WIN_TP1", "WIN_TP2", "WIN_TP3"))
+        tp2_hit = int(result in ("WIN_TP2", "WIN_TP3"))
+        tp3_hit = int(result == "WIN_TP3")
+        be_hit = int(result == "WIN_BE")
+        be_armed = int(bool(tp1_hit))
+
+        if result == "WIN_BE" and row["tp1_hit"] and row["tp1"] and float(row["tp1"]) > 0:
+            pips = calculate_trade_pips(row["signal"], row["entry"], float(row["tp1"]))
+        else:
+            pips = calculate_trade_pips(row["signal"], row["entry"], exit_price)
+
+        cursor = conn.execute(
+            """
+            UPDATE trades SET result=?, exit_price=?, pnl_r=?, pips=?, notes=?,
+                              tp1_hit=?, tp2_hit=?, tp3_hit=?, be_armed=?, be_hit=?
+            WHERE trade_id=? AND status='CLOSED'
+            """,
+            (result, float(exit_price), pnl_r, pips, notes,
+             tp1_hit, tp2_hit, tp3_hit, be_armed, be_hit, trade_id),
+        )
+        if cursor.rowcount == 0:
+            return False
+
+        # Ricalcola i contatori di sessione del giorno in cui il trade era
+        # stato chiuso in origine (non quello odierno, se diversi) — sottrae
+        # il contributo del vecchio risultato e aggiunge quello nuovo.
+        if row["activated"] and (old_result != "CANCELLED" or result != "CANCELLED"):
+            closed_day = (row["closed_at"] or now.isoformat())[:10]
+            was_win = int(old_result in ("WIN_TP1", "WIN_TP2", "WIN_TP3") or bool(row["tp1_hit"]))
+            was_loss = int(old_result == "LOSS")
+            is_win = int(result in ("WIN_TP1", "WIN_TP2", "WIN_TP3") or bool(tp1_hit))
+            is_loss = int(result == "LOSS")
+            delta_wins = is_win - was_win
+            delta_losses = is_loss - was_loss
+            delta_pnl = pnl_r - old_pnl_r
+            conn.execute(
+                """
+                UPDATE sessions SET
+                    wins=MAX(0, wins+?), losses=MAX(0, losses+?), pnl_r=pnl_r+?,
+                    consecutive_losses=MAX(0, consecutive_losses+?)
+                WHERE date=?
+                """,
+                (delta_wins, delta_losses, delta_pnl, delta_losses, closed_day),
+            )
+
+    _sync_active_snapshot()
+    logger.info(
+        "Trade corretto (amministrativo): %s -> %s (%+.3fR), era %s (%+.1fR)",
+        trade_id, result, pnl_r, old_result, old_pnl_r,
+    )
+    return True
+
+
 def _decode_row(row: sqlite3.Row | dict) -> dict:
     data = dict(row)
     for source, target, default in (
