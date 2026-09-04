@@ -1,0 +1,5 @@
+-r requirements.txt
+# Solo per la suite di test (property-based testing, vedi tests/) - NON
+# serve al bot live, quindi non va in requirements.txt: Railway continua a
+# installare solo le dipendenze che il bot deployato usa davvero.
+hypothesis==6.141.1

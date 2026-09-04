@@ -7,3 +7,6 @@ regime_history.json
 # Cartella dati locale (BOT_DIR): DB runtime, CSV storici scaricati da
 # historical_events.py — ricostruibili, non vanno in git.
 data/
+# Cache di esempi di Hypothesis (property-based testing, vedi
+# tests/test_property_based.py) — locale, non serve versionarla.
+.hypothesis/
