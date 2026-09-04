@@ -129,5 +129,43 @@ class TestBuildContextSnapshotTradeState(unittest.TestCase):
         self.assertIn("sotto la soglia 65%", context)
 
 
+class TestStatedPositionNote(unittest.TestCase):
+    """_stated_position_note(): terzo bug della stessa sessione, il più
+    insidioso. Una regola nel system prompt ("se l'utente descrive una sua
+    posizione, ha priorità sul campo Trade") non bastava da sola —
+    verificato dal vivo con Groq: con un trade SELL del bot in contesto e
+    una domanda "ho un buy da 4394, dove metto i TP?", il modello ha
+    comunque risposto con i TP del SELL del bot (target sotto al prezzo
+    invece che sopra, coerenti con una SELL non con il BUY dichiarato).
+    Serve un rinforzo strutturale agganciato alla domanda stessa, non solo
+    un'istruzione generica nel prompt."""
+
+    def test_detects_common_italian_phrasings(self):
+        casi = [
+            "Ho un buy da 4394, dove metto i TP?",
+            "sono long a 4394, che ne pensi",
+            "Ho un sell da 4470",
+            "sono short da 4470, dove sl?",
+            "ho comprato a 4394 ieri",
+        ]
+        for domanda in casi:
+            with self.subTest(domanda=domanda):
+                self.assertNotEqual(aiasst._stated_position_note(domanda), "")
+
+    def test_generic_question_returns_empty_note(self):
+        casi = [
+            "Guardando il mercato ora fino a dove potrebbe arrivare?",
+            "Cosa ne pensi dell'NFP di oggi?",
+            "Conviene entrare adesso?",
+        ]
+        for domanda in casi:
+            with self.subTest(domanda=domanda):
+                self.assertEqual(aiasst._stated_position_note(domanda), "")
+
+    def test_note_tells_model_to_ignore_bot_trade_field(self):
+        note = aiasst._stated_position_note("Ho un buy da 4394, dove metto i TP?")
+        self.assertIn("ignora del tutto il campo 'Trade'", note)
+
+
 if __name__ == "__main__":
     unittest.main()

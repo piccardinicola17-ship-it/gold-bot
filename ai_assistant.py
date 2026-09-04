@@ -4,6 +4,7 @@ Usa Groq per rispondere a domande libere sul mercato con contesto live.
 """
 
 import os
+import re
 import logging
 import requests
 import asyncio
@@ -16,6 +17,34 @@ TIMEZONE = pytz.timezone("Europe/Rome")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "groq/compound-mini"
+
+# Rileva se l'utente sta descrivendo una PROPRIA posizione nella domanda
+# (es. "ho un buy da 4394", "sono short a 4470", "ho comprato a 4394").
+# FIX: una regola nel system prompt da sola non bastava — testato in
+# produzione il 2026-09-04, con un trade del bot in contesto (SELL LIMIT)
+# di direzione opposta a quella dichiarata dall'utente (BUY), il modello
+# ha comunque risposto sui livelli del trade del bot, ignorando i numeri
+# scritti dall'utente. Quando questo pattern matcha, il codice inserisce
+# una nota esplicita SEPARATA dal system prompt, agganciata proprio alla
+# domanda — un rinforzo strutturale, non solo un'istruzione generica.
+_STATED_POSITION_RE = re.compile(
+    r"\b(?:ho\s+un\s+(?:buy|sell)|sono\s+(?:long|short)|ho\s+comprato|ho\s+venduto)\b"
+    r".{0,25}?(\d{3,5}(?:[.,]\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def _stated_position_note(question: str) -> str:
+    if not _STATED_POSITION_RE.search(question):
+        return ""
+    return (
+        "\n\nATTENZIONE: la domanda qui sotto descrive una posizione PERSONALE "
+        "dell'utente (un entry/prezzo scritto da lui). NON è il campo 'Trade' nel "
+        "contesto sopra — quello è il trade che il BOT ha aperto per conto suo, "
+        "può avere direzione e prezzo completamente diversi. Per rispondere usa "
+        "SOLO i numeri che l'utente scrive nella domanda, ignora del tutto il "
+        "campo 'Trade' del contesto."
+    )
 
 
 def build_context_snapshot() -> str:
@@ -128,8 +157,12 @@ def build_context_snapshot() -> str:
                     distanza = f" — distanza prezzo attuale da entry: {float(current_price) - float(trade.get('entry', 0)):+.2f}$"
                 except (TypeError, ValueError):
                     pass
+            # Etichetta esplicita "del BOT" (non solo "Trade:") — riduce
+            # l'ambiguità quando l'utente descrive una propria posizione
+            # diversa nella domanda, vedi _stated_position_note().
             parts.append(
-                f"\nTrade: {trade.get('signal')} {trade.get('order_type')} "
+                f"\nTrade aperto dal BOT (può essere diverso da una tua posizione personale): "
+                f"{trade.get('signal')} {trade.get('order_type')} "
                 f"@ {trade.get('entry')} [{trade.get('timeframe','').upper()}] — Stato: {stato}{progresso}{distanza}\n"
                 f"SL {trade.get('sl')}, TP1 {trade.get('tp1')}, TP2 {trade.get('tp2')}, TP3 {trade.get('tp3')}"
             )
@@ -149,6 +182,7 @@ REGOLE:
 - Una domanda diretta ("fino a dove può arrivare", "conviene entrare") merita una risposta diretta — un numero, un livello, una direzione. Non elencare scenari ipotetici multipli ("se i dati escono deboli... se escono forti...") a meno che l'utente chieda esplicitamente "cosa succede se X". Prendi posizione sui dati che hai adesso.
 - Usa SEMPRE i dati di contesto forniti (prezzo, regime, strategie, notizie, calendario, trade). Non inventare mai un dato assente dal contesto — se manca, dillo in una frase, non aggirarlo con un'ipotesi.
 - Sul trade in corso: guarda il campo "Stato". Se dice "IN ATTESA", l'ordine non è mai scattato e NESSUN target può essere stato raggiunto — non dire mai che un TP è stato toccato o è vicino a meno che compaia esplicitamente tra i "target già raggiunti".
+- Se l'utente descrive una SUA posizione nella domanda (es. "ho un buy da 4394", "sono short da X") quella ha SEMPRE priorità assoluta sul campo "Trade" del contesto: quel campo è il trade che il BOT ha aperto per conto suo, non necessariamente la posizione di cui l'utente sta parlando — possono avere direzione e prezzo diversi. Se l'utente dà un entry o una direzione nella domanda, usa SOLO quei numeri per rispondere, ignora il trade del contesto a meno che l'utente non lo citi.
 - Niente consigli assoluti (compra/vendi ora): presenta il dato e lascia la decisione all'utente, senza girarci troppo intorno."""
 
 
@@ -162,6 +196,8 @@ async def ask_ai(question: str) -> str:
         logger.error(f"Errore contesto: {e}")
         context = "(Contesto di mercato non disponibile)"
 
+    question_note = _stated_position_note(question)
+
     def _request():
         response = requests.post(
             GROQ_URL,
@@ -170,7 +206,7 @@ async def ask_ai(question: str) -> str:
                 "model": GROQ_MODEL,
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": f"CONTESTO:\n{context}\n\nDOMANDA:\n{question}"}
+                    {"role": "user",   "content": f"CONTESTO:\n{context}\n\nDOMANDA:\n{question}{question_note}"}
                 ],
                 "temperature": 0.4,
                 # Ridotto da 500: la regola "massimo 4-5 righe" nel prompt
