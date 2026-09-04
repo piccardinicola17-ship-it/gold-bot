@@ -1395,6 +1395,7 @@ async def check_macro_alerts(bot):
         # POST-evento (8-15 minuti dopo) — il resoconto post-evento non
         # scattava mai, per nessun evento (bug trovato il 1 settembre 2026).
         events = await asyncio.to_thread(get_upcoming_events, 1, 0.5)
+        post_event_fired = False
 
         for ev in events:
             ev_key = f"{ev['date']}_{ev['time']}_{ev['title']}"
@@ -1455,13 +1456,6 @@ async def check_macro_alerts(bot):
             post_key = f"POST_{ev_key}"
             if -15 <= mins_away <= -8 and post_key not in _sent_post_event_alerts:
                 price = await get_current_price_async()
-                try:
-                    news = await asyncio.to_thread(get_extended_news)
-                    news_analysis = await asyncio.to_thread(
-                        format_news_message, news, price
-                    )
-                except Exception:
-                    news_analysis = "_Notizie non disponibili._"
                 # Resoconto oggettivo: bias previsto pre-evento vs movimento
                 # di prezzo reale — confronto aritmetico sui prezzi, non una
                 # seconda opinione dell'AI (che tra l'altro non avrebbe
@@ -1526,8 +1520,27 @@ async def check_macro_alerts(bot):
                 except Exception as e:
                     logger.debug(f"[{ev['title']}] Previsione statistica non disponibile: {e}")
 
-                if len(news_analysis) > 4000: news_analysis = news_analysis[:3950] + "\n_[Troncato]_"
-                await bot.send_message(chat_id=CHAT_ID, text=news_analysis, parse_mode="Markdown")
+                post_event_fired = True
+
+        # FIX (trovato in diretta il 2026-09-04, NFP): il digest notizie
+        # veniva rifatto (fetch + chiamata LLM) e reinviato UNA VOLTA PER
+        # OGNI evento nel ciclo POST-EVENTO sopra — con più rilasci
+        # simultanei alla stessa ora (es. NFP + Average Hourly Earnings +
+        # Unemployment Rate, tutti alle 14:30) il risultato erano 3 digest
+        # quasi identici di fila, generici (non specifici all'evento appena
+        # uscito) e persino con bias diverso da una chiamata all'altra
+        # (l'LLM ha temperature>0: stesso input, output non deterministico)
+        # — sembrava un bot rotto in loop. Ora si manda una sola volta per
+        # giro dello scheduler, non per evento.
+        if post_event_fired:
+            price = await get_current_price_async()
+            try:
+                news = await asyncio.to_thread(get_extended_news)
+                news_analysis = await asyncio.to_thread(format_news_message, news, price)
+            except Exception:
+                news_analysis = "_Notizie non disponibili._"
+            if len(news_analysis) > 4000: news_analysis = news_analysis[:3950] + "\n_[Troncato]_"
+            await bot.send_message(chat_id=CHAT_ID, text=news_analysis, parse_mode="Markdown")
 
         # Pulizia memory leak
         if len(_sent_event_alerts) > 50:

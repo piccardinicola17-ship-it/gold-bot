@@ -177,5 +177,79 @@ class TestCheckMacroAlertsResilience(GoldBotTestCase):
         self.assertIn("rate\\_decision", sent_text)
 
 
+class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):
+    """Bug trovato in diretta il 2026-09-04 sull'NFP: 3 eventi simultanei
+    (NFP + Average Hourly Earnings + Unemployment Rate, tutti alle 14:30)
+    generavano 3 digest notizie quasi identici di fila (uno per evento nel
+    ciclo POST-EVENTO), con bias pure diverso da una chiamata all'altra —
+    sembrava un bot rotto in loop. Il digest va mandato una sola volta per
+    giro, non una volta per evento."""
+
+    def _make_event(self, minutes_away: int, title: str) -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "N/A",
+            "previous": "N/A",
+        }
+
+    async def _run(self, events):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=events), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4400.0), \
+             mock.patch("gold_bot.get_extended_news", return_value=["headline"]), \
+             mock.patch("gold_bot.format_news_message", return_value="digest notizie"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_single_post_event_sends_news_digest_once(self):
+        import asyncio
+        event = self._make_event(-10, "Non-Farm Employment Change")
+        bot = asyncio.run(self._run([event]))
+        digest_calls = [
+            c for c in bot.send_message.call_args_list
+            if c.kwargs.get("text") == "digest notizie"
+        ]
+        self.assertEqual(len(digest_calls), 1)
+
+    def test_three_simultaneous_post_events_send_news_digest_once_not_three_times(self):
+        import asyncio
+        events = [
+            self._make_event(-10, "Non-Farm Employment Change"),
+            self._make_event(-10, "Average Hourly Earnings m/m"),
+            self._make_event(-10, "Unemployment Rate"),
+        ]
+        bot = asyncio.run(self._run(events))
+        digest_calls = [
+            c for c in bot.send_message.call_args_list
+            if c.kwargs.get("text") == "digest notizie"
+        ]
+        self.assertEqual(len(digest_calls), 1)
+        # Ma il resoconto POST-EVENTO va comunque mandato per ciascuno dei 3.
+        post_evento_calls = [
+            c for c in bot.send_message.call_args_list
+            if "POST-EVENTO" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(post_evento_calls), 3)
+
+    def test_no_post_event_no_news_digest_sent(self):
+        """Solo eventi pre-evento (30 min prima): nessun digest, il flag
+        post_event_fired resta False."""
+        import asyncio
+        event = self._make_event(30, "Fed Chair Speech")
+        with mock.patch("gold_bot.analyze_macro_event", return_value="Bias: NEUTRO\nMotivo: test"):
+            bot = asyncio.run(self._run([event]))
+        digest_calls = [
+            c for c in bot.send_message.call_args_list
+            if c.kwargs.get("text") == "digest notizie"
+        ]
+        self.assertEqual(len(digest_calls), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
