@@ -22,6 +22,7 @@ from backtest import (
     _is_pending, _order_touched, _execution_entry, _execution_exit,
     _check_trade_bar, _r_result, _safe, _make_setup,
     monte_carlo_drawdown, parameter_sensitivity_backtest,
+    _stat_arb_for_date, _get_cross_asset_series_and_ma,
 )
 
 
@@ -333,6 +334,73 @@ class TestParameterSensitivityBacktest(unittest.TestCase):
             parameter_sensitivity_backtest(base_min_prob=5, deltas=(-10, 0))
         called_probs = [c.kwargs["min_prob"] for c in mock_run.call_args_list]
         self.assertIn(1, called_probs)  # 5 + (-10) clampato a 1, non negativo
+
+
+class TestStatArbForDate(unittest.TestCase):
+    """stat_arb nel backtest (2026-09-05): DXY/TLT storici gratuiti
+    (yfinance) al posto del NEUTRO fisso - lookup causale (.asof), mai il
+    futuro."""
+
+    def _fake_series(self, dates, values):
+        return pd.Series(values, index=pd.DatetimeIndex(dates))
+
+    def test_causal_lookup_uses_last_known_value_not_future(self):
+        dates = pd.date_range("2026-01-01", periods=5, freq="D")
+        dxy = self._fake_series(dates, [100.0, 100.0, 103.0, 100.0, 100.0])
+        dxy_ma = self._fake_series(dates, [100.0] * 5)
+        tlt = self._fake_series(dates, [90.0] * 5)
+        tlt_ma = self._fake_series(dates, [90.0] * 5)
+        with patch("backtest._get_cross_asset_series_and_ma", side_effect=[
+            (dxy, dxy_ma), (tlt, tlt_ma),
+        ]):
+            # Query su una data TRA il giorno 3 (DXY=103, SELL) e il 4esimo
+            # (torna a 100): .asof() deve prendere l'ultimo valore noto
+            # PRIMA della query, non guardare avanti.
+            result = _stat_arb_for_date(pd.Timestamp("2026-01-03 12:00:00"))
+        self.assertEqual(result["signal"], "SELL")
+
+    def test_empty_history_returns_neutral(self):
+        with patch("backtest._get_cross_asset_series_and_ma", return_value=(pd.Series(dtype=float), pd.Series(dtype=float))):
+            result = _stat_arb_for_date(pd.Timestamp("2026-01-03"))
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+    def test_date_before_any_history_returns_neutral(self):
+        dates = pd.date_range("2026-01-01", periods=5, freq="D")
+        dxy = self._fake_series(dates, [100.0] * 5)
+        dxy_ma = self._fake_series(dates, [100.0] * 5)
+        with patch("backtest._get_cross_asset_series_and_ma", side_effect=[
+            (dxy, dxy_ma), (dxy, dxy_ma),
+        ]):
+            result = _stat_arb_for_date(pd.Timestamp("2025-01-01"))
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+
+class TestGetCrossAssetSeriesAndMa(unittest.TestCase):
+    def setUp(self):
+        import backtest as bt
+        bt._cross_asset_ma_cache.clear()
+
+    def test_caches_after_first_fetch(self):
+        import backtest as bt
+        fake_df = pd.DataFrame(
+            {"Close": [100.0 + i for i in range(15)]},
+            index=pd.date_range("2026-01-01", periods=15, freq="D"),
+        )
+        with patch("yfinance.Ticker") as mock_ticker:
+            mock_ticker.return_value.history.return_value = fake_df
+            s1, ma1 = _get_cross_asset_series_and_ma("DX-Y.NYB")
+            s2, ma2 = _get_cross_asset_series_and_ma("DX-Y.NYB")
+        self.assertEqual(mock_ticker.call_count, 1)  # secondo giro dalla cache
+        self.assertEqual(len(s1), 15)
+        self.assertTrue(s1.equals(s2))
+
+    def test_fetch_failure_returns_empty_series_not_raise(self):
+        import backtest as bt
+        bt._cross_asset_ma_cache.pop("BROKEN", None)
+        with patch("yfinance.Ticker", side_effect=Exception("rete giu'")):
+            s, ma = _get_cross_asset_series_and_ma("BROKEN")
+        self.assertTrue(s.empty)
+        self.assertTrue(ma.empty)
 
 
 if __name__ == "__main__":

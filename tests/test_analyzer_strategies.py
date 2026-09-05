@@ -18,7 +18,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analyzer import candlestick_strategy, ml_alpha_strategy
+from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy
+from unittest.mock import patch
 
 
 def _candle_df(rows: list) -> pd.DataFrame:
@@ -129,6 +130,62 @@ class TestMlAlphaStrategyRuleBasedOnly(unittest.TestCase):
         os.environ.pop("DB_PATH", None)
         result = ml_alpha_strategy(df, {"1h": "BUY"}, {"structure": "BULLISH"})
         self.assertIn(result["signal"], ("BUY", "SELL", "NEUTRAL"))
+
+
+class TestStatArbScoreFromMeans(unittest.TestCase):
+    """_stat_arb_score_from_means() (2026-09-05): logica pura estratta da
+    statistical_arbitrage_strategy() così che backtest.py possa riusarla
+    con medie storiche gratuite invece di duplicarne le soglie."""
+
+    def test_dxy_above_ma_signals_sell(self):
+        result = _stat_arb_score_from_means(dxy=102.0, us10y=90.0, dxy_ma=100.0, tlt_ma=None)
+        self.assertEqual(result["signal"], "SELL")
+
+    def test_dxy_below_ma_signals_buy(self):
+        result = _stat_arb_score_from_means(dxy=98.0, us10y=90.0, dxy_ma=100.0, tlt_ma=None)
+        self.assertEqual(result["signal"], "BUY")
+
+    def test_tlt_above_ma_signals_buy(self):
+        # TLT alto = yields bassi = positivo per l'oro
+        result = _stat_arb_score_from_means(dxy=100.0, us10y=92.0, dxy_ma=None, tlt_ma=90.0)
+        self.assertEqual(result["signal"], "BUY")
+
+    def test_tlt_below_ma_signals_sell(self):
+        result = _stat_arb_score_from_means(dxy=100.0, us10y=88.0, dxy_ma=None, tlt_ma=90.0)
+        self.assertEqual(result["signal"], "SELL")
+
+    def test_conflicting_signals_cancel_to_neutral(self):
+        # DXY dice SELL (+2), TLT dice BUY (+2): pareggio -> nessuna direzione vince
+        result = _stat_arb_score_from_means(dxy=102.0, us10y=92.0, dxy_ma=100.0, tlt_ma=90.0)
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+    def test_small_deviation_is_neutral(self):
+        result = _stat_arb_score_from_means(dxy=100.3, us10y=90.0, dxy_ma=100.0, tlt_ma=None)
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+    def test_missing_means_is_neutral(self):
+        result = _stat_arb_score_from_means(dxy=100.0, us10y=90.0, dxy_ma=None, tlt_ma=None)
+        self.assertEqual(result["signal"], "NEUTRAL")
+        self.assertEqual(result["score"], 0)
+
+
+class TestStatisticalArbitrageStrategyWrapper(unittest.TestCase):
+    """Regressione: statistical_arbitrage_strategy() deve comportarsi
+    esattamente come prima del refactor (delega a
+    _stat_arb_score_from_means)."""
+
+    def test_zero_dxy_or_us10y_is_neutral(self):
+        self.assertEqual(statistical_arbitrage_strategy(4000.0, 0.0, 90.0)["signal"], "NEUTRAL")
+        self.assertEqual(statistical_arbitrage_strategy(4000.0, 100.0, 0.0)["signal"], "NEUTRAL")
+
+    def test_delegates_to_pure_scoring_with_fetched_means(self):
+        import pandas as pd
+        dxy_hist = pd.DataFrame({"close": [100.0] * 15})
+        tlt_hist = pd.DataFrame({"close": [90.0] * 15})
+        with patch("analyzer.get_dxy_history", return_value=dxy_hist), \
+             patch("analyzer.get_tlt_history", return_value=tlt_hist):
+            result = statistical_arbitrage_strategy(4000.0, 103.0, 90.0)
+        self.assertEqual(result["signal"], "SELL")
 
 
 if __name__ == "__main__":

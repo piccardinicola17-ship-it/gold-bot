@@ -29,6 +29,7 @@ from analyzer import (
     momentum_strategy,
     order_flow_strategy,
     trend_following_strategy,
+    _stat_arb_score_from_means,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,65 @@ def _check_trade_bar(trade: dict, bar) -> BarResult:
     return BarResult(activated_now=activated_now)
 
 
+# stat_arb nel backtest (2026-09-05): la strategia è già live e vota nella
+# pipeline reale, ma non era mai stata validata perché statistical_
+# arbitrage_strategy() usa get_dxy_history()/get_tlt_history() — Twelve
+# Data (a pagamento) e solo 20 barre, inadatte a un backtest di migliaia
+# di candele. Qui si usa storico DXY/TLT gratuito (yfinance, "max" period,
+# cache in-process) e si richiama _stat_arb_score_from_means() — la STESSA
+# funzione di scoring del path live (estratta apposta da
+# statistical_arbitrage_strategy, vedi analyzer.py) — invece di duplicarne
+# le soglie qui. Lookup con .asof(): usa solo l'ultimo valore NOTO fino a
+# quella data, mai il futuro.
+_cross_asset_ma_cache: dict[str, tuple] = {}
+
+
+def _get_cross_asset_series_and_ma(symbol: str) -> tuple:
+    if symbol in _cross_asset_ma_cache:
+        return _cross_asset_ma_cache[symbol]
+    try:
+        import yfinance as yf
+        df = yf.Ticker(symbol).history(period="max", interval="1d", auto_adjust=True)
+        if df is None or df.empty:
+            raise ValueError(f"nessun dato storico per {symbol}")
+        s = df["Close"].astype(float)
+        s.index = pd.to_datetime(s.index)
+        if s.index.tz is not None:
+            s.index = s.index.tz_localize(None)
+        s = s.sort_index()
+        ma = s.rolling(20, min_periods=10).mean()
+    except Exception as e:
+        logger.warning(f"stat_arb: storico {symbol} non disponibile per il backtest: {e}")
+        s, ma = pd.Series(dtype=float), pd.Series(dtype=float)
+    _cross_asset_ma_cache[symbol] = (s, ma)
+    return s, ma
+
+
+def _stat_arb_for_date(date) -> dict:
+    # try/except a copertura anche di input non-datetime (es. finestre di
+    # test con indice intero) - mai il caso nei dati OHLC reali, ma _make_
+    # setup() non deve comunque crashare l'intera pipeline per questo.
+    try:
+        dxy_s, dxy_ma_s = _get_cross_asset_series_and_ma("DX-Y.NYB")
+        tlt_s, tlt_ma_s = _get_cross_asset_series_and_ma("TLT")
+        if dxy_s.empty or tlt_s.empty:
+            return {"signal": "NEUTRAL", "score": 0}
+        dxy    = dxy_s.asof(date)
+        tlt    = tlt_s.asof(date)
+        dxy_ma = dxy_ma_s.asof(date)
+        tlt_ma = tlt_ma_s.asof(date)
+    except Exception as e:
+        logger.debug(f"stat_arb: lookup fallito per {date!r}: {e}")
+        return {"signal": "NEUTRAL", "score": 0}
+    if pd.isna(dxy) or pd.isna(tlt):
+        return {"signal": "NEUTRAL", "score": 0}
+    return _stat_arb_score_from_means(
+        float(dxy), float(tlt),
+        None if pd.isna(dxy_ma) else float(dxy_ma),
+        None if pd.isna(tlt_ma) else float(tlt_ma),
+    )
+
+
 def _make_setup(window: pd.DataFrame, interval: str, min_prob: int) -> dict | None:
     window = detect_swing_points(window.copy())
     row = window.iloc[-1]
@@ -199,7 +259,7 @@ def _make_setup(window: pd.DataFrame, interval: str, min_prob: int) -> dict | No
         "ml": ml_alpha_strategy(window, mtf_neutral, smc),
         "smc": {"signal": "NEUTRAL", "score": 0},
         "event": {"signal": "NEUTRAL", "score": 0},
-        "stat_arb": {"signal": "NEUTRAL", "score": 0},
+        "stat_arb": _stat_arb_for_date(window.index[-1]),
     }
     aggregated = aggregate_strategies(strategies, regime_data, timeframe=interval)
     if aggregated["signal"] == "NEUTRAL":

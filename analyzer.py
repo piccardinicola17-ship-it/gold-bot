@@ -1171,6 +1171,48 @@ def get_data_generic(symbol: str, interval: str = "1day", outputsize: int = 30) 
     return df
 
 
+def _stat_arb_score_from_means(dxy: float, us10y: float, dxy_ma, tlt_ma) -> dict:
+    """
+    Logica pura di scoring (nessuna chiamata di rete) — usa la deviazione %
+    di DXY/TLT dalla propria media mobile a 20 periodi. Estratta da
+    statistical_arbitrage_strategy() il 2026-09-05 così che backtest.py possa
+    chiamare la STESSA funzione di decisione con medie precalcolate da dati
+    storici gratuiti (yfinance), invece di duplicarne le soglie in un secondo
+    posto — la strategia era già live ma non era mai stata validata da un
+    backtest (statistical_arbitrage_strategy chiama get_dxy_history/
+    get_tlt_history, che usano Twelve Data a pagamento e nessuna media
+    storica lunga: inadatte a migliaia di barre di backtest).
+    """
+    score_buy  = 0
+    score_sell = 0
+    reasons    = []
+
+    if dxy_ma:
+        dxy_dev = (dxy - dxy_ma) / dxy_ma * 100  # % deviazione dalla media
+        if dxy_dev > 1.0:      # DXY sopra la sua media di oltre 1%
+            score_sell += 2
+            reasons.append(f"DXY +{dxy_dev:.1f}% vs MA20")
+        elif dxy_dev < -1.0:   # DXY sotto la sua media di oltre 1%
+            score_buy += 2
+            reasons.append(f"DXY {dxy_dev:.1f}% vs MA20")
+
+    if tlt_ma:
+        tlt_dev = (us10y - tlt_ma) / tlt_ma * 100
+        # TLT alto = yields bassi = positivo per oro
+        if tlt_dev > 1.0:
+            score_buy += 2
+            reasons.append(f"TLT +{tlt_dev:.1f}% vs MA20 (yields bassi)")
+        elif tlt_dev < -1.0:
+            score_sell += 2
+            reasons.append(f"TLT {tlt_dev:.1f}% vs MA20 (yields alti)")
+
+    if score_buy >= 2 and score_buy > score_sell:
+        return {"signal": "BUY", "score": score_buy, "reason": "StatArb: " + ", ".join(reasons)}
+    if score_sell >= 2 and score_sell > score_buy:
+        return {"signal": "SELL", "score": score_sell, "reason": "StatArb: " + ", ".join(reasons)}
+    return {"signal": "NEUTRAL", "score": 0, "reason": ""}
+
+
 def statistical_arbitrage_strategy(price_xau: float, dxy: float, us10y: float) -> dict:
     """
     Statistical Arbitrage: XAU/USD vs DXY e TLT (proxy tassi).
@@ -1178,52 +1220,26 @@ def statistical_arbitrage_strategy(price_xau: float, dxy: float, us10y: float) -
     assolute fisse — più robusto perché si adatta ai livelli di mercato attuali
     invece di restare ancorato a valori storici che diventano obsoleti.
     """
-    result = {"signal": "NEUTRAL", "score": 0, "reason": ""}
-
     if dxy == 0 or us10y == 0:
-        return result
+        return {"signal": "NEUTRAL", "score": 0, "reason": ""}
 
-    score_buy  = 0
-    score_sell = 0
-    reasons    = []
-
+    dxy_ma = None
+    tlt_ma = None
     try:
         dxy_hist = get_dxy_history(20)
         if not dxy_hist.empty and len(dxy_hist) >= 10:
-            dxy_ma  = float(dxy_hist["close"].mean())
-            dxy_dev = (dxy - dxy_ma) / dxy_ma * 100  # % deviazione dalla media
-
-            if dxy_dev > 1.0:      # DXY sopra la sua media di oltre 1%
-                score_sell += 2
-                reasons.append(f"DXY +{dxy_dev:.1f}% vs MA20")
-            elif dxy_dev < -1.0:   # DXY sotto la sua media di oltre 1%
-                score_buy += 2
-                reasons.append(f"DXY {dxy_dev:.1f}% vs MA20")
+            dxy_ma = float(dxy_hist["close"].mean())
     except Exception as e:
         logger.warning(f"Errore calcolo DXY MA: {e}")
 
     try:
         tlt_hist = get_tlt_history(20)
         if not tlt_hist.empty and len(tlt_hist) >= 10:
-            tlt_ma  = float(tlt_hist["close"].mean())
-            tlt_dev = (us10y - tlt_ma) / tlt_ma * 100
-
-            # TLT alto = yields bassi = positivo per oro
-            if tlt_dev > 1.0:
-                score_buy += 2
-                reasons.append(f"TLT +{tlt_dev:.1f}% vs MA20 (yields bassi)")
-            elif tlt_dev < -1.0:
-                score_sell += 2
-                reasons.append(f"TLT {tlt_dev:.1f}% vs MA20 (yields alti)")
+            tlt_ma = float(tlt_hist["close"].mean())
     except Exception as e:
         logger.warning(f"Errore calcolo TLT MA: {e}")
 
-    if score_buy >= 2 and score_buy > score_sell:
-        return {"signal": "BUY", "score": score_buy, "reason": "StatArb: " + ", ".join(reasons)}
-    if score_sell >= 2 and score_sell > score_buy:
-        return {"signal": "SELL", "score": score_sell, "reason": "StatArb: " + ", ".join(reasons)}
-
-    return result
+    return _stat_arb_score_from_means(dxy, us10y, dxy_ma, tlt_ma)
 
 
 # ═══════════════════════════════════════════════════════════════
