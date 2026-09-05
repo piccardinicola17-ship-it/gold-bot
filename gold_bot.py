@@ -198,128 +198,12 @@ def _ny_open_time_it() -> str:
 
 
 # ═══════════════════════════════════════════════
-# FORMATO SEGNALE
-# ═══════════════════════════════════════════════
-
-def format_signal(data: dict) -> str:
-    signal     = data["signal"]
-    order_type = data["order_type"]
-    entry      = data["entry"]
-    sl         = data["sl"]
-    tp1        = data["tp1"]
-    tp2        = data["tp2"]
-    tp3        = data["tp3"]
-    rr1        = data.get("rr1", "?")
-    rr2        = data.get("rr2", "?")
-    rr3        = data.get("rr3", "?")
-    prob       = data["prob"]
-    tf         = data.get("timeframe", "5min")
-    tf_label   = TF_LABEL.get(tf, tf.upper())
-    emoji      = "🟢" if signal == "BUY" else "🔴"
-
-    return (
-        f"{emoji} *Trade: XAUUSD {order_type} @ {entry}* [{tf_label}]\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛑 SL @ {sl}\n"
-        f"🎯 TP1 @ {tp1}  |  R:R 1:{rr1}\n"
-        f"🎯 TP2 @ {tp2}  |  R:R 1:{rr2}\n"
-        f"🎯 TP3 @ {tp3}  |  R:R 1:{rr3}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Prob: {prob}%"
-    )
-
-
-def format_signal_detail(data: dict) -> str:
-    signal     = data["signal"]
-    order_type = data["order_type"]
-    entry      = data["entry"]
-    sl         = data["sl"]
-    tp1        = data["tp1"]
-    tp2        = data["tp2"]
-    tp3        = data["tp3"]
-    rr1        = data.get("rr1", "?")
-    rr2        = data.get("rr2", "?")
-    rr3        = data.get("rr3", "?")
-    prob       = data["prob"]
-    tf         = data.get("timeframe", "5min")
-    tf_label   = TF_LABEL.get(tf, tf.upper())
-    emoji      = "🟢" if signal == "BUY" else "🔴"
-
-    strats    = data.get("strategies", {})
-    strat_txt = ""
-    labels    = {
-        "smc": "SMC v3.0", "trend": "Trend Following", "mean_rev": "Mean Reversion",
-        "momentum": "Momentum", "event": "Event-Driven", "stat_arb": "Stat.Arb",
-        "ml": "ML Alpha", "candle": "Candlestick", "order_flow": "Order Flow"
-    }
-    for name, res in strats.items():
-        s  = res.get("signal", "NEUTRAL")
-        sc = res.get("score", 0)
-        e  = "🟢" if s == "BUY" else "🔴" if s == "SELL" else "⚪"
-        strat_txt += f"{e} {labels.get(name, name)}: {s} ({sc})\n"
-
-    mtf     = data.get("mtf_trends", {})
-    mtf_txt = ""
-    for tf_k in ["5min", "15min", "1h", "4h", "1day"]:
-        t = mtf.get(tf_k, "N/A")
-        e = "🟢" if t == "BUY" else "🔴" if t == "SELL" else "⚪"
-        mtf_txt += f"{e}{TF_LABEL.get(tf_k, tf_k)} "
-
-    regime   = data.get("regime", "N/A")
-    regime_map = {
-        "TRENDING_UP": "📈 Trending Up", "TRENDING_DOWN": "📉 Trending Down",
-        "RANGING": "📦 Ranging", "VOLATILE": "🌪 Volatile", "NORMAL": "➡️ Normale",
-        "ACCUMULATION": "🔄 Accumulation", "MANIPULATION": "⚠️ Manipulation",
-        "DISTRIBUTION": "📤 Distribution", "REVERSAL": "🔁 Reversal",
-    }
-
-    smc_setup = data.get("smc_setup", "")
-    bos       = data.get("bos", "")
-    choch     = data.get("choch", "")
-    candle    = data.get("candle", "")
-    structure = data.get("structure", "NEUTRAL")
-    pd_zone   = data.get("pd_zone", "N/A")
-    sr        = data.get("sr", {})
-    ob        = data.get("ob", {})
-    fvg       = data.get("fvg", {})
-
-    msg = (
-        f"{emoji} *Trade: XAUUSD {order_type} @ {entry}* [{tf_label}]\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛑 SL @ {sl}\n"
-        f"🎯 TP1 @ {tp1}  |  R:R 1:{rr1}\n"
-        f"🎯 TP2 @ {tp2}  |  R:R 1:{rr2}\n"
-        f"🎯 TP3 @ {tp3}  |  R:R 1:{rr3}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Prob: {prob}% | Score: {data.get('total_score', 0)}\n"
-        f"🌍 {regime_map.get(regime, regime)} | {structure} | {pd_zone}\n"
-    )
-    if smc_setup: msg += f"🏗 {smc_setup}\n"
-    if bos:       msg += f"🔓 BOS: {bos}\n"
-    if choch:     msg += f"🔄 CHoCH: {choch}\n"
-    if candle:    msg += f"🕯 {candle}\n"
-    if signal == "BUY" and ob.get("bullish_ob"):
-        msg += f"📦 OB: {ob['bullish_ob']['low']}–{ob['bullish_ob']['high']}\n"
-    if signal == "SELL" and ob.get("bearish_ob"):
-        msg += f"📦 OB: {ob['bearish_ob']['low']}–{ob['bearish_ob']['high']}\n"
-    if signal == "BUY" and fvg.get("bullish_fvg"):
-        msg += f"🔵 FVG: {fvg['bullish_fvg']['bottom']}–{fvg['bullish_fvg']['top']}\n"
-    if signal == "SELL" and fvg.get("bearish_fvg"):
-        msg += f"🔴 FVG: {fvg['bearish_fvg']['bottom']}–{fvg['bearish_fvg']['top']}\n"
-    if sr:
-        msg += f"📍 S: {sr.get('s_near')} | R: {sr.get('r_near')} | Pivot: {sr.get('pivot')}\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"🔭 MTF: {mtf_txt}\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"*Strategie:*\n{strat_txt}"
-    msg += f"━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"📅 {datetime.now(TIMEZONE).strftime('%d/%m/%Y %H:%M')}"
-    return msg
-
-
-# ═══════════════════════════════════════════════
 # COMANDI TELEGRAM
 # ═══════════════════════════════════════════════
+# FIX (audit 2026-09-05): format_signal()/format_signal_detail() (114 righe)
+# erano definite qui ma mai chiamate da nessuna parte - superate da
+# format_pipeline_report() di agent_orchestrator.py, che è quello davvero
+# usato per i messaggi SEGNALE. Rimosse.
 
 async def cmd_start(update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
@@ -765,7 +649,7 @@ async def cmd_report(update, context: ContextTypes.DEFAULT_TYPE):
             tf = TF_LABEL.get(t.get("timeframe",""), t.get("timeframe","?"))
             by_tf.setdefault(tf, {"w": 0, "n": 0})
             by_tf[tf]["n"] += 1
-            if _is_win(t): by_tf[tf]["w"] += 1
+            if is_decisive_win(t): by_tf[tf]["w"] += 1
         tf_txt = "\n".join(
             f"  • {tf}: {d['w']}/{d['n']} ({round(d['w']/d['n']*100,1)}%)"
             for tf, d in sorted(by_tf.items())

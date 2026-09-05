@@ -150,6 +150,36 @@ class TestWinRateConsistencyAcrossCommands(GoldBotTestCase):
         self.assertEqual(len(wins), 0)
 
 
+class TestCmdReportEndToEnd(GoldBotTestCase):
+    """Regression (audit 2026-09-05): cmd_report() chiamava _is_win(t) in
+    un secondo punto (breakdown per timeframe) mai aggiornato quando la
+    funzione locale _is_win fu sostituita da is_decisive_win() importata
+    (2026-09-03) - NameError ad ogni chiamata con almeno un trade
+    decisivo, catturato dal try/except generico e mostrato come
+    "Errore: ..." invece del report. I test precedenti verificavano solo
+    la FORMULA di is_decisive_win, mai cmd_report() come handler vero -
+    per questo il bug non era stato notato. Qui si chiama l'handler reale."""
+
+    async def _run_cmd_report(self):
+        update = mock.MagicMock()
+        update.message.reply_text = mock.AsyncMock()
+        with mock.patch("gold_bot.is_authorized", return_value=True):
+            await gb.cmd_report(update, mock.MagicMock())
+        return update.message.reply_text
+
+    def test_does_not_raise_with_a_decisive_trade(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "WIN_TP1", data["tp1"])
+
+        import asyncio
+        reply = asyncio.run(self._run_cmd_report())
+        reply.assert_called_once()
+        sent_text = reply.call_args.args[0]
+        self.assertNotIn("Errore", sent_text)
+        self.assertIn("DASHBOARD PERFORMANCE", sent_text)
+
+
 class TestCheckMacroAlertsResilience(GoldBotTestCase):
     """check_macro_alerts: escaping del titolo e dedup marcato solo dopo
     un send riuscito (prima: marcato subito, un fallimento perdeva
