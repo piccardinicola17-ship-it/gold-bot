@@ -23,6 +23,7 @@ from backtest import (
     _check_trade_bar, _r_result, _safe, _make_setup,
     monte_carlo_drawdown, parameter_sensitivity_backtest,
     _stat_arb_for_date, _get_cross_asset_series_and_ma,
+    calibration_report, format_calibration_report,
 )
 
 
@@ -401,6 +402,62 @@ class TestGetCrossAssetSeriesAndMa(unittest.TestCase):
             s, ma = _get_cross_asset_series_and_ma("BROKEN")
         self.assertTrue(s.empty)
         self.assertTrue(ma.empty)
+
+
+class TestCalibrationReport(unittest.TestCase):
+    """calibration_report() (2026-09-05): estimate_probability() e'
+    dichiaratamente uno score euristico, non una probabilita' statistica
+    reale - questo verifica solo che ordini correttamente (fasce di prob
+    piu' alte vincono piu' spesso), non che il numero esatto sia calibrato."""
+
+    def test_empty_input(self):
+        result = calibration_report([])
+        self.assertEqual(result["n_total"], 0)
+
+    def test_buckets_win_rate_computed_correctly(self):
+        pairs = [(60, True)] * 15 + [(60, False)] * 5  # fascia 55-64%, WR 75%
+        result = calibration_report(pairs)
+        bucket = next(b for b in result["buckets"] if b["label"] == "55-64%")
+        self.assertEqual(bucket["n"], 20)
+        self.assertEqual(bucket["actual_win_rate"], 75.0)
+        self.assertTrue(bucket["reliable"])
+
+    def test_bucket_below_min_n_flagged_unreliable(self):
+        pairs = [(60, True)] * 5
+        result = calibration_report(pairs)
+        bucket = next(b for b in result["buckets"] if b["label"] == "55-64%")
+        self.assertFalse(bucket["reliable"])
+
+    def test_monotonic_when_higher_prob_wins_more(self):
+        pairs = (
+            [(55, True)] * 12 + [(55, False)] * 13 +   # 55-64%: WR 48%
+            [(80, True)] * 18 + [(80, False)] * 3       # 75-84%: WR 86%
+        )
+        result = calibration_report(pairs)
+        self.assertTrue(result["monotonic"])
+
+    def test_not_monotonic_when_higher_prob_wins_less(self):
+        pairs = (
+            [(80, True)] * 5 + [(80, False)] * 20 +    # 75-84%: WR 20%
+            [(55, True)] * 20 + [(55, False)] * 5       # 55-64%: WR 80%
+        )
+        result = calibration_report(pairs)
+        self.assertFalse(result["monotonic"])
+
+    def test_insufficient_reliable_buckets_returns_none(self):
+        pairs = [(60, True)] * 3
+        result = calibration_report(pairs)
+        self.assertIsNone(result["monotonic"])
+
+    def test_format_does_not_raise_on_empty(self):
+        msg = format_calibration_report(calibration_report([]), "1day")
+        self.assertIn("Nessun trade concluso", msg)
+
+    def test_format_includes_bucket_rows(self):
+        pairs = [(60, True)] * 15 + [(60, False)] * 10
+        msg = format_calibration_report(calibration_report(pairs), "1day")
+        self.assertIn("55-64%", msg)
+        self.assertIn("60.0%", msg)
 
 
 if __name__ == "__main__":

@@ -839,6 +839,7 @@ async def cmd_backtest(update, context: ContextTypes.DEFAULT_TYPE):
       /backtest wf [tf] [barre]           — walk-forward
       /backtest mc [tf] [barre]           — Monte Carlo sul drawdown
       /backtest robust [tf] [barre]       — robustezza ai parametri
+      /backtest calib [tf] [barre]        — calibrazione probabilità
 
     NB: 5y/10y/20y sono storico affidabile solo su 1day/4h — le fonti gratuite
     (yfinance/Stooq) non hanno abbastanza storico intraday oltre ~2 anni.
@@ -908,6 +909,27 @@ async def cmd_backtest(update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg[:4000], parse_mode="Markdown")
         except Exception as e:
             await update.message.reply_text(f"Errore test robustezza: {e}")
+        return
+
+    # /backtest calib [interval] [bars] — calibrazione probabilità
+    if args and args[0].lower() == "calib":
+        from backtest import run_backtest, calibration_report, format_calibration_report
+        interval = args[1] if len(args) > 1 else "1day"
+        try: bars = int(args[2]) if len(args) > 2 else 2000
+        except ValueError: bars = 2000
+        valid = ["1min","5min","15min","1h","4h","1day"]
+        if interval not in valid:
+            await update.message.reply_text(f"TF non valido. Usa: {', '.join(valid)}")
+            return
+        await update.message.reply_text(f"Calibrazione probabilità {interval} su {bars} candele... (1-2 min)")
+        try:
+            min_prob = _live_min_prob_for_tf(interval)
+            stats = await asyncio.to_thread(run_backtest, interval=interval, bars=bars, min_prob=min_prob)
+            calib = await asyncio.to_thread(calibration_report, stats.get("prob_outcome_pairs", []))
+            msg = format_calibration_report(calib, interval)
+            await update.message.reply_text(msg[:4000], parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"Errore calibrazione: {e}")
         return
 
     # /backtest tutti 3m/6m/1y/2y/5y/10y/20y — tutti i TF in sequenza

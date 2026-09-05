@@ -529,6 +529,15 @@ def _compute_backtest_stats(
         # storico osservato, unica tra le tante in cui quei trade potevano
         # capitare.
         "r_results": [float(v) for v in concluded["r_result"].tolist()] if len(concluded) else [],
+        # Usati da calibration_report() — (prob dichiarata, esito decisivo)
+        # per ogni trade concluso (WIN_BE escluso, stesso criterio del
+        # win_rate qui sopra: non è un esito categorico).
+        "prob_outcome_pairs": (
+            [(int(p), bool(w)) for p, w in zip(
+                decisive["prob"].tolist(),
+                decisive["outcome"].str.startswith("WIN").tolist(),
+            )] if len(decisive) else []
+        ),
     }
 
 
@@ -970,4 +979,99 @@ def format_sensitivity_report(sens: dict, interval: str) -> str:
         f"{rows}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"{verdict}"
+    )
+
+
+# Fasce di prob_outcome_pairs — allineate alle soglie reali del bot (55%
+# default, 65% M5/M15/M1, cap a 97 in estimate_probability()) invece di
+# bin arbitrari, cosi' ogni fascia corrisponde a una decisione concreta
+# gia' presa dal codice, non a un taglio statistico astratto.
+_CALIBRATION_BUCKETS = (
+    (40, 54, "40-54%"),
+    (55, 64, "55-64%"),
+    (65, 74, "65-74%"),
+    (75, 84, "75-84%"),
+    (85, 97, "85-97%"),
+)
+_CALIBRATION_MIN_N = 20  # stesso standard n>=20 usato altrove nel progetto
+
+
+def calibration_report(prob_outcome_pairs: list) -> dict:
+    """
+    estimate_probability() dichiara esplicitamente di NON essere una
+    probabilita' statistica reale (vedi il commento in analyzer.py) — uno
+    score di confidenza euristico 40-97. Questo verifica empiricamente,
+    sui trade di un backtest, se quel punteggio e' almeno ORDINALMENTE
+    coerente con l'esito reale: un 85% dovrebbe vincere piu' spesso di un
+    55%, anche se il numero esatto non e' "l'85% di probabilita' vera".
+    Fase A del 2026-09-05.
+    """
+    if not prob_outcome_pairs:
+        return {"n_total": 0, "buckets": [], "message": "Nessun trade concluso su cui calibrare."}
+
+    buckets = []
+    for lo, hi, label in _CALIBRATION_BUCKETS:
+        in_bucket = [(p, w) for p, w in prob_outcome_pairs if lo <= p <= hi]
+        n = len(in_bucket)
+        if n == 0:
+            continue
+        wins = sum(1 for _, w in in_bucket if w)
+        avg_prob = sum(p for p, _ in in_bucket) / n
+        buckets.append({
+            "label": label,
+            "n": n,
+            "reliable": n >= _CALIBRATION_MIN_N,
+            "avg_declared_prob": round(avg_prob, 1),
+            "actual_win_rate": round(wins / n * 100, 1),
+            "gap": round(wins / n * 100 - avg_prob, 1),
+        })
+
+    reliable = [b for b in buckets if b["reliable"]]
+    monotonic = all(
+        reliable[i]["actual_win_rate"] <= reliable[i + 1]["actual_win_rate"] + 5  # tolleranza 5 punti
+        for i in range(len(reliable) - 1)
+    ) if len(reliable) >= 2 else None
+
+    return {
+        "n_total": len(prob_outcome_pairs),
+        "buckets": buckets,
+        "monotonic": monotonic,
+    }
+
+
+def format_calibration_report(calib: dict, interval: str) -> str:
+    if calib.get("n_total", 0) == 0:
+        return f"📐 Calibrazione probabilità {interval}\n\n{calib.get('message', 'Nessun risultato.')}"
+
+    rows = []
+    for b in calib["buckets"]:
+        flag = "" if b["reliable"] else " (n<20, non affidabile)"
+        rows.append(
+            f"  {b['label']}: dichiarata ~{b['avg_declared_prob']}% | "
+            f"reale {b['actual_win_rate']}% | scarto {b['gap']:+.1f}pt "
+            f"(n={b['n']}){flag}"
+        )
+    rows_txt = "\n".join(rows)
+
+    if calib["monotonic"] is None:
+        verdict = "Campione insufficiente (serve n≥20 in almeno 2 fasce) per un verdetto sull'ordinamento."
+    elif calib["monotonic"]:
+        verdict = "✅ Ordinalmente coerente — fasce di prob più alte vincono più spesso, come atteso."
+    else:
+        verdict = (
+            "⚠️ Non ordinalmente coerente — una fascia di prob più alta vince meno "
+            "spesso di una più bassa: lo score non discrimina bene in quella zona."
+        )
+
+    return (
+        f"📐 *CALIBRAZIONE PROBABILITÀ — {interval}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{calib['n_total']} trade decisivi totali\n\n"
+        f"{rows_txt}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{verdict}\n"
+        f"_estimate_probability() è dichiaratamente uno score euristico, non "
+        f"una probabilità statistica reale — questo verifica solo che ordini "
+        f"correttamente i setup migliori dai peggiori, non che il numero "
+        f"esatto sia calibrato._"
     )
