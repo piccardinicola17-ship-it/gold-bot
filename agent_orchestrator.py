@@ -402,6 +402,17 @@ async def agent_risk(state: TradingState) -> AgentResult:
             near_news=state.high_impact,  # aggiornato dall'agente news se già girato
             signal=state.signal,
             news_error=state.news_error,
+            # FIX (audit 2026-09-05): timeframe non veniva mai passato qui —
+            # check_can_trade() ha la sua soglia 65%/55% differenziata per
+            # M5/M15/M1 (terza copia della stessa logica di
+            # agent_structure_analyst e gold_bot._live_min_prob_for_tf, vedi
+            # test_risk_manager.py) ma senza timeframe cadeva SEMPRE sulla
+            # soglia 55%, anche per M5/M15. Mascherato finora perché
+            # structure_analyst gira prima e blocca già con la soglia
+            # corretta (65%) - ma un domani in cui quel controllo cambiasse
+            # senza toccare anche questo, il gate qui sotto lascerebbe
+            # passare M5/M15 sotto il 65% inosservato.
+            timeframe=state.timeframe,
         )
 
         state.risk_ok     = result.allowed

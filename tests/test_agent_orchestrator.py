@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_orchestrator import TradingState, agent_decision_maker, agent_structure_analyst, run_pipeline
+from agent_orchestrator import TradingState, agent_decision_maker, agent_structure_analyst, agent_risk, run_pipeline
 import agent_orchestrator
 
 
@@ -206,6 +206,27 @@ class TestBlockedDirectionByRegime(unittest.IsolatedAsyncioTestCase):
             await agent_structure_analyst(state)
         self.assertEqual(state.final_decision, "SKIP")
         self.assertIn("TRENDING DOWN", state.decision_reason)
+
+
+class TestAgentRiskForwardsTimeframe(unittest.IsolatedAsyncioTestCase):
+    """Regression (audit 2026-09-05): agent_risk() non passava mai
+    state.timeframe a check_can_trade() - che ha una sua soglia 65%/55%
+    differenziata per M5/M15/M1 (terza copia della stessa logica di
+    agent_structure_analyst). Senza timeframe cadeva sempre sulla soglia
+    55%, anche per M5/M15 - mascherato finora solo perché
+    agent_structure_analyst gira prima e blocca già con la soglia giusta."""
+
+    async def test_passes_state_timeframe_to_check_can_trade(self):
+        state = TradingState(timeframe="5min", signal="BUY", prob=70, rr=2.5)
+        with patch("risk_manager.check_can_trade") as mock_check, \
+             patch("risk_manager.is_weekend_now", return_value=False), \
+             patch("risk_manager.get_session_stats", return_value={}), \
+             patch("risk_manager.get_consecutive_losses", return_value=0):
+            mock_check.return_value = type("R", (), {
+                "allowed": True, "risk_pct": 1.0, "reason": "ok",
+            })()
+            await agent_risk(state)
+        self.assertEqual(mock_check.call_args.kwargs.get("timeframe"), "5min")
 
 
 class TestRunPipelineLogsDecision(unittest.IsolatedAsyncioTestCase):

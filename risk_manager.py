@@ -30,7 +30,6 @@ MAX_RISK_PCT           = 1.0
 MAX_TOTAL_RESERVED_RISK_PCT = 6.0
 MAX_SAME_DIRECTION     = 3  # max 3 trade nella stessa direzione (era 2 — bloccava con M5+M15+H4)
 MIN_RR                 = 2.0
-MIN_PROB               = 55
 NEWS_BUFFER_MINUTES    = 30
 
 DD_REDUCE_AT_R  = 3.0
@@ -408,9 +407,17 @@ def check_can_trade(
 
     if near_news:
         return RiskCheckResult(False, f"Evento macro entro ±{NEWS_BUFFER_MINUTES} minuti")
-    # Soglia differenziata: M5/M15 richiedono 65% (SL stretti, alta volatilità)
+    # Soglia differenziata: M5/M15 richiedono 65% (SL stretti, alta volatilità).
+    # FIX (audit 2026-09-05): il valore per gli altri TF era il modulo
+    # MIN_PROB (costante fissa, MAI aggiornata dalla env var MIN_PROB) mentre
+    # agent_orchestrator.py legge quella env var ad ogni chiamata - se
+    # qualcuno l'avesse abbassata per avere più segnali, questo gate avrebbe
+    # comunque bloccato tutto sotto 55% ignorando l'override, silenziosamente.
+    # Letta qui allo stesso modo (dinamica, non un modulo-level costante) per
+    # restare sincronizzata per costruzione.
+    import os as _os
     _tf = timeframe.lower() if timeframe else ""
-    _min_prob = 65 if _tf in ("5min", "1min", "15min") else MIN_PROB
+    _min_prob = 65 if _tf in ("5min", "1min", "15min") else int(_os.environ.get("MIN_PROB", "55"))
     if prob < _min_prob:
         return RiskCheckResult(False, f"Confidence {prob}% sotto soglia {_min_prob}% [{timeframe or 'tutti i TF'}]")
     if rr < MIN_RR:

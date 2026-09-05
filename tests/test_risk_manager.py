@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -191,6 +192,23 @@ class TestCheckCanTrade(RiskManagerTestCase):
         blocked_m5 = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="5min")
         self.assertTrue(ok_h4.allowed)
         self.assertFalse(blocked_m5.allowed)
+
+    def test_respects_min_prob_env_override_for_non_fast_timeframes(self):
+        """Regression (audit 2026-09-05): la soglia per i TF non veloci era
+        una costante fissa (MIN_PROB=55), mai sincronizzata con la stessa
+        env var MIN_PROB letta da agent_orchestrator.py - abbassarla per
+        avere più segnali non aveva alcun effetto qui, bloccando comunque
+        tutto sotto 55%."""
+        with unittest.mock.patch.dict(os.environ, {"MIN_PROB": "40"}):
+            result = rm.check_can_trade(prob=45, rr=2.5, signal="BUY", timeframe="4h")
+        self.assertTrue(result.allowed)
+
+    def test_m5_threshold_unaffected_by_min_prob_env_override(self):
+        # La soglia 65% di M5/M15/M1 resta fissa indipendentemente dalla
+        # env var MIN_PROB, esattamente come in agent_orchestrator.py.
+        with unittest.mock.patch.dict(os.environ, {"MIN_PROB": "40"}):
+            result = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="5min")
+        self.assertFalse(result.allowed)
 
     def test_low_rr_blocks(self):
         result = rm.check_can_trade(prob=70, rr=1.0, signal="BUY", timeframe="4h")
