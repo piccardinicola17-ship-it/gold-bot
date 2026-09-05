@@ -29,7 +29,6 @@ from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_d
 from agent_orchestrator import run_pipeline, format_pipeline_report
 from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
 # ORB rimosso — gestito manualmente dall'utente
-from regime_detector import format_regime_message
 from self_learning import analyze_last_trade, weekly_review, optimize_strategy_weights, format_learning_report
 from risk_manager import format_risk_report, calculate_lot_size, resume_session_manual
 from trade_manager import (
@@ -873,13 +872,12 @@ async def cmd_regime(update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update): return
     await update.message.reply_text("⏳ Analisi regime in corso...")
     try:
-        from analyzer import get_data, compute_indicators
-        from regime_detector import detect_market_regime
+        from analyzer import get_data, compute_indicators, detect_market_regime, format_live_regime_message
         def _regime_analysis():
             frame = compute_indicators(get_data(interval="5min", outputsize=100))
             return detect_market_regime(frame)
         regime = await asyncio.to_thread(_regime_analysis)
-        msg    = format_regime_message(regime)
+        msg    = format_live_regime_message(regime)
         if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:

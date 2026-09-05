@@ -1,9 +1,11 @@
 """
 Test per analyzer._detect_market_regime_fallback — il classificatore
-(ADX/Bollinger-width/ROC) che guida davvero le decisioni di trading live,
-diverso da quello di regime_detector.py usato solo dal comando /regime
-(vedi la nota aggiunta in regime_detector.format_regime_message il
-2026-09-03). Verifica i confini delle 5 soglie che decidono il regime.
+(ADX/Bollinger-width/ROC) che guida davvero le decisioni di trading live.
+Fino al 2026-09-05 esisteva anche regime_detector.py, un secondo
+classificatore con soglie diverse usato solo dal comando /regime (poteva
+mostrare un regime diverso da quello su cui il bot decideva davvero nello
+stesso istante) — rimosso, /regime ora usa questa stessa funzione. Verifica
+i confini delle 5 soglie che decidono il regime.
 """
 
 import os
@@ -14,7 +16,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analyzer import _detect_market_regime_fallback
+from analyzer import _detect_market_regime_fallback, format_live_regime_message
 
 
 def _frame(adx=15.0, bb_width=0.02, atr=1.0, avg_atr=1.0, ema20=100.0, ema50=100.0, roc=0.0,
@@ -64,6 +66,26 @@ class TestRegimeFallback(unittest.TestCase):
         df.loc[df.index[-1], "ema20"] = float("nan")
         result = _detect_market_regime_fallback(df)  # non deve sollevare
         self.assertIn(result["regime"], ("TRENDING_UP", "TRENDING_DOWN", "RANGING", "VOLATILE", "NORMAL"))
+
+
+class TestFormatLiveRegimeMessage(unittest.TestCase):
+    """/regime (2026-09-05) usa lo stesso format_live_regime_message() per
+    presentare l'output di detect_market_regime() — non più un secondo
+    classificatore separato (regime_detector.py, rimosso)."""
+
+    def test_known_regime_shows_mapped_label(self):
+        msg = format_live_regime_message({"regime": "TRENDING_UP", "adx": 30.5, "atr": 4.2})
+        self.assertIn("Trending Up", msg)
+        self.assertIn("30.5", msg)
+        self.assertIn("4.2", msg)
+
+    def test_unknown_regime_falls_back_to_raw_value(self):
+        msg = format_live_regime_message({"regime": "SOMETHING_NEW", "adx": 1, "atr": 1})
+        self.assertIn("SOMETHING_NEW", msg)
+
+    def test_missing_fields_do_not_crash(self):
+        msg = format_live_regime_message({})
+        self.assertIn("UNKNOWN", msg)
 
 
 if __name__ == "__main__":

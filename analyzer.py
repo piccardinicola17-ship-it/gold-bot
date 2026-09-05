@@ -1702,17 +1702,18 @@ def detect_market_regime(df: pd.DataFrame) -> dict:
     aggregate_strategies, ecc.) — schema esteso con regime_compat,
     best_strategies, probability.
 
-    NOTA: regime_detector.py espone un sistema separato e più semplice
-    (regime/strength/details, usato solo dal comando /regime). In passato
-    questa funzione provava a chiamare regime_detector.detect_regime_v2()
-    e ne rimappava l'output, ma quella funzione è solo un alias verso lo
-    schema semplice: mancano le chiavi attese qui (indicators/best_strategies/
-    probability/...), quindi il tentativo falliva SEMPRE con KeyError e si
-    finiva sempre nel fallback sotto — su ogni singola candela, in tutta la
-    pipeline. Innocuo su una chiamata isolata, ma su un backtest di migliaia
-    di candele l'overhead delle eccezioni si somma inutilmente. Rimosso il
-    tentativo morto: si usa direttamente la logica che era comunque l'unica
-    ad essere eseguita.
+    NOTA STORICA: esisteva un regime_detector.py separato (schema
+    regime/strength/details) usato solo dal comando /regime, con soglie
+    diverse da questa funzione — poteva mostrare un regime diverso da
+    quello su cui il bot decideva davvero nello stesso istante. Prima
+    ancora, questa funzione provava pure a chiamare il suo
+    detect_regime_v2() e rimappare l'output, ma quella funzione era solo
+    un alias verso lo schema semplice: mancavano le chiavi attese qui, il
+    tentativo falliva SEMPRE con KeyError e si finiva sempre nel fallback
+    sotto. Rimosso il tentativo morto il 1 settembre 2026; il file intero
+    rimosso il 2026-09-05 quando /regime è stato spostato su questa stessa
+    funzione (vedi format_live_regime_message più sotto) — un solo
+    classificatore, non due che rischiano di divergere.
     """
     return _detect_market_regime_fallback(df)
 
@@ -1752,6 +1753,45 @@ def _detect_market_regime_fallback(df: pd.DataFrame) -> dict:
         "history":         [],
         "raw_scores":      {},
     }
+
+
+_REGIME_LABELS = {
+    "TRENDING_UP":   "📈 Trending Up",
+    "TRENDING_DOWN": "📉 Trending Down",
+    "RANGING":       "📦 Ranging",
+    "VOLATILE":      "🌪 Volatile",
+    "NORMAL":        "➡️ Normale",
+}
+
+
+def format_live_regime_message(regime_data: dict) -> str:
+    """
+    Formatta per Telegram il regime restituito da detect_market_regime() —
+    lo STESSO classificatore che decide se il bot può aprire un trade ora
+    (ADX/EMA/ROC/Bollinger-width), non un'approssimazione indicativa.
+
+    Prima del 2026-09-05, /regime usava regime_detector.py: un secondo
+    classificatore con soglie diverse (EMA/ATR%/range% invece di ADX/BB-
+    width/ROC), che poteva mostrare un regime diverso da quello su cui il
+    bot stava davvero decidendo nello stesso istante. Era una divergenza
+    nota e dichiarata (un disclaimer avvertiva "non è necessariamente
+    quello su cui il bot sta basando le decisioni"), non un bug segreto —
+    ma un secondo sistema che duplica la stessa logica è esattamente il
+    pattern che in questo codebase ha causato la maggior parte dei bug
+    reali. Risolto alla radice: un solo classificatore, usato sia qui sia
+    dalla pipeline live.
+    """
+    regime = regime_data.get("regime", "UNKNOWN")
+    label = _REGIME_LABELS.get(regime, regime)
+    return (
+        f"🌍 *REGIME DI MERCATO*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Regime: *{label}*\n"
+        f"ADX: *{regime_data.get('adx', 0)}* | ATR: *${regime_data.get('atr', 0)}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Stesso classificatore usato dalla pipeline di trading live — "
+        f"questo è il regime che decide se il bot può aprire un trade ora._"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
