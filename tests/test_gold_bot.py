@@ -81,6 +81,31 @@ class TestLiveMinProbForTf(unittest.TestCase):
             self.assertEqual(gb._live_min_prob_for_tf("5min"), 65)
 
 
+class TestAsyncPosttradeForwardsTradeId(GoldBotTestCase):
+    """Regression (audit 2026-09-05): _async_posttrade_and_learn() riceveva
+    gia' trade_id come parametro (passato correttamente dal chiamante) ma
+    non lo inoltrava ad analyze_last_trade() - stesso bug trovato in
+    trade_manager._post_trade_analysis, corretto insieme."""
+
+    def test_forwards_the_trade_id_that_just_closed(self):
+        import asyncio
+        update = mock.MagicMock()
+        update.message.reply_text = mock.AsyncMock()
+        with mock.patch("gold_bot.analyze_last_trade", return_value="ok") as mock_analyze, \
+             mock.patch("gold_bot._get_closed_trades", return_value=[]), \
+             mock.patch("asyncio.sleep", new=mock.AsyncMock()):
+            asyncio.run(gb._async_posttrade_and_learn(update, "WIN_TP1", "real-trade-id-xyz"))
+        mock_analyze.assert_called_once_with("real-trade-id-xyz")
+
+    def test_skips_analysis_for_cancelled_outcome(self):
+        import asyncio
+        update = mock.MagicMock()
+        update.message.reply_text = mock.AsyncMock()
+        with mock.patch("gold_bot.analyze_last_trade") as mock_analyze:
+            asyncio.run(gb._async_posttrade_and_learn(update, "CANCELLED", "some-id"))
+        mock_analyze.assert_not_called()
+
+
 class TestWinRateConsistencyAcrossCommands(GoldBotTestCase):
     """Il bug reale: un trade WIN_BE con tp1_hit=True doveva contare come
     vittoria ovunque, non solo in /report."""

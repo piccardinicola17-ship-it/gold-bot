@@ -1177,12 +1177,19 @@ async def handle_free_text(update, context: ContextTypes.DEFAULT_TYPE):
 # ═══════════════════════════════════════════════
 
 async def _async_posttrade_and_learn(update, outcome: str, trade_id: str = ""):
-    """Post-trade analysis + auto-ottimizzazione ogni 10 trade chiusi."""
+    """
+    Post-trade analysis + auto-ottimizzazione ogni 10 trade chiusi.
+
+    FIX (audit 2026-09-05): trade_id era già un parametro di questa funzione
+    (passato correttamente dal chiamante) ma non veniva inoltrato ad
+    analyze_last_trade() — cadeva sempre sul fallback "ultimo trade nel
+    DB", lo stesso bug trovato in trade_manager._post_trade_analysis.
+    """
     if outcome in ("CANCELLED", "manual"):
         return
     await asyncio.sleep(2)
     try:
-        analysis = await asyncio.to_thread(analyze_last_trade)
+        analysis = await asyncio.to_thread(analyze_last_trade, trade_id)
         if len(analysis) > 3800: analysis = analysis[:3750] + "\n_[Troncato]_"
         await update.message.reply_text(
             f"🤖 *ANALISI POST-TRADE*\n━━━━━━━━━━━━━━━━━━━━\n{analysis}",

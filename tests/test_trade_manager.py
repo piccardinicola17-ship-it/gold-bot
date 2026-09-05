@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -356,6 +357,29 @@ class TestPendingInvalidation(TradeManagerTestCase):
         trade = {"signal": "SELL", "order_type": "SELL LIMIT", "entry": 100.0}
         self.assertEqual(tm._pending_adverse_distance(trade, 95.0), 5.0)
         self.assertEqual(tm._pending_adverse_distance(trade, 105.0), 0.0)
+
+
+class TestPostTradeAnalysisForwardsTradeId(TradeManagerTestCase):
+    """Regression (audit 2026-09-05): _post_trade_analysis() aveva trade_id
+    disponibile in tutti e 3 i punti di chiamata (BE/SL/TP3) ma non lo
+    passava mai ad analyze_last_trade() - cadeva sempre sul fallback
+    "ultimo trade nel DB". Con due trade chiusi quasi in contemporanea
+    (asyncio.create_task + sleep(1)) entrambe le analisi finivano per
+    descrivere lo stesso trade."""
+
+    async def _run(self, trade_id):
+        bot = AsyncMock()
+        with patch("self_learning.analyze_last_trade", return_value="ok") as mock_analyze, \
+             patch("self_learning.format_learning_report"), \
+             patch("self_learning.optimize_strategy_weights"), \
+             patch("asyncio.sleep", new=AsyncMock()):
+            await tm._post_trade_analysis(bot, "12345", trade_id)
+        return mock_analyze
+
+    def test_forwards_the_trade_id_that_just_closed(self):
+        import asyncio
+        mock_analyze = asyncio.run(self._run("real-trade-id-abc"))
+        mock_analyze.assert_called_once_with("real-trade-id-abc")
 
 
 class TestDecisionLog(TradeManagerTestCase):

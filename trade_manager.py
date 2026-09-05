@@ -2050,7 +2050,7 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
                 )
             except Exception:
                 logger.exception("Invio alert BE fallito per %s", trade_id)
-            asyncio.create_task(_post_trade_analysis(bot, chat_id))
+            asyncio.create_task(_post_trade_analysis(bot, chat_id, trade_id))
         return
 
     if _stop_reached(signal, adverse_price, sl):
@@ -2072,7 +2072,7 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
                 )
             except Exception:
                 logger.exception("Invio alert SL fallito per %s", trade_id)
-            asyncio.create_task(_post_trade_analysis(bot, chat_id))
+            asyncio.create_task(_post_trade_analysis(bot, chat_id, trade_id))
         return
 
     if _target_reached(signal, favorable_price, tp1):
@@ -2132,15 +2132,25 @@ async def _monitor_single(bot, chat_id: str, trade: dict, price: float,
                 )
             except Exception:
                 logger.exception("Invio alert TP3 fallito per %s", trade_id)
-            asyncio.create_task(_post_trade_analysis(bot, chat_id))
+            asyncio.create_task(_post_trade_analysis(bot, chat_id, trade_id))
 
 
-async def _post_trade_analysis(bot, chat_id: str) -> None:
+async def _post_trade_analysis(bot, chat_id: str, trade_id: str = "") -> None:
+    """
+    FIX (audit 2026-09-05): trade_id non veniva mai passato ad
+    analyze_last_trade(), nonostante fosse disponibile in tutti e 3 i punti
+    di chiamata (BE/SL/TP3) — la funzione cadeva sempre sul fallback
+    "ultimo trade nel DB". Con asyncio.create_task + questo sleep(1), due
+    trade chiusi quasi in contemporanea (comune con più timeframe attivi)
+    finivano per essere analizzati entrambi come lo stesso trade — esattamente
+    lo scenario che il parametro trade_id di analyze_last_trade era pensato
+    per prevenire, mai davvero collegato.
+    """
     await asyncio.sleep(1)
     try:
         from self_learning import analyze_last_trade, format_learning_report, optimize_strategy_weights
 
-        analysis = await asyncio.to_thread(analyze_last_trade)
+        analysis = await asyncio.to_thread(analyze_last_trade, trade_id)
         await bot.send_message(
             chat_id=chat_id,
             text=("🤖 *ANALISI POST-TRADE*\n" + analysis)[:4000],
