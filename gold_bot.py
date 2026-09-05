@@ -224,6 +224,7 @@ async def cmd_start(update, context: ContextTypes.DEFAULT_TYPE):
         f"/report — Dashboard performance\n"
         f"/status — Stato bot\n"
         f"/risk — Risk management\n"
+        f"/riprendisessione — Sblocca la sessione in cooldown senza aspettare\n"
         f"/news — Notizie oro\n"
         f"/macro — Briefing eventi macro\n"
         f"/regime — Regime di mercato\n"
