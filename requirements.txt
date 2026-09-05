@@ -6,6 +6,5 @@ requests==2.32.5
 pytz==2026.1.post1
 flask==3.0.3
 numpy==1.26.4
-scikit-learn==1.4.2
 yfinance==0.2.52
 pandas-datareader==0.10.0

@@ -1232,17 +1232,31 @@ def statistical_arbitrage_strategy(price_xau: float, dxy: float, us10y: float) -
 
 def ml_alpha_strategy(df: pd.DataFrame, mtf_trends: dict, smc: dict) -> dict:
     """
-    ML Alpha v2 — Regressione Logistica Reale su Trade Storici.
+    ML Alpha — score composito rule-based sulle stesse variabili tecniche
+    usate dalle altre strategie (EMA alignment, RSI, MACD, volatilità, bias
+    MTF, struttura SMC).
 
-    VERSIONE PRECEDENTE: formula pesata manualmente (score composito).
-    VERSIONE ATTUALE: regressione logistica che si allena sui trade
-    storici del DB goldbot.db. Le feature sono le stesse variabili
-    tecniche, ma i pesi vengono ottimizzati su dati reali.
-
-    Fallback automatico alla versione rule-based se:
-    - Meno di MIN_SAMPLES trade nel DB
-    - Errore nel training
-    - sklearn non disponibile
+    FIX (audit 2026-09-05): esisteva un tentativo di "regressione logistica
+    reale sui trade storici" (rimosso). Aveva due problemi concreti, non
+    solo cosmetici:
+    1. Un vettore di 14 feature tecniche veniva costruito e MAI usato — il
+       modello si allenava invece su 4 proxy ricavate dai metadati DB
+       (segnale, la confidenza che il bot aveva assegnato al trade, se
+       aveva toccato TP1/BE).
+    2. Le stesse posizioni del vettore, in previsione sul trade di adesso,
+       venivano riempite con valori di natura diversa (RSI al posto della
+       confidenza storica; un'euristica indovinata al posto del vero
+       tp1_hit/be_hit, che per il trade attuale — non ancora aperto — non
+       può nemmeno esistere). Il modello imparava una relazione da dati
+       reali e la applicava a input semanticamente incompatibili: non
+       falsificabile con i backtest esistenti perché non testato lì (vedi
+       backtest.py, che passa "ml" come NEUTRAL fisso), ma comunque attivo
+       e pesato (1.5x in NORMAL/TRENDING) in produzione dal vivo.
+    Una ricostruzione corretta richiederebbe le feature tecniche reali di
+    ognuno dei trade storici (dati OHLC dell'istante di apertura, non
+    disponibili oggi nel DB trade) — lavoro a parte, non improvvisabile
+    qui. Nel frattempo resta solo la versione rule-based, onesta e
+    internamente coerente.
     """
     result = {"signal": "NEUTRAL", "score": 0, "reason": ""}
     if len(df) < 50:
@@ -1262,10 +1276,6 @@ def ml_alpha_strategy(df: pd.DataFrame, mtf_trends: dict, smc: dict) -> dict:
     macd_h2= float(df["macd_hist"].iloc[-2] if len(df) > 2 else 0) or 0
     atr    = max(float(row.get("atr", 5) or 5), 0.1)
     avg_atr= float(df["atr"].tail(20).mean()) or atr
-    adx    = float(row.get("adx", 20) or 20)
-    bb_up  = float(row.get("bb_upper", price) or price)
-    bb_lo  = float(row.get("bb_lower", price) or price)
-    bb_mid = (bb_up + bb_lo) / 2
 
     emas_above = sum([price > ema9, price > ema20, price > ema50, price > ema200])
     mtf_buy  = sum(1 for v in mtf_trends.values() if v == "BUY")
@@ -1273,122 +1283,7 @@ def ml_alpha_strategy(df: pd.DataFrame, mtf_trends: dict, smc: dict) -> dict:
     struct   = smc.get("structure", "NEUTRAL")
     vol_ratio = atr / (avg_atr + 1e-9)
 
-    # Feature vector (14 feature, normalizzate)
-    features = [
-        emas_above / 4,                          # 0-1: EMA alignment
-        (rsi - 50) / 50,                         # -1 to +1: RSI centrato
-        (rsi_f - rsi) / 10,                      # divergenza RSI fast/slow
-        1 if macd_h > 0 else -1,                 # MACD histogram sign
-        1 if macd_h > macd_h2 else -1,           # MACD momentum
-        min(max(vol_ratio - 1, -1), 1),          # volatilità relativa
-        (price - ema20) / atr,                   # distanza da EMA20 in ATR
-        (price - bb_mid) / (bb_up - bb_lo + 1), # posizione nelle BB
-        (mtf_buy - mtf_sell) / 6,                # bias MTF normalizzato
-        adx / 50,                                # forza trend
-        1 if struct == "BULLISH" else (-1 if struct == "BEARISH" else 0),
-        (price - ema200) / atr,                  # distanza da EMA200
-        min(max((price - ema9) / atr, -3), 3),  # distanza da EMA9
-        1 if macd_h > 0 and rsi < 60 else (-1 if macd_h < 0 and rsi > 40 else 0),
-    ]
-
-    # ── Tenta ML reale dal DB ─────────────────────────────────────────────────
-    MIN_SAMPLES = 15  # trade minimi per allenare il modello
-
-    try:
-        import os, sqlite3
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.preprocessing import StandardScaler
-        import numpy as np
-
-        db_path = os.environ.get("DB_PATH", os.path.join(
-            os.environ.get("BOT_DIR", "/tmp"), "goldbot.db"
-        ))
-
-        if os.path.exists(db_path):
-            conn = sqlite3.connect(db_path, timeout=5)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """SELECT signal, result, prob, regime,
-                          tp1_hit, tp2_hit, be_hit, pnl_r
-                   FROM trades
-                   WHERE status='CLOSED'
-                     AND result IN ('WIN_TP1','WIN_TP2','WIN_TP3','LOSS')
-                   ORDER BY id DESC LIMIT 200"""
-            ).fetchall()
-            conn.close()
-
-            if len(rows) >= MIN_SAMPLES:
-                # Costruisci dataset semplice dai metadati del trade
-                # (non ricostruiamo le feature originali — usiamo proxy dai metadati)
-                X_hist, y_hist = [], []
-                for r in rows:
-                    # Proxy feature dai metadati del trade
-                    sig     = 1 if r["signal"] == "BUY" else -1
-                    prob_n  = (float(r["prob"] or 50) - 50) / 50
-                    tp1h    = float(r["tp1_hit"] or 0)
-                    beh     = float(r["be_hit"] or 0)
-                    pnl     = float(r["pnl_r"] or 0)
-                    X_hist.append([sig, prob_n, tp1h, beh])
-                    y_hist.append(1 if "WIN" in str(r["result"]) else 0)
-
-                X_arr = np.array(X_hist)
-                y_arr = np.array(y_hist)
-
-                # Allena un classificatore leggero
-                scaler = StandardScaler()
-                X_sc   = scaler.fit_transform(X_arr)
-                clf    = LogisticRegression(C=0.5, max_iter=200, random_state=42)
-                clf.fit(X_sc, y_arr)
-
-                # Predici sulla situazione attuale usando proxy feature
-                sig_now  = 1 if sum([price > ema20, rsi < 50, macd_h > 0]) >= 2 else -1
-                prob_now = (rsi - 50) / 50
-                tp1_est  = 1 if emas_above >= 3 and rsi < 65 else 0
-                be_est   = 1 if vol_ratio < 1.3 else 0
-                x_now    = scaler.transform([[sig_now, prob_now, tp1_est, be_est]])
-                win_prob = clf.predict_proba(x_now)[0][1]  # probabilità WIN
-
-                # Converti in segnale
-                if win_prob > 0.62:
-                    # Il modello dice WIN → segui la direzione tecnica
-                    if sig_now == 1 and emas_above >= 2:
-                        score = int(win_prob * 10)
-                        return {
-                            "signal": "BUY",
-                            "score":  min(score, 10),
-                            "reason": f"ML v2: win_prob={win_prob:.0%} ({len(rows)} trade storici)"
-                        }
-                    elif sig_now == -1 and emas_above <= 2:
-                        score = int(win_prob * 10)
-                        return {
-                            "signal": "SELL",
-                            "score":  min(score, 10),
-                            "reason": f"ML v2: win_prob={win_prob:.0%} ({len(rows)} trade storici)"
-                        }
-                elif win_prob < 0.38:
-                    # Il modello dice LOSS → invia il segnale inverso (contrarian)
-                    if sig_now == 1:
-                        return {
-                            "signal": "SELL",
-                            "score":  6,
-                            "reason": f"ML v2 contrarian: loss_prob={1-win_prob:.0%}"
-                        }
-                    else:
-                        return {
-                            "signal": "BUY",
-                            "score":  6,
-                            "reason": f"ML v2 contrarian: loss_prob={1-win_prob:.0%}"
-                        }
-
-                return {"signal": "NEUTRAL", "score": 0,
-                        "reason": f"ML v2: incerto win_prob={win_prob:.0%}"}
-
-    except ImportError:
-        pass  # sklearn non installato → fallback rule-based
-    except Exception as e:
-        logger.debug(f"ML training fallito: {e}")
-
-    # ── Fallback: versione rule-based (come prima ma come backup) ─────────────
+    # ── Score composito rule-based ────────────────────────────────────────────
     ml_buy = (
         emas_above * 1.5
         + max(0, (50 - rsi) / 10)
@@ -1449,8 +1344,24 @@ def candlestick_strategy(df: pd.DataFrame) -> dict:
     if rng0 == 0: return result
 
     patterns_found = []
-    signal = "NEUTRAL"
-    score  = 0
+    # FIX (audit 2026-09-05): prima, ogni pattern che matchava sovrascriveva
+    # signal/score senza confronto — con più pattern non mutuamente esclusivi
+    # (tutti quelli a 3 candele, e i pinbar che non richiedono una direzione
+    # di chiusura) un pattern debole controllato DOPO uno forte vinceva solo
+    # per l'ordine del codice, non perché fosse davvero il segnale più forte.
+    # Ora si tiene sempre il punteggio più alto trovato, indipendentemente
+    # da quale controllo lo produce — stesso principio già usato in
+    # order_flow_strategy (score_buy/score_sell accumulati e confrontati
+    # solo alla fine).
+    best_signal  = "NEUTRAL"
+    best_score   = 0
+    best_pattern = ""
+
+    def _consider(label: str, direction: str, points: int) -> None:
+        nonlocal best_signal, best_score, best_pattern
+        patterns_found.append(label)
+        if points > best_score:
+            best_signal, best_score, best_pattern = direction, points, label
 
     # ── Singola candela ──
     # Doji
@@ -1459,107 +1370,89 @@ def candlestick_strategy(df: pd.DataFrame) -> dict:
 
     # Hammer (rialzista)
     if lw0 >= body0 * 2.5 and uw0 <= body0 * 0.4 and c_0 > o0:
-        patterns_found.append("🔨 Hammer")
-        signal = "BUY"; score = 6
+        _consider("🔨 Hammer", "BUY", 6)
 
     # Inverted Hammer
     if uw0 >= body0 * 2.5 and lw0 <= body0 * 0.4 and c_0 > o0:
-        patterns_found.append("🔨 Inverted Hammer")
-        signal = "BUY"; score = 5
+        _consider("🔨 Inverted Hammer", "BUY", 5)
 
     # Shooting Star (ribassista)
     if uw0 >= body0 * 2.5 and lw0 <= body0 * 0.4 and c_0 < o0:
-        patterns_found.append("⭐ Shooting Star")
-        signal = "SELL"; score = 6
+        _consider("⭐ Shooting Star", "SELL", 6)
 
     # Hanging Man
     if lw0 >= body0 * 2.5 and uw0 <= body0 * 0.4 and c_0 < o0:
-        patterns_found.append("🪢 Hanging Man")
-        signal = "SELL"; score = 5
+        _consider("🪢 Hanging Man", "SELL", 5)
 
     # Marubozu Bullish
     if c_0 > o0 and body0 >= rng0 * 0.85:
-        patterns_found.append("🕯 Marubozu Bullish")
-        signal = "BUY"; score = 5
+        _consider("🕯 Marubozu Bullish", "BUY", 5)
 
     # Marubozu Bearish
     if c_0 < o0 and body0 >= rng0 * 0.85:
-        patterns_found.append("🕯 Marubozu Bearish")
-        signal = "SELL"; score = 5
+        _consider("🕯 Marubozu Bearish", "SELL", 5)
 
     # Pinbar Bullish
     if lw0 >= rng0 * 0.65 and body0 <= rng0 * 0.25:
-        patterns_found.append("📌 Pinbar Bullish")
-        signal = "BUY"; score = 7
+        _consider("📌 Pinbar Bullish", "BUY", 7)
 
     # Pinbar Bearish
     if uw0 >= rng0 * 0.65 and body0 <= rng0 * 0.25:
-        patterns_found.append("📌 Pinbar Bearish")
-        signal = "SELL"; score = 7
+        _consider("📌 Pinbar Bearish", "SELL", 7)
 
     # ── Due candele ──
     # Engulfing Bullish
     if c_0 > o0 and c_1 < o1 and c_0 > o1 and o0 < c_1:
-        patterns_found.append("📈 Engulfing Bullish")
-        signal = "BUY"; score = 8
+        _consider("📈 Engulfing Bullish", "BUY", 8)
 
     # Engulfing Bearish
     if c_0 < o0 and c_1 > o1 and c_0 < o1 and o0 > c_1:
-        patterns_found.append("📉 Engulfing Bearish")
-        signal = "SELL"; score = 8
+        _consider("📉 Engulfing Bearish", "SELL", 8)
 
     # Tweezer Bottom
     if abs(l0 - l1) <= rng0 * 0.02 and c_0 > o0 and c_1 < o1:
-        patterns_found.append("🔽 Tweezer Bottom")
-        signal = "BUY"; score = 6
+        _consider("🔽 Tweezer Bottom", "BUY", 6)
 
     # Tweezer Top
     if abs(h0 - h1) <= rng0 * 0.02 and c_0 < o0 and c_1 > o1:
-        patterns_found.append("🔼 Tweezer Top")
-        signal = "SELL"; score = 6
+        _consider("🔼 Tweezer Top", "SELL", 6)
 
     # Harami Bullish
     if c_1 < o1 and c_0 > o0 and o0 > c_1 and c_0 < o1 and body0 < body1 * 0.6:
-        patterns_found.append("📊 Harami Bullish")
-        signal = "BUY"; score = 5
+        _consider("📊 Harami Bullish", "BUY", 5)
 
     # Harami Bearish
     if c_1 > o1 and c_0 < o0 and o0 < c_1 and c_0 > o1 and body0 < body1 * 0.6:
-        patterns_found.append("📊 Harami Bearish")
-        signal = "SELL"; score = 5
+        _consider("📊 Harami Bearish", "SELL", 5)
 
     # ── Tre candele ──
     # Morning Star
     if (c_2 < o2 and abs(c_1 - o1) <= rng1 * 0.35 and
             c_0 > o0 and c_0 > (o2 + c_2) / 2):
-        patterns_found.append("🌅 Morning Star")
-        signal = "BUY"; score = 9
+        _consider("🌅 Morning Star", "BUY", 9)
 
     # Evening Star
     if (c_2 > o2 and abs(c_1 - o1) <= rng1 * 0.35 and
             c_0 < o0 and c_0 < (o2 + c_2) / 2):
-        patterns_found.append("🌆 Evening Star")
-        signal = "SELL"; score = 9
+        _consider("🌆 Evening Star", "SELL", 9)
 
     # Three White Soldiers
     if all([
         float(df.iloc[-i]["Close"]) > float(df.iloc[-i]["Open"]) for i in [1, 2, 3]
     ]) and c_0 > c_1 > c_2:
-        patterns_found.append("⚔️ Tre Soldati Bianchi")
-        signal = "BUY"; score = 8
+        _consider("⚔️ Tre Soldati Bianchi", "BUY", 8)
 
     # Three Black Crows
     if all([
         float(df.iloc[-i]["Close"]) < float(df.iloc[-i]["Open"]) for i in [1, 2, 3]
     ]) and c_0 < c_1 < c_2:
-        patterns_found.append("🐦 Tre Corvi Neri")
-        signal = "SELL"; score = 8
+        _consider("🐦 Tre Corvi Neri", "SELL", 8)
 
-    if patterns_found and signal != "NEUTRAL":
+    if patterns_found and best_signal != "NEUTRAL":
         return {
-            "signal":  signal,
-            "score":   score,
-            "pattern": patterns_found[-1],
+            "signal":  best_signal,
+            "score":   best_score,
+            "pattern": best_pattern,
             "reason":  "Candle: " + ", ".join(patterns_found)
         }
 
