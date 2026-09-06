@@ -13,12 +13,14 @@ Test per due fix nella generazione segnali di analyzer.py (audit 2026-09-05):
 import os
 import sys
 import unittest
+from datetime import datetime
 
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy
+import analyzer
+from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy
 from unittest.mock import patch
 
 
@@ -186,6 +188,52 @@ class TestStatisticalArbitrageStrategyWrapper(unittest.TestCase):
              patch("analyzer.get_tlt_history", return_value=tlt_hist):
             result = statistical_arbitrage_strategy(4000.0, 103.0, 90.0)
         self.assertEqual(result["signal"], "SELL")
+
+
+class TestSmcV3StrategyUsesEvaluationTime(unittest.TestCase):
+    """FIX (2026-09-06): smc_v3_strategy() usava datetime.now(TIMEZONE) —
+    l'ora REALE del computer — per il filtro di sessione 14-19 IT, invece
+    dell'orario della barra simulata. Risultato: un backtest che la
+    richiama con dati storici otteneva sempre NEUTRAL a meno di girare lo
+    script fra le 14 e le 19 reali (verificato: 39295 chiamate, 0 segnali,
+    indipendentemente dai dati). Aggiunto un parametro opzionale `now` che
+    di default preserva il comportamento live (datetime.now(TIMEZONE)) ma
+    permette a un backtest di passare l'orario storico simulato."""
+
+    def _df(self, n=40):
+        idx = pd.date_range("2026-01-01", periods=n, freq="15min")
+        return pd.DataFrame({
+            "Open": [100.0] * n, "High": [100.5] * n, "Low": [99.5] * n,
+            "Close": [100.0] * n, "Volume": [100] * n,
+        }, index=idx)
+
+    def test_explicit_now_outside_session_blocks_before_evaluating_setups(self):
+        outside_hours = analyzer.TIMEZONE.localize(datetime(2026, 3, 4, 21, 45))
+        with patch("analyzer.detect_bos_choch") as mock_choch:
+            result = smc_v3_strategy(self._df(), self._df(), {}, {}, {}, now=outside_hours)
+        self.assertEqual(result, {"signal": "NEUTRAL", "setup": None, "score": 0})
+        mock_choch.assert_not_called()
+
+    def test_explicit_now_inside_session_proceeds_to_evaluate_setups(self):
+        """Prima del fix, questa chiamata sarebbe stata bloccata ogni volta
+        che lo script gira fuori dalle 14-19 reali, indipendentemente
+        dall'orario storico simulato passato: col fix, e' SOLO `now` a
+        decidere se procedere."""
+        inside_hours = analyzer.TIMEZONE.localize(datetime(2026, 3, 4, 15, 30))
+        neutral_smc = {"choch": None, "bos": None, "structure": "NEUTRAL"}
+        with patch("analyzer.detect_bos_choch", return_value=neutral_smc) as mock_choch:
+            smc_v3_strategy(self._df(), self._df(), {}, {}, {}, now=inside_hours)
+        mock_choch.assert_called()
+
+    def test_omitting_now_preserves_live_behaviour_using_real_clock(self):
+        """Comportamento live invariato: senza passare `now`, la funzione
+        deve continuare a usare l'orologio reale (datetime.now)."""
+        fake_real_now = analyzer.TIMEZONE.localize(datetime(2026, 3, 4, 3, 0))
+        with patch("analyzer.datetime") as mock_datetime_cls:
+            mock_datetime_cls.now.return_value = fake_real_now
+            result = smc_v3_strategy(self._df(), self._df(), {}, {}, {})
+        mock_datetime_cls.now.assert_called_once()
+        self.assertEqual(result["signal"], "NEUTRAL")
 
 
 if __name__ == "__main__":

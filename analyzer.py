@@ -604,15 +604,22 @@ def detect_premium_discount(df: pd.DataFrame, smc: dict) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def smc_v3_strategy(df_15m: pd.DataFrame, df_1m: pd.DataFrame,
-                    smc: dict, ob: dict, fvg: dict) -> dict:
+                    smc: dict, ob: dict, fvg: dict, now: datetime = None) -> dict:
     """
     Strategia SMC v3.0 — 5 Setup su XAU/USD
     Timeframe contesto: 15min
     Timeframe entry: 1min (CHoCH su 1min come conferma finale)
     Sessione operativa: 14:00-19:00 IT (NY Kill Zone: 15:30-17:30)
+
+    `now` è l'istante rispetto a cui valutare il filtro orario e il bonus
+    NY Kill Zone: di default l'orario reale (uso live), ma un backtest può
+    passare l'orario storico della barra simulata — altrimenti la funzione
+    valuterebbe sempre l'ora reale del computer invece di quella simulata,
+    restituendo sempre NEUTRAL a meno di girare il backtest tra le 14 e le 19.
     """
     result = {"signal": "NEUTRAL", "setup": None, "score": 0}
-    now    = datetime.now(TIMEZONE)
+    if now is None:
+        now = datetime.now(TIMEZONE)
 
     # Filtro orario — solo 14:00-19:00
     if not (14 <= now.hour < 19):
