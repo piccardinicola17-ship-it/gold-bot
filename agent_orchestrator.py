@@ -48,10 +48,6 @@ def _set_cached_data(interval: str, outputsize: int, df):
 # Soglia confidenza AI per eseguire il trade
 AI_CONFIDENCE_THRESHOLD = 65
 
-# Timeframe senza edge dimostrato a probabilita' basse — soglia piu' alta.
-_FAST_TIMEFRAMES = ("5min", "1min", "15min")
-_FAST_TF_MIN_PROB = 65
-
 # Regimi bloccati per timeframe — non e' lo stesso regime ovunque.
 # H1: RANGING resta il peggiore (WR 23.7%, avg -0.297R, n=38 su 1y).
 # TRENDING_UP aggiunto il 1 set 2026: negativo in modo coerente su
@@ -72,7 +68,8 @@ _FAST_TF_MIN_PROB = 65
 #
 # 1min/5min/15min (2026-09-06): backtest completo su tutti i timeframe
 # dopo il fix del limite trade/giorno, con soglia gia' alzata a 65%
-# (vedi _FAST_TF_MIN_PROB) — 1min, 5min e 15min risultavano tutti in
+# (vedi risk_manager.MIN_PROB_HIGH_THRESHOLD_TFS) — 1min, 5min e 15min
+# risultavano tutti in
 # perdita (PF 0.00/0.67/0.91), a differenza di 1h/4h/1day (PF 1.31-1.81).
 # Sembrava non essere rumore da campione piccolo (confermato raddoppiando
 # 2000 -> 5000 barre Twelve Data), ma era comunque poco storico: 5000
@@ -135,13 +132,15 @@ def get_strategy_fingerprint() -> str:
     import os as _os
 
     try:
-        from risk_manager import MIN_RR
+        from risk_manager import MIN_RR, MIN_PROB_HIGH_THRESHOLD, MIN_PROB_HIGH_THRESHOLD_TFS
     except Exception:
         MIN_RR = None
+        MIN_PROB_HIGH_THRESHOLD = None
+        MIN_PROB_HIGH_THRESHOLD_TFS = ()
 
     config = {
-        "fast_tf_min_prob": _FAST_TF_MIN_PROB,
-        "fast_timeframes": sorted(_FAST_TIMEFRAMES),
+        "min_prob_high_threshold": MIN_PROB_HIGH_THRESHOLD,
+        "min_prob_high_threshold_tfs": sorted(MIN_PROB_HIGH_THRESHOLD_TFS),
         "default_min_prob_env": int(_os.environ.get("MIN_PROB", "55")),
         "blocked_regimes_by_tf": {k: sorted(v) for k, v in _BLOCKED_REGIMES_BY_TF.items()},
         "blocked_regime_direction_by_tf": {
@@ -361,13 +360,11 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
             diff_entry_tp = abs(state.tp2 - state.entry)
             state.rr = round(diff_entry_tp / diff_entry_sl, 2) if diff_entry_sl > 0 else 0
 
-        # Soglia prob differenziata per TF (costanti a livello modulo, vedi
-        # get_strategy_fingerprint())
+        # Soglia prob differenziata per TF - unica fonte di verita' in
+        # risk_manager.min_prob_for_timeframe() (vedi get_strategy_fingerprint()).
         _tf = state.timeframe.lower() if state.timeframe else ""
-        if _tf in _FAST_TIMEFRAMES:
-            MIN_PROB = _FAST_TF_MIN_PROB
-        else:
-            MIN_PROB = int(__import__("os").environ.get("MIN_PROB", "55"))
+        from risk_manager import min_prob_for_timeframe
+        MIN_PROB = min_prob_for_timeframe(state.timeframe)
 
         _regime_up = str(state.regime).upper().replace(" ","_")
         _blocked = _BLOCKED_REGIMES_BY_TF.get(_tf, ())

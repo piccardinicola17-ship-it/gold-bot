@@ -187,10 +187,10 @@ class TestCheckCanTrade(RiskManagerTestCase):
         self.assertIn("sotto soglia", result.reason)
 
     def test_m5_requires_higher_probability_than_other_timeframes(self):
-        # 60% basta su H4 (soglia 55%) ma non su M5 (soglia 65%, SL stretti).
-        ok_h4 = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="4h")
+        # 60% basta su H1 (soglia 55%) ma non su M5 (soglia 65%, SL stretti).
+        ok_h1 = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="1h")
         blocked_m5 = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="5min")
-        self.assertTrue(ok_h4.allowed)
+        self.assertTrue(ok_h1.allowed)
         self.assertFalse(blocked_m5.allowed)
 
     def test_respects_min_prob_env_override_for_non_fast_timeframes(self):
@@ -200,15 +200,38 @@ class TestCheckCanTrade(RiskManagerTestCase):
         avere più segnali non aveva alcun effetto qui, bloccando comunque
         tutto sotto 55%."""
         with unittest.mock.patch.dict(os.environ, {"MIN_PROB": "40"}):
-            result = rm.check_can_trade(prob=45, rr=2.5, signal="BUY", timeframe="4h")
+            result = rm.check_can_trade(prob=45, rr=2.5, signal="BUY", timeframe="1h")
         self.assertTrue(result.allowed)
 
     def test_m5_threshold_unaffected_by_min_prob_env_override(self):
-        # La soglia 65% di M5/M15/M1 resta fissa indipendentemente dalla
+        # La soglia 65% di M5/M15/M1/H4 resta fissa indipendentemente dalla
         # env var MIN_PROB, esattamente come in agent_orchestrator.py.
         with unittest.mock.patch.dict(os.environ, {"MIN_PROB": "40"}):
             result = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="5min")
         self.assertFalse(result.allowed)
+
+    def test_h4_requires_65_percent_since_2026_09_06(self):
+        """FIX (2026-09-06): min_prob per H4 alzato da 55% a 65% - validato
+        con uno split train/test dedicato (PF migliora in ENTRAMBE le meta'
+        cronologiche indipendenti 2021-2024 e 2024-2026, non solo
+        nell'aggregato). 60% bastava prima di questo fix, ora non basta più."""
+        blocked = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="4h")
+        allowed = rm.check_can_trade(prob=65, rr=2.5, signal="BUY", timeframe="4h")
+        self.assertFalse(blocked.allowed)
+        self.assertTrue(allowed.allowed)
+
+    def test_h4_threshold_unaffected_by_min_prob_env_override(self):
+        # Come M5/M15/M1: la soglia 65% di H4 e' fissa, non l'env var MIN_PROB.
+        with unittest.mock.patch.dict(os.environ, {"MIN_PROB": "40"}):
+            result = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="4h")
+        self.assertFalse(result.allowed)
+
+    def test_1day_not_affected_by_h4_threshold_change(self):
+        """1day mostrava lo stesso miglioramento nell'aggregato di H4 ma NON
+        reggeva lo split train/test (peggiorava nella meta' 2003-2015) -
+        scartato, resta al default 55%."""
+        result = rm.check_can_trade(prob=60, rr=2.5, signal="BUY", timeframe="1day")
+        self.assertTrue(result.allowed)
 
     def test_low_rr_blocks(self):
         result = rm.check_can_trade(prob=70, rr=1.0, signal="BUY", timeframe="4h")

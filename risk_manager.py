@@ -32,6 +32,33 @@ MAX_SAME_DIRECTION     = 3  # max 3 trade nella stessa direzione (era 2 — bloc
 MIN_RR                 = 2.0
 NEWS_BUFFER_MINUTES    = 30
 
+# Timeframe con soglia di probabilita' minima piu' alta (65% invece del
+# default 55%) - unica fonte di verita' per questo valore (FIX 2026-09-05:
+# due copie separate della stessa soglia rischiavano di disallinearsi tra
+# agent_orchestrator.py e questo modulo).
+# 1min/5min/15min: nessun edge dimostrato a probabilita' basse (vedi
+# agent_orchestrator._BLOCKED_REGIMES_BY_TF per il contesto completo).
+# 4h aggiunto il 2026-09-06: il PF migliora passando da 55 a 65 in ENTRAMBE
+# le meta' cronologiche indipendenti del campione 2021-2026 (0.96->1.09 e
+# 1.08->1.22) - validato con uno split train/test dedicato, non solo
+# osservato sull'aggregato. 1day mostrava lo stesso miglioramento
+# nell'aggregato (PF 1.10->1.22) ma NON regge in entrambe le meta':
+# peggiora (1.02->0.94) nel periodo 2003-2015, migliora solo nel piu'
+# recente - scartato, resta al default (era guidato da un solo
+# sottoperiodo, non un edge reale).
+MIN_PROB_HIGH_THRESHOLD_TFS = ("1min", "5min", "15min", "4h")
+MIN_PROB_HIGH_THRESHOLD     = 65
+
+
+def min_prob_for_timeframe(timeframe: str | None) -> int:
+    """Soglia minima di probabilita' per aprire un trade sul timeframe dato."""
+    tf = timeframe.lower() if timeframe else ""
+    if tf in MIN_PROB_HIGH_THRESHOLD_TFS:
+        return MIN_PROB_HIGH_THRESHOLD
+    import os as _os
+    return int(_os.environ.get("MIN_PROB", "55"))
+
+
 DD_REDUCE_AT_R  = 3.0
 DD_PAUSE_AT_R   = 10.0   # soglia alzata — non blocca con DD storico da paper trading
 MIN_KELLY_TRADES = 30
@@ -407,17 +434,9 @@ def check_can_trade(
 
     if near_news:
         return RiskCheckResult(False, f"Evento macro entro ±{NEWS_BUFFER_MINUTES} minuti")
-    # Soglia differenziata: M5/M15 richiedono 65% (SL stretti, alta volatilità).
-    # FIX (audit 2026-09-05): il valore per gli altri TF era il modulo
-    # MIN_PROB (costante fissa, MAI aggiornata dalla env var MIN_PROB) mentre
-    # agent_orchestrator.py legge quella env var ad ogni chiamata - se
-    # qualcuno l'avesse abbassata per avere più segnali, questo gate avrebbe
-    # comunque bloccato tutto sotto 55% ignorando l'override, silenziosamente.
-    # Letta qui allo stesso modo (dinamica, non un modulo-level costante) per
-    # restare sincronizzata per costruzione.
-    import os as _os
-    _tf = timeframe.lower() if timeframe else ""
-    _min_prob = 65 if _tf in ("5min", "1min", "15min") else int(_os.environ.get("MIN_PROB", "55"))
+    # Soglia differenziata per timeframe - vedi min_prob_for_timeframe()
+    # sopra (unica fonte di verita', condivisa con agent_orchestrator.py).
+    _min_prob = min_prob_for_timeframe(timeframe)
     if prob < _min_prob:
         return RiskCheckResult(False, f"Confidence {prob}% sotto soglia {_min_prob}% [{timeframe or 'tutti i TF'}]")
     if rr < MIN_RR:
