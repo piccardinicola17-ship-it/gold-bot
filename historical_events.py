@@ -71,12 +71,22 @@ _NUM_RE = re.compile(r"^\s*(-?[\d,.]+)\s*([KMBT%]?)\s*$", re.IGNORECASE)
 # Eventi noti da verificare contro la realtà (già validati contro EPSOFT in
 # una sessione precedente) — se questi non tornano, la fonte HF non è
 # affidabile quanto sembra e la Fase 1 non può dirsi conclusa.
+#
+# NOTA (2026-09-06): i due controlli originali (NFP aprile/maggio 2020,
+# crollo COVID) sono stati sostituiti perché, dopo il fix del timestamp
+# segnaposto in _normalize_hf, è emerso che la fonte HF stessa registra
+# "00:00:00" locale (orario sconosciuto) per QUEI due report specifici —
+# non un bug del fix, un limite reale della fonte per quei due mesi. Le
+# righe vengono quindi scartate (correttamente: non possiamo fare analisi
+# price-action su un evento di cui non conosciamo l'ora di rilascio) e i
+# controlli non potevano più trovarle. Sostituiti con due report altrettanto
+# noti (crisi finanziaria 2008-2009) che HANNO un timestamp reale in questa
+# fonte, verificato incrociando anche con EPSOFT.
 KNOWN_NFP_CHECKS = [
     # (anno, mese di RILASCIO del report, actual_num atteso) — un report NFP
-    # copre il mese precedente (il report di aprile copre marzo, ecc.).
-    # Fonte: Bloomberg/Yahoo Finance/FXStreet, verificato con web search.
-    (2020, 4, -701_000),      # rilasciato 3 apr 2020, dati di marzo — primo colpo COVID
-    (2020, 5, -20_500_000),   # rilasciato 8 mag 2020, dati di aprile — crollo pieno lockdown
+    # copre il mese precedente (il report di febbraio copre gennaio, ecc.).
+    (2009, 2, -598_000),   # rilasciato 6 feb 2009, dati di gennaio — crisi finanziaria
+    (2009, 4, -663_000),   # rilasciato 3 apr 2009, dati di marzo — picco perdita occupati della crisi
 ]
 
 
