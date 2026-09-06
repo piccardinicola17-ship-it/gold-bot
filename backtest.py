@@ -57,8 +57,14 @@ MAX_PENDING_BARS = {
     "4h": 6,
     "1day": 3,
 }
-MAX_TRADES_PER_DAY = 3
-MAX_CONSECUTIVE_LOSS = 3
+# FIX (2026-09-06): erano costanti hardcoded (3/giorno) mai sincronizzate
+# col bot live — risk_manager.py non impone alcun limite giornaliero
+# (MAX_TRADES_PER_DAY=999, praticamente illimitato: l'unico freno reale è
+# lo stop dopo 3 perdite consecutive). Ogni backtest fatto finora simulava
+# quindi un bot più prudente di quello che gira davvero in produzione.
+# Importate da risk_manager (fonte di verità) invece di un mirror a mano,
+# stesso pattern già usato per _BLOCKED_REGIMES_BY_TF qui sopra.
+from risk_manager import MAX_TRADES_PER_DAY, MAX_CONSECUTIVE_LOSS
 
 # FIX (audit 2026-09-04): _make_setup() non applicava questi filtri
 # regime/direzione — agent_orchestrator.py li applica in produzione dal
