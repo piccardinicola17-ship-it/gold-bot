@@ -54,6 +54,7 @@ class GoldBotTestCase(unittest.TestCase):
         gb._sent_event_alerts = set()
         gb._sent_post_event_alerts = set()
         gb._pre_event_bias = {}
+        gb._sent_stat_prediction = set()
 
     def tearDown(self):
         for suffix in ("", "-wal", "-shm"):
@@ -230,6 +231,71 @@ class TestCheckMacroAlertsResilience(GoldBotTestCase):
         sent_text = bot.send_message.call_args.kwargs["text"]
         self.assertIn("\\[Update\\]", sent_text)
         self.assertIn("rate\\_decision", sent_text)
+
+
+class TestStatPredictionRetriesIndependently(GoldBotTestCase):
+    """FIX (2026-09-06): la previsione statistica (macro_predictor) viveva
+    dentro la stessa finestra stretta di 7 minuti del resoconto post-evento,
+    marcata "fatta" subito dopo l'invio del resoconto — anche se FRED non
+    aveva ancora il dato (aggiornamento reale fino a un'ora), non veniva mai
+    ritentata. Ora è una condizione indipendente con finestra di 3 ore e
+    dedup proprio (_sent_stat_prediction), che ricontrolla a ogni giro finché
+    non trova il dato o la finestra scade."""
+
+    def _make_event(self, minutes_away: int, title: str = "Core CPI m/m") -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "0.3",
+            "previous": "0.2",
+        }
+
+    async def _run(self, event, prediction_return):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4400.0), \
+             mock.patch("gold_bot.analyze_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
+             mock.patch("macro_predictor.predict_reaction", return_value=prediction_return), \
+             mock.patch("macro_predictor.format_prediction", return_value="previsione"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_fred_not_ready_yet_does_not_mark_dedup_allows_retry(self):
+        import asyncio
+        # Evento 40 minuti fa: fuori dalla finestra stretta del resoconto
+        # (-15/-8) ma dentro quella larga (3h) della previsione statistica.
+        event = self._make_event(-40)
+        stat_key = f"{event['date']}_{event['time']}_{event['title']}"
+        stat_key = f"STAT_{stat_key}"
+
+        bot1 = asyncio.run(self._run(event, None))  # FRED non ancora aggiornato
+        bot1.send_message.assert_not_called()
+        self.assertNotIn(stat_key, gb._sent_stat_prediction)
+
+        # Giro successivo, FRED ora ha il dato -> deve ancora poter scattare.
+        bot2 = asyncio.run(self._run(event, {"predicted_reaction_usd": 1.2}))
+        bot2.send_message.assert_called_once()
+        self.assertIn(stat_key, gb._sent_stat_prediction)
+
+    def test_outside_three_hour_window_never_checked(self):
+        import asyncio
+        event = self._make_event(-200)  # oltre le 3 ore, non deve nemmeno provarci
+        bot = asyncio.run(self._run(event, {"predicted_reaction_usd": 1.2}))
+        bot.send_message.assert_not_called()
+
+    def test_succeeds_once_does_not_resend_on_next_cycle(self):
+        import asyncio
+        event = self._make_event(-40)
+        bot1 = asyncio.run(self._run(event, {"predicted_reaction_usd": 1.2}))
+        bot1.send_message.assert_called_once()
+
+        bot2 = asyncio.run(self._run(event, {"predicted_reaction_usd": 1.2}))
+        bot2.send_message.assert_not_called()
 
 
 class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):

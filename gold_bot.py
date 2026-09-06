@@ -1239,6 +1239,10 @@ _sent_post_event_alerts = set()
 # post-evento se la previsione si è avverata (confronto oggettivo sul
 # prezzo reale, non un'altra opinione dell'AI).
 _pre_event_bias = {}
+# Previsioni statistiche Fase 5 (macro_predictor) già inviate — dedup
+# separato da _sent_post_event_alerts perché la finestra di retry (3 ore)
+# è indipendente da quella del resoconto post-evento (7 minuti).
+_sent_stat_prediction = set()
 
 
 async def check_breaking_news_job(bot):
@@ -1389,17 +1393,23 @@ async def check_breaking_news_job(bot):
 
 async def check_macro_alerts(bot):
     """Controlla ogni 5 minuti se ci sono eventi macro entro 30 minuti."""
-    global _sent_event_alerts, _sent_post_event_alerts, _pre_event_bias
+    global _sent_event_alerts, _sent_post_event_alerts, _pre_event_bias, _sent_stat_prediction
     if is_bot_paused():
         return
     try:
         from analyzer import get_upcoming_events
         now    = datetime.now(TIMEZONE)
-        # hours_lookback=0.5: senza, get_upcoming_events() scarta gli eventi
+        # hours_lookback=3.5: senza, get_upcoming_events() scarta gli eventi
         # già avvenuti prima ancora che si possa controllare la finestra
         # POST-evento (8-15 minuti dopo) — il resoconto post-evento non
         # scattava mai, per nessun evento (bug trovato il 1 settembre 2026).
-        events = await asyncio.to_thread(get_upcoming_events, 1, 0.5)
+        # Alzato da 0.5 a 3.5 (FIX 2026-09-06): la previsione statistica
+        # (sotto) deve poter ricontrollare FRED fino a 3 ore dopo l'evento
+        # — se l'evento sparisse dalla lista dopo 30 minuti come prima,
+        # quel blocco non avrebbe mai la possibilità di ritentare. Le
+        # finestre pre/post-evento più strette restano invariate, sono
+        # condizioni indipendenti più a valle nello stesso ciclo.
+        events = await asyncio.to_thread(get_upcoming_events, 1, 3.5)
         post_event_fired = False
 
         for ev in events:
@@ -1565,11 +1575,27 @@ async def check_macro_alerts(bot):
                 await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
                 _sent_post_event_alerts.add(post_key)
                 _pre_event_bias.pop(ev_key, None)
+                post_event_fired = True
 
-                # Fase 5 progetto dati storici: previsione statistica reale,
-                # solo per le serie validate in Fase 4 (oggi: Core CPI m/m).
-                # Silenziosa se non applicabile (evento diverso, FRED non
-                # ancora aggiornato, forecast non numerico) — mai forzata.
+            # Fase 5 progetto dati storici: previsione statistica reale, solo
+            # per le serie validate in Fase 4 (oggi: Core CPI m/m). Silenziosa
+            # se non applicabile (evento diverso, forecast non numerico) —
+            # mai forzata.
+            #
+            # FIX (2026-09-06): prima questo controllo viveva DENTRO il blocco
+            # post-evento sopra, con la stessa finestra stretta di 7 minuti
+            # (-15/-8) e marcato "fatto" (post_key) subito dopo l'invio del
+            # resoconto principale — anche se FRED non aveva ancora pubblicato
+            # il dato (aggiornamento reale fino a un'ora, non minuti, per
+            # CPI/Unemployment Claims), il controllo non veniva MAI ripetuto:
+            # la previsione rischiava di non scattare quasi mai nella pratica.
+            # Ora è una condizione indipendente, con una finestra propria di
+            # 3 ore e una chiave di dedup separata (stat_key): ricontrolla
+            # FRED a ogni giro dello scheduler (5 min) finché non trova il
+            # dato o la finestra scade — mai bloccata dall'invio (o mancato
+            # invio) del resoconto principale.
+            stat_key = f"STAT_{ev_key}"
+            if -180 <= mins_away <= 0 and stat_key not in _sent_stat_prediction:
                 try:
                     from macro_predictor import predict_reaction, format_prediction
                     prediction = await asyncio.to_thread(
@@ -1579,10 +1605,9 @@ async def check_macro_alerts(bot):
                         await bot.send_message(
                             chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
                         )
+                        _sent_stat_prediction.add(stat_key)
                 except Exception as e:
                     logger.debug(f"[{ev['title']}] Previsione statistica non disponibile: {e}")
-
-                post_event_fired = True
 
         # FIX (trovato in diretta il 2026-09-04, NFP): il digest notizie
         # veniva rifatto (fetch + chiamata LLM) e reinviato UNA VOLTA PER
@@ -1609,6 +1634,8 @@ async def check_macro_alerts(bot):
             _sent_event_alerts = set(list(_sent_event_alerts)[-30:])
         if len(_sent_post_event_alerts) > 50:
             _sent_post_event_alerts = set(list(_sent_post_event_alerts)[-30:])
+        if len(_sent_stat_prediction) > 50:
+            _sent_stat_prediction = set(list(_sent_stat_prediction)[-30:])
         if len(_pre_event_bias) > 50:
             for k in list(_pre_event_bias.keys())[:-30]:
                 _pre_event_bias.pop(k, None)
@@ -1618,6 +1645,7 @@ async def check_macro_alerts(bot):
         await asyncio.to_thread(
             save_macro_alert_state,
             _sent_event_alerts, _sent_post_event_alerts, _pre_event_bias,
+            _sent_stat_prediction,
         )
 
     except Exception as e:
@@ -1994,11 +2022,12 @@ async def main():
     # catturato) da prima di un eventuale riavvio/deploy — senza questo,
     # un deploy a metà finestra evento perde il bias pre-evento e il
     # post-evento non può più confermare/smentire la previsione.
-    global _sent_event_alerts, _sent_post_event_alerts, _pre_event_bias
+    global _sent_event_alerts, _sent_post_event_alerts, _pre_event_bias, _sent_stat_prediction
     _macro_state = load_macro_alert_state()
     _sent_event_alerts      = _macro_state["sent_event_alerts"]
     _sent_post_event_alerts = _macro_state["sent_post_event_alerts"]
     _pre_event_bias         = _macro_state["pre_event_bias"]
+    _sent_stat_prediction   = _macro_state["sent_stat_prediction"]
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 

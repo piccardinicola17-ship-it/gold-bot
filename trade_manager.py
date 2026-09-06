@@ -1483,19 +1483,22 @@ def load_macro_alert_state() -> dict:
                 "SELECT value FROM bot_state WHERE key='macro_alert_state'"
             ).fetchone()
         if not row:
-            return {"sent_event_alerts": set(), "sent_post_event_alerts": set(), "pre_event_bias": {}}
+            return {"sent_event_alerts": set(), "sent_post_event_alerts": set(),
+                     "pre_event_bias": {}, "sent_stat_prediction": set()}
         data = json.loads(row["value"])
         return {
             "sent_event_alerts": set(data.get("sent_event_alerts", [])),
             "sent_post_event_alerts": set(data.get("sent_post_event_alerts", [])),
             "pre_event_bias": data.get("pre_event_bias", {}),
+            "sent_stat_prediction": set(data.get("sent_stat_prediction", [])),
         }
     except Exception:
-        return {"sent_event_alerts": set(), "sent_post_event_alerts": set(), "pre_event_bias": {}}
+        return {"sent_event_alerts": set(), "sent_post_event_alerts": set(),
+                 "pre_event_bias": {}, "sent_stat_prediction": set()}
 
 
 def save_macro_alert_state(sent_event_alerts: set, sent_post_event_alerts: set,
-                            pre_event_bias: dict) -> None:
+                            pre_event_bias: dict, sent_stat_prediction: set = frozenset()) -> None:
     with _write_lock, _connect() as conn:
         conn.execute(
             "INSERT INTO bot_state(key, value) VALUES('macro_alert_state', ?) "
@@ -1504,6 +1507,7 @@ def save_macro_alert_state(sent_event_alerts: set, sent_post_event_alerts: set,
                 "sent_event_alerts": list(sent_event_alerts),
                 "sent_post_event_alerts": list(sent_post_event_alerts),
                 "pre_event_bias": pre_event_bias,
+                "sent_stat_prediction": list(sent_stat_prediction),
             }),),
         )
 
