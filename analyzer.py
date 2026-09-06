@@ -343,6 +343,15 @@ def get_multi_timeframe_data() -> dict:
 # ═══════════════════════════════════════════════════════════════
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    # Copia esplicita: se il chiamante passa uno slice/view (es. df.tail(n)
+    # o df.iloc[a:b] senza .copy()), assegnare colonne qui sotto genera un
+    # SettingWithCopyWarning ad ogni riga per ogni chiamata - irrilevante
+    # per la correttezza (il chiamante usa sempre il valore di ritorno) ma
+    # con migliaia di chiamate ravvicinate (backtest bar-per-bar) l'overhead
+    # di formattazione/scrittura del warning diventa il vero collo di
+    # bottiglia (osservato: un backtest fermo a "zero progresso" con un log
+    # di 4.2GB di soli warning ripetuti).
+    df = df.copy()
     # EMA
     df["ema9"]   = ta.trend.ema_indicator(df["Close"], window=9)
     df["ema20"]  = ta.trend.ema_indicator(df["Close"], window=20)
