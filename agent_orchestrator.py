@@ -74,25 +74,35 @@ _FAST_TF_MIN_PROB = 65
 # dopo il fix del limite trade/giorno, con soglia gia' alzata a 65%
 # (vedi _FAST_TF_MIN_PROB) — 1min, 5min e 15min risultavano tutti in
 # perdita (PF 0.00/0.67/0.91), a differenza di 1h/4h/1day (PF 1.31-1.81).
-# Non e' rumore da campione piccolo: confermato anche raddoppiando lo
-# storico (2000 -> 5000 barre, stessi numeri quasi identici).
+# Sembrava non essere rumore da campione piccolo (confermato raddoppiando
+# 2000 -> 5000 barre Twelve Data), ma era comunque poco storico: 5000
+# barre a 15min sono solo ~17 giorni.
+#
+# FIX (stesso giorno, poche ore dopo): scaricati 5 anni REALI di candele
+# XAU/USD via Dukascopy (dukascopy-python, non Twelve Data) — 118.279
+# barre a 15min, 354.816 a 5min. Il filtro TRENDING_UP-only che era stato
+# deployato qui per 15min (paragrafo sotto, ora rimosso) NON regge su
+# questo campione enorme: R medio -0.078 su 1744 trade, non piu' positivo
+# come sui 2000-5000 barre Twelve Data. Era un pattern da poco storico,
+# non un edge vero — lezione diretta dello standard di validazione del
+# progetto (mai fidarsi di un pattern senza split cronologico vero).
 # 1min: tutti i regimi bloccati (n=10 su 2000 barre, WR 0%, instabile ai
 # parametri) — dati troppo pochi per salvare qualunque sottoinsieme,
 # bloccato per intero finche' non c'e' piu' storico.
-# 15min: unico regime con R medio positivo e' TRENDING_UP, confermato su
-# due finestre indipendenti (2000 e 5000 barre) e stabile su 5 soglie di
-# probabilita' diverse (55-75) — bloccati gli altri tre.
-# 5min: stesso filtro TRENDING_UP testato ma NON confermato (positivo su
-# 5000 barre, negativo sul sottoinsieme piu' recente di 2000) — nessun
+# 15min: FILTRO RIMOSSO (non piu' TRENDING_UP-only) in attesa di una vera
+# validazione out-of-sample sui 5 anni Dukascopy — su richiesta esplicita
+# dell'utente non bloccato del tutto, resta un problema aperto da
+# risolvere con un fix validato, non un altro tentativo non provato.
+# 5min: stesso identico esito su campione enorme (5 anni, 354.816 barre:
+# PF 0.80, R medio negativo su OGNI regime, incluso TRENDING_UP) — nessun
 # fix trovato finora, resta un problema aperto. Non bloccato per intero
 # su richiesta esplicita, ma senza un filtro regime: il rischio noto
 # resta quello del backtest completo.
 _BLOCKED_REGIMES_BY_TF = {
-    "1h":    ("RANGING", "TRENDING_UP"),
-    "4h":    ("RANGING",),
-    "1day":  ("TRENDING_DOWN",),
-    "1min":  ("NORMAL", "RANGING", "VOLATILE", "TRENDING_UP", "TRENDING_DOWN"),
-    "15min": ("NORMAL", "RANGING", "VOLATILE", "TRENDING_DOWN"),
+    "1h":   ("RANGING", "TRENDING_UP"),
+    "4h":   ("RANGING",),
+    "1day": ("TRENDING_DOWN",),
+    "1min": ("NORMAL", "RANGING", "VOLATILE", "TRENDING_UP", "TRENDING_DOWN"),
 }
 
 # Direzione bloccata per regime/timeframe — a differenza del blocco sopra
