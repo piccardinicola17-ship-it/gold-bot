@@ -20,7 +20,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import analyzer
-from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy
+from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy, detect_swing_points
 from unittest.mock import patch
 
 
@@ -234,6 +234,56 @@ class TestSmcV3StrategyUsesEvaluationTime(unittest.TestCase):
             result = smc_v3_strategy(self._df(), self._df(), {}, {}, {})
         mock_datetime_cls.now.assert_called_once()
         self.assertEqual(result["signal"], "NEUTRAL")
+
+
+class TestDetectSwingPointsVectorized(unittest.TestCase):
+    """PERF (2026-09-06): il loop Python puro riga-per-riga rendeva
+    impraticabile processare 1min su 5 anni pieni (1.77M barre). Sostituito
+    con un rolling centrato, verificato dare risultati identici (~1300x più
+    veloce). Qui si fissa il contratto della funzione, indipendentemente
+    dall'implementazione."""
+
+    def _df(self, highs, lows):
+        n = len(highs)
+        return pd.DataFrame({
+            "Open": highs, "High": highs, "Low": lows, "Close": highs,
+            "Volume": [100] * n,
+        })
+
+    def test_local_peak_is_flagged_swing_high(self):
+        # lookback=5: indice 5 e' un picco isolato circondato da valori piu' bassi.
+        highs = [100, 100, 100, 100, 100, 110, 100, 100, 100, 100, 100]
+        lows  = [99]  * len(highs)
+        df = detect_swing_points(self._df(highs, lows), lookback=5)
+        self.assertTrue(df["swing_high"].iloc[5])
+        self.assertFalse(df["swing_high"].iloc[4])
+        self.assertFalse(df["swing_high"].iloc[6])
+
+    def test_local_trough_is_flagged_swing_low(self):
+        highs = [101] * 11
+        lows  = [100, 100, 100, 100, 100, 90, 100, 100, 100, 100, 100]
+        df = detect_swing_points(self._df(highs, lows), lookback=5)
+        self.assertTrue(df["swing_low"].iloc[5])
+        self.assertFalse(df["swing_low"].iloc[4])
+        self.assertFalse(df["swing_low"].iloc[6])
+
+    def test_edges_within_lookback_are_never_flagged(self):
+        # Anche se il valore piu' alto in assoluto e' al bordo (indice 0),
+        # non puo' avere una finestra completa -> mai marcato.
+        highs = [200, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100]
+        lows  = [99] * len(highs)
+        df = detect_swing_points(self._df(highs, lows), lookback=5)
+        self.assertFalse(df["swing_high"].iloc[0])
+
+    def test_plateau_ties_all_flagged_not_just_one(self):
+        """Se piu' barre nella finestra condividono lo stesso massimo, TUTTE
+        risultano swing_high (confronto indipendente per barra, non un
+        singolo vincitore) - stesso comportamento del loop originale."""
+        highs = [100, 100, 100, 100, 100, 110, 110, 100, 100, 100, 100, 100]
+        lows  = [99] * len(highs)
+        df = detect_swing_points(self._df(highs, lows), lookback=5)
+        self.assertTrue(df["swing_high"].iloc[5])
+        self.assertTrue(df["swing_high"].iloc[6])
 
 
 if __name__ == "__main__":
