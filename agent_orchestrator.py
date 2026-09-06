@@ -69,10 +69,30 @@ _FAST_TF_MIN_PROB = 65
 # da poter essere letto anche da get_strategy_fingerprint() senza
 # duplicarne i valori altrove — stesso principio di backtest.py, che
 # mantiene un mirror ESATTO di questi due dizionari.
+#
+# 1min/5min/15min (2026-09-06): backtest completo su tutti i timeframe
+# dopo il fix del limite trade/giorno, con soglia gia' alzata a 65%
+# (vedi _FAST_TF_MIN_PROB) — 1min, 5min e 15min risultavano tutti in
+# perdita (PF 0.00/0.67/0.91), a differenza di 1h/4h/1day (PF 1.31-1.81).
+# Non e' rumore da campione piccolo: confermato anche raddoppiando lo
+# storico (2000 -> 5000 barre, stessi numeri quasi identici).
+# 1min: tutti i regimi bloccati (n=10 su 2000 barre, WR 0%, instabile ai
+# parametri) — dati troppo pochi per salvare qualunque sottoinsieme,
+# bloccato per intero finche' non c'e' piu' storico.
+# 15min: unico regime con R medio positivo e' TRENDING_UP, confermato su
+# due finestre indipendenti (2000 e 5000 barre) e stabile su 5 soglie di
+# probabilita' diverse (55-75) — bloccati gli altri tre.
+# 5min: stesso filtro TRENDING_UP testato ma NON confermato (positivo su
+# 5000 barre, negativo sul sottoinsieme piu' recente di 2000) — nessun
+# fix trovato finora, resta un problema aperto. Non bloccato per intero
+# su richiesta esplicita, ma senza un filtro regime: il rischio noto
+# resta quello del backtest completo.
 _BLOCKED_REGIMES_BY_TF = {
-    "1h":   ("RANGING", "TRENDING_UP"),
-    "4h":   ("RANGING",),
-    "1day": ("TRENDING_DOWN",),
+    "1h":    ("RANGING", "TRENDING_UP"),
+    "4h":    ("RANGING",),
+    "1day":  ("TRENDING_DOWN",),
+    "1min":  ("NORMAL", "RANGING", "VOLATILE", "TRENDING_UP", "TRENDING_DOWN"),
+    "15min": ("NORMAL", "RANGING", "VOLATILE", "TRENDING_DOWN"),
 }
 
 # Direzione bloccata per regime/timeframe — a differenza del blocco sopra
