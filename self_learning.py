@@ -226,6 +226,27 @@ IMPATTO SUL SISTEMA:
 
 
 def weekly_review() -> str:
+    """
+    FIX (2026-09-06): la review inviata il 6 settembre conteneva 3 problemi
+    reali, non solo di stile — trovati confrontandola col codice e con la
+    validazione a campione grande fatta lo stesso giorno:
+    1. La LLM si è inventata un periodo "07-13 settembre" (nel FUTURO) —
+       il prompt non le dava mai le date esatte da coprire, solo "ultima
+       settimana". Ora il periodo esatto è nel prompt, con l'istruzione
+       esplicita di non inventarne un altro.
+    2. Un bucket regime/timeframe/direzione con 1-2 trade veniva presentato
+       come un "pattern" o un "must-have" — quella settimana specifica
+       "5min/15min: 100% win rate" (in realtà 1-3 trade totali) contraddiva
+       direttamente il backtest da 5 anni fatto lo stesso giorno (5min PF
+       0.80 su n=11.360, 15min PF 0.89 su n=6.661: entrambi in perdita
+       robusta). Ora ogni bucket sotto MIN_TRADES_PER_STRATEGY viene
+       marcato esplicitamente come campione troppo piccolo, con
+       l'istruzione di non trarne conclusioni operative.
+    3. La LLM ha speculato "probabilmente operazioni di test" sul perché
+       12 trade non fossero decisivi (in realtà quasi certamente ancora
+       aperti) — ora il conteggio di "ancora aperti/altro" è dato
+       esplicitamente, con l'istruzione di non speculare oltre.
+    """
     trades = _get_closed_trades(days=7)
     if not trades:
         return "Nessun trade nell'ultima settimana."
@@ -236,6 +257,15 @@ def weekly_review() -> str:
     decisivi = wins + losses
     wr       = round(len(wins) / len(decisivi) * 100, 1) if decisivi else 0
     pnl_r    = sum(t.get("pnl_r") or 0 for t in trades)
+    altri    = len(trades) - len(decisivi) - len(be_list)
+
+    def _breakdown_txt(stats: dict) -> str:
+        lines = []
+        for key, d in stats.items():
+            pct = round(d["wins"] / d["total"] * 100) if d["total"] else 0
+            flag = "" if d["total"] >= MIN_TRADES_PER_STRATEGY else "  [CAMPIONE TROPPO PICCOLO — non è un pattern]"
+            lines.append(f"  {key}: {d['wins']}/{d['total']} ({pct}%){flag}")
+        return "\n".join(lines) or "  Nessun dato"
 
     regime_stats = {}
     for t in decisivi:
@@ -243,7 +273,7 @@ def weekly_review() -> str:
         regime_stats.setdefault(r, {"wins":0,"total":0})
         regime_stats[r]["total"] += 1
         if _is_win(t): regime_stats[r]["wins"] += 1
-    regime_txt = "\n".join(f"  {r}: {d['wins']}/{d['total']} ({round(d['wins']/d['total']*100)}%)" for r,d in regime_stats.items()) or "  Nessun dato"
+    regime_txt = _breakdown_txt(regime_stats)
 
     tf_stats = {}
     for t in decisivi:
@@ -251,7 +281,7 @@ def weekly_review() -> str:
         tf_stats.setdefault(tf, {"wins":0,"total":0})
         tf_stats[tf]["total"] += 1
         if _is_win(t): tf_stats[tf]["wins"] += 1
-    tf_txt = "\n".join(f"  {tf}: {d['wins']}/{d['total']} ({round(d['wins']/d['total']*100)}%)" for tf,d in tf_stats.items()) or "  Nessun dato"
+    tf_txt = _breakdown_txt(tf_stats)
 
     dir_stats = {}
     for t in decisivi:
@@ -259,10 +289,13 @@ def weekly_review() -> str:
         dir_stats.setdefault(sig, {"wins":0,"total":0})
         dir_stats[sig]["total"] += 1
         if _is_win(t): dir_stats[sig]["wins"] += 1
-    dir_txt = "\n".join(f"  {sig}: {d['wins']}/{d['total']} ({round(d['wins']/d['total']*100)}%)" for sig,d in dir_stats.items()) or "  Nessun dato"
+    dir_txt = _breakdown_txt(dir_stats)
 
-    user = f"""REVIEW SETTIMANALE XAU/USD:
-Trade totali: {len(trades)} (decisivi: {len(decisivi)}, BE: {len(be_list)})
+    period_end   = datetime.now(TIMEZONE)
+    period_start = period_end - timedelta(days=7)
+
+    user = f"""REVIEW SETTIMANALE XAU/USD — periodo ESATTO {period_start.strftime('%d/%m/%Y')}-{period_end.strftime('%d/%m/%Y')} (usa SOLO queste date, non inventarne altre):
+Trade totali: {len(trades)} (decisivi: {len(decisivi)}, BE: {len(be_list)}, ancora aperti/altro: {altri})
 Win Rate: {wr}% ({len(wins)}W / {len(losses)}L) — calcolato solo su trade decisivi
 P&L totale: {pnl_r:+.1f}R
 
@@ -270,15 +303,20 @@ Per regime:\n{regime_txt}
 Per timeframe:\n{tf_txt}
 Per direzione:\n{dir_txt}
 
+REGOLE OBBLIGATORIE:
+- Ogni riga marcata "CAMPIONE TROPPO PICCOLO" non è un pattern affidabile: non definirla un punto di forza, un'area di miglioramento o un pattern strutturale — menzionala al massimo come dato grezzo, con l'esplicita cautela che il campione è insufficiente.
+- Usa SOLO il periodo indicato sopra, non inventare altre date.
+- Non speculare sul perché i trade "ancora aperti/altro" non siano decisivi (probabilmente sono ancora aperti) — se non lo sai, non dirlo.
+
 Fornisci:
 1. PERFORMANCE SETTIMANALE: valutazione generale
-2. PUNTI DI FORZA: cosa ha funzionato
-3. AREE DI MIGLIORAMENTO: cosa non ha funzionato
-4. PATTERN IDENTIFICATI: tendenze nelle performance
+2. PUNTI DI FORZA: cosa ha funzionato (solo bucket con campione sufficiente)
+3. AREE DI MIGLIORAMENTO: cosa non ha funzionato (solo bucket con campione sufficiente)
+4. PATTERN IDENTIFICATI: tendenze nelle performance — dichiara esplicitamente quando il campione non basta per un pattern
 5. OBIETTIVI SETTIMANA PROSSIMA: 2-3 azioni concrete"""
 
     ai_review = _call_groq(
-        system="Sei un trading coach esperto su XAU/USD. Weekly review dettagliata e azionabile. Rispondi in italiano.",
+        system="Sei un trading coach esperto su XAU/USD. Weekly review dettagliata e azionabile. Rispondi in italiano. Segui sempre le REGOLE OBBLIGATORIE indicate nel messaggio, anche a costo di una review più breve.",
         user=user,
         max_tokens=600,
     )

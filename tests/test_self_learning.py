@@ -99,5 +99,71 @@ class TestAnalyzeLastTradeTradeIdLookup(unittest.TestCase):
         self.assertIn("$200.0", prompt)
 
 
+def _week_trade(result="WIN_TP2", regime="NORMAL", timeframe="1day", signal="BUY",
+                 tp1_hit=1, pnl_r=1.0):
+    return {
+        "result": result, "regime": regime, "timeframe": timeframe, "signal": signal,
+        "tp1_hit": tp1_hit, "pnl_r": pnl_r,
+    }
+
+
+class TestWeeklyReviewPromptQuality(unittest.TestCase):
+    """FIX (2026-09-06): la review inviata quel giorno conteneva un periodo
+    inventato nel futuro e un "pattern" (5min/15min 100% win rate) basato
+    su 1-3 trade che contraddiceva il backtest a campione grande fatto lo
+    stesso giorno (5min/15min in perdita robusta su migliaia di trade).
+    Qui si verifica che il prompt mandato alla LLM dia le date esatte e
+    marchi esplicitamente i bucket troppo piccoli, invece di lasciare che
+    la LLM li tratti come pattern affidabili."""
+
+    def _prompt_sent(self, trades):
+        captured = {}
+
+        def _fake_groq(system, user, max_tokens=500):
+            captured["user"] = user
+            return "ok"
+
+        with patch.object(sl, "_get_closed_trades", return_value=trades), \
+             patch.object(sl, "_call_groq", side_effect=_fake_groq):
+            sl.weekly_review()
+        return captured["user"]
+
+    def test_prompt_contains_exact_date_range_not_left_to_the_llm(self):
+        trades = [_week_trade() for _ in range(3)]
+        prompt = self._prompt_sent(trades)
+        period_end = sl.datetime.now(sl.TIMEZONE)
+        period_start = period_end - sl.timedelta(days=7)
+        self.assertIn(period_start.strftime("%d/%m/%Y"), prompt)
+        self.assertIn(period_end.strftime("%d/%m/%Y"), prompt)
+        self.assertIn("non inventarne altre", prompt)
+
+    def test_small_bucket_is_flagged_not_presented_as_a_pattern(self):
+        # 1 solo trade su "5min" — esattamente il caso reale del 6 settembre
+        # che aveva prodotto un falso pattern "100% win rate" sulla review.
+        trades = [_week_trade(timeframe="5min", result="WIN_TP2")]
+        prompt = self._prompt_sent(trades)
+        self.assertIn("5min: 1/1", prompt)
+        self.assertIn("CAMPIONE TROPPO PICCOLO", prompt)
+
+    def test_bucket_with_enough_samples_is_not_flagged(self):
+        trades = [_week_trade(timeframe="1day", result="WIN_TP2") for _ in range(2)] + \
+                  [_week_trade(timeframe="1day", result="LOSS")]
+        prompt = self._prompt_sent(trades)
+        self.assertIn("1day: 2/3", prompt)
+        tf_section = prompt.split("Per timeframe:")[1].split("Per direzione:")[0]
+        self.assertNotIn("CAMPIONE TROPPO PICCOLO", tf_section)
+
+    def test_non_decisive_count_is_given_explicitly_not_left_to_speculation(self):
+        # 2 decisivi + 1 BE + 4 "altro" (probabilmente ancora aperti) = 7 totali.
+        trades = (
+            [_week_trade(result="WIN_TP2"), _week_trade(result="LOSS")]
+            + [_week_trade(result="WIN_BE", tp1_hit=0)]
+            + [_week_trade(result="OPEN", tp1_hit=0) for _ in range(4)]
+        )
+        prompt = self._prompt_sent(trades)
+        self.assertIn("ancora aperti/altro: 4", prompt)
+        self.assertIn("non speculare", prompt.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
