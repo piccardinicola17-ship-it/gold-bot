@@ -795,66 +795,15 @@ def trend_following_strategy(df: pd.DataFrame) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════
-# LIVELLO 06 — MEAN REVERSION
+# LIVELLO 06 — (rimosso, vedi sotto)
 # ═══════════════════════════════════════════════════════════════
 
-def mean_reversion_strategy(df: pd.DataFrame) -> dict:
-    """
-    Mean Reversion: Bollinger + RSI estremi + Z-score + Keltner.
-    Funziona meglio in regime RANGING.
-    """
-    result = {"signal": "NEUTRAL", "score": 0, "reason": ""}
-    if len(df) < 30: return result
-
-    row    = df.iloc[-1]
-    price  = float(row["Close"])
-    bb_u   = float(row["bb_upper"]) if not pd.isna(row["bb_upper"]) else price
-    bb_l   = float(row["bb_lower"]) if not pd.isna(row["bb_lower"]) else price
-    bb_mid = float(row["bb_mid"])   if not pd.isna(row["bb_mid"])   else price
-    rsi    = float(row["rsi"])      if not pd.isna(row["rsi"])      else 50
-    zscore = float(row["zscore"])   if not pd.isna(row["zscore"])   else 0
-    sk     = float(row["stoch_k"])  if not pd.isna(row["stoch_k"])  else 50
-    sd     = float(row["stoch_d"])  if not pd.isna(row["stoch_d"])  else 50
-    kelt_l = float(row["kelt_lower"]) if not pd.isna(row["kelt_lower"]) else price
-    kelt_u = float(row["kelt_upper"]) if not pd.isna(row["kelt_upper"]) else price
-    cci    = float(row["cci"])      if not pd.isna(row["cci"])      else 0
-    willr  = float(row["willr"])    if not pd.isna(row["willr"])    else -50
-    adx    = float(row["adx"])      if not pd.isna(row["adx"])      else 0
-
-    # Mean reversion funziona quando ADX è basso (mercato laterale)
-    adx_filter = adx < 30
-
-    score_buy = 0
-    reason_buy = []
-    if price <= bb_l:       score_buy += 3; reason_buy.append("BB Lower")
-    if rsi < 30:            score_buy += 3; reason_buy.append(f"RSI {rsi:.0f}")
-    elif rsi < 40:          score_buy += 2
-    if zscore < -2.0:       score_buy += 3; reason_buy.append(f"Z-score {zscore:.1f}")
-    elif zscore < -1.5:     score_buy += 2
-    if sk < 20 and sk > sd: score_buy += 2; reason_buy.append("Stoch oversold cross")
-    if price <= kelt_l:     score_buy += 2; reason_buy.append("Keltner Lower")
-    if cci < -150:          score_buy += 2; reason_buy.append(f"CCI {cci:.0f}")
-    if willr < -85:         score_buy += 1
-
-    if score_buy >= 6 and adx_filter:
-        return {"signal": "BUY", "score": score_buy, "reason": "MR: " + ", ".join(reason_buy)}
-
-    score_sell = 0
-    reason_sell = []
-    if price >= bb_u:       score_sell += 3; reason_sell.append("BB Upper")
-    if rsi > 70:            score_sell += 3; reason_sell.append(f"RSI {rsi:.0f}")
-    elif rsi > 60:          score_sell += 2
-    if zscore > 2.0:        score_sell += 3; reason_sell.append(f"Z-score {zscore:.1f}")
-    elif zscore > 1.5:      score_sell += 2
-    if sk > 80 and sk < sd: score_sell += 2; reason_sell.append("Stoch overbought cross")
-    if price >= kelt_u:     score_sell += 2; reason_sell.append("Keltner Upper")
-    if cci > 150:           score_sell += 2; reason_sell.append(f"CCI {cci:.0f}")
-    if willr > -15:         score_sell += 1
-
-    if score_sell >= 6 and adx_filter:
-        return {"signal": "SELL", "score": score_sell, "reason": "MR: " + ", ".join(reason_sell)}
-
-    return {"signal": "NEUTRAL", "score": 0, "reason": "No MR signal"}
+# FIX (2026-09-06): mean_reversion_strategy() rimossa. Il suo peso era
+# gia' stato azzerato in TUTTI i regimi in aggregate_strategies dopo un
+# backtest reale (19% win rate, n=21, pattern negativo confermato) — da
+# allora votava ogni ciclo senza che il voto contasse mai. Codice morto
+# con un costo di calcolo reale e zero effetto: rimosso invece di
+# lasciarlo azzerato per sempre.
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1972,7 +1921,6 @@ def aggregate_strategies(strategies: dict, regime: dict, timeframe: str = "5min"
         "TRENDING_UP": {
             "smc":         1.2,
             "trend":       1.0,
-            "mean_rev":    0.0,
             "momentum":    1.8,
             "event":       0.8,
             "stat_arb":    1.0,
@@ -1983,7 +1931,6 @@ def aggregate_strategies(strategies: dict, regime: dict, timeframe: str = "5min"
         "TRENDING_DOWN": {
             "smc":         1.2,
             "trend":       1.0,
-            "mean_rev":    0.0,
             "momentum":    1.8,
             "event":       0.8,
             "stat_arb":    1.0,
@@ -1994,7 +1941,6 @@ def aggregate_strategies(strategies: dict, regime: dict, timeframe: str = "5min"
         "RANGING": {
             "smc":         1.0,
             "trend":       0.4,
-            "mean_rev":    0.0,
             "momentum":    0.5,
             "event":       1.0,
             "stat_arb":    1.2,
@@ -2005,7 +1951,6 @@ def aggregate_strategies(strategies: dict, regime: dict, timeframe: str = "5min"
         "VOLATILE": {
             "smc":         1.5,
             "trend":       0.5,
-            "mean_rev":    0.0,
             "momentum":    0.8,
             "event":       1.5,
             "stat_arb":    0.8,
@@ -2016,7 +1961,6 @@ def aggregate_strategies(strategies: dict, regime: dict, timeframe: str = "5min"
         "NORMAL": {
             "smc":         1.5,
             "trend":       0.7,
-            "mean_rev":    0.0,
             "momentum":    1.2,
             "event":       1.0,
             "stat_arb":    1.0,
@@ -2228,9 +2172,6 @@ def full_analyze(timeframe_focus: str = "5min") -> dict:
 
     # 2. Trend Following
     strategies["trend"] = trend_following_strategy(df_main)
-
-    # 3. Mean Reversion
-    strategies["mean_rev"] = mean_reversion_strategy(df_main)
 
     # 4. Momentum
     strategies["momentum"] = momentum_strategy(df_main, mtf_trends)

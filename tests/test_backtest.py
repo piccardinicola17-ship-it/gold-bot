@@ -202,7 +202,6 @@ def _mock_pipeline(regime: str, signal: str, prob: int = 80):
          patch.object(backtest, "get_support_resistance", lambda w: {}), \
          patch.object(backtest, "detect_market_regime", lambda w: {"regime": regime}), \
          patch.object(backtest, "trend_following_strategy", lambda w: dict(neutral)), \
-         patch.object(backtest, "mean_reversion_strategy", lambda w: dict(neutral)), \
          patch.object(backtest, "momentum_strategy", lambda w, mtf: dict(neutral)), \
          patch.object(backtest, "candlestick_strategy", lambda w: dict(neutral)), \
          patch.object(backtest, "order_flow_strategy", lambda w: dict(neutral)), \

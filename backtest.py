@@ -24,7 +24,6 @@ from analyzer import (
     estimate_probability,
     get_data,
     get_support_resistance,
-    mean_reversion_strategy,
     ml_alpha_strategy,
     momentum_strategy,
     order_flow_strategy,
@@ -258,7 +257,6 @@ def _make_setup(window: pd.DataFrame, interval: str, min_prob: int) -> dict | No
 
     strategies = {
         "trend": trend_following_strategy(window),
-        "mean_rev": mean_reversion_strategy(window),
         "momentum": momentum_strategy(window, mtf_neutral),
         "candle": candlestick_strategy(window),
         "order_flow": order_flow_strategy(window),
@@ -560,7 +558,7 @@ def format_backtest_report(stats: dict, interval: str) -> str:
     pf_txt = "inf" if pf == float("inf") else str(pf)
 
     strat_labels = {
-        "smc": "SMC v3.0", "trend": "Trend Following", "mean_rev": "Mean Reversion",
+        "smc": "SMC v3.0", "trend": "Trend Following",
         "momentum": "Momentum", "event": "Event-Driven", "stat_arb": "Stat Arb",
         "ml": "ML Alpha", "candle": "Candlestick", "order_flow": "Order Flow"
     }
