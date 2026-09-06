@@ -296,7 +296,16 @@ def fit_final_model(event_name: str, horizon: str = DEPLOY_HORIZON, db_path: str
     }
 
 
-DEPLOYED_EVENTS = ("Core CPI m/m",)  # solo le serie con edge validato in Fase 4
+# Nome serie -> orizzonte VALIDATO per QUELLA serie specifica (non più una
+# costante globale unica): serie diverse possono validare a orizzonti
+# diversi — Core CPI m/m regge su reaction_30m, Unemployment Claims solo
+# su reaction_1m (vedi run_all()/summarize() del 2026-09-05). Solo le
+# serie con edge validato in Fase 4 E una fonte dati live gratuita
+# affidabile (vedi macro_predictor.FRED_SERIES) vanno qui.
+DEPLOYED_EVENTS = {
+    "Core CPI m/m": DEPLOY_HORIZON,
+    "Unemployment Claims": "reaction_1m",
+}
 
 
 def regenerate_deployed_models(db_path: str = HIST_DB_PATH) -> None:
@@ -313,22 +322,21 @@ def regenerate_deployed_models(db_path: str = HIST_DB_PATH) -> None:
     # FIX: prima fittava sempre a DEPLOY_HORIZON alla cieca, senza
     # verificare che fosse davvero l'orizzonte che ha superato la
     # validazione (beats_naive su TUTTI gli split cronologici, vedi
-    # summarize()) per quella specifica serie — se una futura serie
-    # aggiunta a DEPLOYED_EVENTS validasse solo a un altro orizzonte (es.
-    # reaction_5m), qui si sarebbe comunque deployato un reaction_30m mai
-    # validato, senza alcun avviso. Ora fallisce rumorosamente invece.
+    # summarize()) per quella specifica serie — una serie che valida solo
+    # a un altro orizzonte (es. Unemployment Claims @ reaction_1m, non
+    # reaction_30m) si sarebbe vista deployare un orizzonte mai validato,
+    # senza alcun avviso. Ora ogni serie usa il proprio orizzonte
+    # dichiarato in DEPLOYED_EVENTS e fallisce rumorosamente se non regge.
     results = run_all(db_path=db_path)
     models = {}
-    for name in DEPLOYED_EVENTS:
-        subset = results[(results["event_name"] == name) & (results["horizon"] == DEPLOY_HORIZON)]
+    for name, horizon in DEPLOYED_EVENTS.items():
+        subset = results[(results["event_name"] == name) & (results["horizon"] == horizon)]
         if subset.empty or not subset["beats_naive"].all():
             raise ValueError(
-                f"{name} @ {DEPLOY_HORIZON}: non risulta validato su tutti gli split "
-                f"cronologici testati (vedi summarize()) — non lo deploy alla cieca. "
-                f"Se questa serie valida solo a un altro orizzonte, la costante globale "
-                f"DEPLOY_HORIZON non basta più: va gestito per-serie."
+                f"{name} @ {horizon}: non risulta validato su tutti gli split "
+                f"cronologici testati (vedi summarize()) — non lo deploy alla cieca."
             )
-        models[name] = fit_final_model(name, horizon=DEPLOY_HORIZON, db_path=db_path)
+        models[name] = fit_final_model(name, horizon=horizon, db_path=db_path)
 
     out_path = Path(__file__).resolve().parent / "macro_models.json"
     out_path.write_text(json.dumps(models, indent=2))

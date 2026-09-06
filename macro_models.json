@@ -8,6 +8,17 @@
     "surprise_std": 0.13343492064965784,
     "surprise_zscore_clip": 4.0,
     "n": 83,
-    "fitted_at": "2026-09-06T12:26:02.835054+00:00"
+    "fitted_at": "2026-09-06T18:38:36.870785+00:00"
+  },
+  "Unemployment Claims": {
+    "event_name": "Unemployment Claims",
+    "horizon": "reaction_1m",
+    "slope": 0.8100579193160202,
+    "intercept": -0.277830997328135,
+    "surprise_mean": 13053.846153846154,
+    "surprise_std": 145259.20758490043,
+    "surprise_zscore_clip": 4.0,
+    "n": 130,
+    "fitted_at": "2026-09-06T18:38:36.873303+00:00"
   }
 }

@@ -84,23 +84,29 @@ class TestSummarizeMissingSeries(unittest.TestCase):
 
 
 class TestRegenerateDeployedModelsValidatesHorizon(unittest.TestCase):
+    """I test patchano DEPLOYED_EVENTS esplicitamente con un solo evento di
+    prova, cosi' restano indipendenti da quali serie reali sono deployate
+    in produzione in questo momento."""
+
     def test_raises_when_deploy_horizon_never_validated(self):
         fake_results = pd.DataFrame([
             _split_row("Core CPI m/m", hm.DEPLOY_HORIZON, 0.5, 50, 50, beats_naive=False),
         ])
-        with mock.patch("historical_model.run_all", return_value=fake_results), \
+        with mock.patch("historical_model.DEPLOYED_EVENTS", {"Core CPI m/m": hm.DEPLOY_HORIZON}), \
+             mock.patch("historical_model.run_all", return_value=fake_results), \
              mock.patch("historical_model.fit_final_model") as mock_fit:
             with self.assertRaises(ValueError):
                 hm.regenerate_deployed_models()
             mock_fit.assert_not_called()
 
     def test_raises_when_deploy_horizon_missing_entirely(self):
-        """Il campione non contiene affatto DEPLOY_HORIZON per questa
-        serie (es. dati insufficienti proprio a quell'orizzonte)."""
+        """Il campione non contiene affatto l'orizzonte dichiarato per
+        questa serie (es. dati insufficienti proprio a quell'orizzonte)."""
         fake_results = pd.DataFrame([
             _split_row("Core CPI m/m", "reaction_5m", 0.5, 50, 50, beats_naive=True),
         ])
-        with mock.patch("historical_model.run_all", return_value=fake_results), \
+        with mock.patch("historical_model.DEPLOYED_EVENTS", {"Core CPI m/m": hm.DEPLOY_HORIZON}), \
+             mock.patch("historical_model.run_all", return_value=fake_results), \
              mock.patch("historical_model.fit_final_model") as mock_fit:
             with self.assertRaises(ValueError):
                 hm.regenerate_deployed_models()
@@ -112,11 +118,41 @@ class TestRegenerateDeployedModelsValidatesHorizon(unittest.TestCase):
             _split_row("Core CPI m/m", hm.DEPLOY_HORIZON, 0.7, 70, 30, beats_naive=True),
         ])
         fake_model = {"event_name": "Core CPI m/m", "horizon": hm.DEPLOY_HORIZON, "slope": 1.0}
-        with mock.patch("historical_model.run_all", return_value=fake_results), \
+        with mock.patch("historical_model.DEPLOYED_EVENTS", {"Core CPI m/m": hm.DEPLOY_HORIZON}), \
+             mock.patch("historical_model.run_all", return_value=fake_results), \
              mock.patch("historical_model.fit_final_model", return_value=fake_model) as mock_fit, \
              mock.patch("pathlib.Path.write_text") as mock_write:
             hm.regenerate_deployed_models()
             mock_fit.assert_called_once_with("Core CPI m/m", horizon=hm.DEPLOY_HORIZON, db_path=hm.HIST_DB_PATH)
+            mock_write.assert_called_once()
+
+    def test_each_series_validated_at_its_own_horizon_not_a_global_one(self):
+        """Il bug che questo fix risolve: una serie che valida SOLO a un
+        orizzonte diverso da quello di un'altra serie deployata deve
+        comunque passare, fittata al SUO orizzonte — non deve fallire solo
+        perche' non coincide con l'orizzonte di un'altra serie nello
+        stesso DEPLOYED_EVENTS."""
+        fake_results = pd.DataFrame([
+            _split_row("Core CPI m/m", "reaction_30m", 0.5, 50, 50, beats_naive=True),
+            _split_row("Core CPI m/m", "reaction_30m", 0.7, 70, 30, beats_naive=True),
+            _split_row("Unemployment Claims", "reaction_1m", 0.5, 50, 50, beats_naive=True),
+            _split_row("Unemployment Claims", "reaction_1m", 0.7, 70, 30, beats_naive=True),
+            # Unemployment Claims NON valida a reaction_30m — non deve
+            # importare, dato che il suo orizzonte dichiarato e' un altro.
+            _split_row("Unemployment Claims", "reaction_30m", 0.5, 50, 50, beats_naive=False),
+        ])
+
+        def fake_fit(name, horizon, db_path):
+            return {"event_name": name, "horizon": horizon, "slope": 1.0}
+
+        with mock.patch("historical_model.DEPLOYED_EVENTS",
+                        {"Core CPI m/m": "reaction_30m", "Unemployment Claims": "reaction_1m"}), \
+             mock.patch("historical_model.run_all", return_value=fake_results), \
+             mock.patch("historical_model.fit_final_model", side_effect=fake_fit) as mock_fit, \
+             mock.patch("pathlib.Path.write_text") as mock_write:
+            hm.regenerate_deployed_models()
+            mock_fit.assert_any_call("Core CPI m/m", horizon="reaction_30m", db_path=hm.HIST_DB_PATH)
+            mock_fit.assert_any_call("Unemployment Claims", horizon="reaction_1m", db_path=hm.HIST_DB_PATH)
             mock_write.assert_called_once()
 
 
