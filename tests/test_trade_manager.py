@@ -386,6 +386,110 @@ class TestCancelledTradeIsDeleted(TradeManagerTestCase):
         self.assertFalse(tm.recently_cancelled_on_timeframe("1day"))
 
 
+class TestProgressiveCancellationCooldown(TradeManagerTestCase):
+    """FIX (2026-09-07, stesso giorno, poche ore dopo il cooldown fisso):
+    un cooldown fisso di 15 minuti non bastava quando il mercato continua
+    a muoversi forte contro lo stesso tipo di ordine per ore - l'utente ha
+    segnalato 11 segnali H1 identici (annunciati e poi cancellati) in una
+    mattina. Il cooldown ora raddoppia a ogni cancellazione consecutiva
+    sullo stesso timeframe, fino a un tetto, e si azzera quando un ordine
+    finalmente si attiva."""
+
+    def _cancel_on(self, timeframe: str):
+        data = _base_trade_data(timeframe=timeframe)
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "CANCELLED", data["entry"], "test")
+
+    def _age_last_cancelled(self, timeframe: str, minutes: float):
+        """Sposta indietro nel tempo l'ultima cancellazione registrata,
+        senza toccare il conteggio della serie - simula il passaggio del
+        tempo tra una cancellazione e il controllo successivo."""
+        state = tm.load_last_cancelled_by_tf()
+        aged = datetime.now(tm.TIMEZONE) - timedelta(minutes=minutes)
+        state[timeframe] = aged.isoformat()
+        tm.save_last_cancelled_by_tf(state)
+
+    def test_first_cancellation_uses_base_cooldown(self):
+        self._cancel_on("1h")
+        self._age_last_cancelled("1h", tm.CANCELLED_SIGNAL_COOLDOWN_MINUTES - 1)
+        self.assertTrue(tm.recently_cancelled_on_timeframe("1h"))
+        self._age_last_cancelled("1h", tm.CANCELLED_SIGNAL_COOLDOWN_MINUTES + 1)
+        self.assertFalse(tm.recently_cancelled_on_timeframe("1h"))
+
+    def test_second_consecutive_cancellation_doubles_the_cooldown(self):
+        self._cancel_on("1h")
+        self._cancel_on("1h")  # seconda cancellazione consecutiva sullo stesso TF
+        double = 2 * tm.CANCELLED_SIGNAL_COOLDOWN_MINUTES
+        self._age_last_cancelled("1h", double - 1)
+        self.assertTrue(
+            tm.recently_cancelled_on_timeframe("1h"),
+            "la seconda cancellazione consecutiva deve raddoppiare il cooldown",
+        )
+        self._age_last_cancelled("1h", double + 1)
+        self.assertFalse(tm.recently_cancelled_on_timeframe("1h"))
+
+    def test_cooldown_caps_at_maximum(self):
+        # 11 cancellazioni consecutive come nel caso reale segnalato -
+        # 15*2^10 supererebbe di gran lunga il tetto senza il min().
+        for _ in range(11):
+            self._cancel_on("1h")
+        self._age_last_cancelled("1h", tm.CANCELLED_SIGNAL_COOLDOWN_MAX_MINUTES - 1)
+        self.assertTrue(tm.recently_cancelled_on_timeframe("1h"))
+        self._age_last_cancelled("1h", tm.CANCELLED_SIGNAL_COOLDOWN_MAX_MINUTES + 1)
+        self.assertFalse(
+            tm.recently_cancelled_on_timeframe("1h"),
+            "il cooldown non deve mai superare CANCELLED_SIGNAL_COOLDOWN_MAX_MINUTES",
+        )
+
+    def test_activation_resets_the_streak(self):
+        self._cancel_on("1h")
+        self._cancel_on("1h")  # streak=2, prossimo cooldown sarebbe 30 min
+
+        data = _base_trade_data(timeframe="1h", entry=4500.0, sl=4470.0)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)  # si attiva finalmente: la serie si interrompe
+        tm.close_trade(trade_id, "WIN_TP1", data["tp1"], "test")  # ciclo di vita completo
+
+        self._cancel_on("1h")  # nuova cancellazione, dopo un'attivazione riuscita
+        self._age_last_cancelled("1h", tm.CANCELLED_SIGNAL_COOLDOWN_MINUTES + 1)
+        self.assertFalse(
+            tm.recently_cancelled_on_timeframe("1h"),
+            "dopo un'attivazione riuscita la serie riparte dal cooldown base, non da 30 min",
+        )
+
+    def test_long_gap_resets_the_streak_even_without_activation(self):
+        self._cancel_on("1h")
+        self._cancel_on("1h")  # streak=2
+
+        # Simula una pausa lunga (oltre CANCELLED_SIGNAL_STREAK_RESET_HOURS)
+        # prima della prossima cancellazione: la serie deve considerarsi
+        # conclusa anche senza un'attivazione.
+        streaks = tm.load_cancelled_streak_by_tf()
+        stale_at = datetime.now(tm.TIMEZONE) - timedelta(
+            hours=tm.CANCELLED_SIGNAL_STREAK_RESET_HOURS + 1
+        )
+        streaks["1h"]["at"] = stale_at.isoformat()
+        tm.save_cancelled_streak_by_tf(streaks)
+
+        self._cancel_on("1h")  # terza cancellazione, ma dopo una pausa lunga
+        self._age_last_cancelled("1h", tm.CANCELLED_SIGNAL_COOLDOWN_MINUTES + 1)
+        self.assertFalse(
+            tm.recently_cancelled_on_timeframe("1h"),
+            "una pausa lunga tra due cancellazioni deve azzerare la serie",
+        )
+
+    def test_streak_is_per_timeframe(self):
+        self._cancel_on("1h")
+        self._cancel_on("1h")  # streak 1h = 2
+        self._cancel_on("4h")  # prima cancellazione su 4h, serie indipendente
+
+        self._age_last_cancelled("4h", tm.CANCELLED_SIGNAL_COOLDOWN_MINUTES + 1)
+        self.assertFalse(
+            tm.recently_cancelled_on_timeframe("4h"),
+            "la serie di cancellazioni di 1h non deve influenzare il cooldown di 4h",
+        )
+
+
 class TestPendingInvalidation(TradeManagerTestCase):
     def _pending_trade(self, timeframe: str, signal: str = "BUY", order_type: str = "BUY LIMIT",
                         entry: float = 4329.31, sl: float = 4299.11, minutes_ago: float = 1.0) -> dict:

@@ -794,7 +794,7 @@ def activate_trade(trade_id: str) -> bool:
     changed = False
     with _write_lock, _connect() as conn:
         row = conn.execute(
-            "SELECT status, counted_open FROM trades WHERE trade_id=?", (trade_id,)
+            "SELECT status, counted_open, timeframe FROM trades WHERE trade_id=?", (trade_id,)
         ).fetchone()
         if not row or row["status"] != "OPEN":
             return False
@@ -820,6 +820,10 @@ def activate_trade(trade_id: str) -> bool:
                 (trade_id,),
             )
     _sync_active_snapshot()
+    # Un ordine finalmente attivato interrompe la serie di cancellazioni
+    # consecutive su questo timeframe (vedi CANCELLED_SIGNAL_COOLDOWN_MAX_MINUTES
+    # sopra) - il prossimo eventuale CANCELLED riparte dal cooldown base.
+    reset_cancelled_streak_on_timeframe(row["timeframe"])
     return changed
 
 
@@ -1586,8 +1590,8 @@ def save_fred_last_seen(state: dict) -> None:
         )
 
 
-# Minuti di cooldown su un timeframe dopo un pending CANCELLED, prima di
-# poter proporre un nuovo segnale sullo stesso TF. FIX (2026-09-07): senza
+# Cooldown su un timeframe dopo un pending CANCELLED, prima di poter
+# proporre un nuovo segnale sullo stesso TF. FIX (2026-09-07): senza
 # questo, lo stesso setup (struttura invariata, entry ricalcolata a ogni
 # giro con un prezzo leggermente diverso) poteva essere riproposto e
 # ricancellato ogni 5 minuti (frequenza di auto_check_all_timeframes),
@@ -1597,7 +1601,21 @@ def save_fred_last_seen(state: dict) -> None:
 # candela (vedi was_setup_seen). Stato persistito separatamente (non nella
 # tabella trades) perche' un CANCELLED viene ora eliminato subito da
 # close_trade() invece di restare come riga marcata.
+#
+# FIX 2 (stesso giorno, poche ore dopo): un cooldown fisso di 15 minuti
+# non bastava quando il mercato continua a muoversi forte contro lo
+# stesso tipo di ordine per ore — l'utente ha segnalato 11 segnali H1
+# identici in una mattina, ognuno annunciato e poi cancellato. Reso
+# progressivo: ogni cancellazione consecutiva sullo stesso timeframe (una
+# "serie" — interrotta da un'attivazione riuscita o da una pausa piu'
+# lunga di CANCELLED_SIGNAL_STREAK_RESET_HOURS senza cancellazioni)
+# raddoppia il cooldown, fino a un tetto massimo. Una serie molto lunga
+# smette cosi' di intasare la chat, ma senza bloccare il timeframe per
+# sempre — il tetto e il reset lasciano sempre una via d'uscita quando il
+# regime di mercato cambia davvero.
 CANCELLED_SIGNAL_COOLDOWN_MINUTES = 15
+CANCELLED_SIGNAL_COOLDOWN_MAX_MINUTES = 240
+CANCELLED_SIGNAL_STREAK_RESET_HOURS = 4
 
 
 def load_last_cancelled_by_tf() -> dict:
@@ -1620,16 +1638,68 @@ def save_last_cancelled_by_tf(state: dict) -> None:
         )
 
 
+def load_cancelled_streak_by_tf() -> dict:
+    """{timeframe: {"count": N, "at": iso}} - N cancellazioni consecutive
+    sullo stesso timeframe, senza un'attivazione riuscita o una pausa
+    lunga nel mezzo (vedi mark_cancelled_on_timeframe)."""
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM bot_state WHERE key='cancelled_streak_by_tf'"
+            ).fetchone()
+        return json.loads(row["value"]) if row else {}
+    except Exception:
+        return {}
+
+
+def save_cancelled_streak_by_tf(state: dict) -> None:
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO bot_state(key, value) VALUES('cancelled_streak_by_tf', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(state),),
+        )
+
+
 def mark_cancelled_on_timeframe(timeframe: str) -> None:
-    state = load_last_cancelled_by_tf()
-    state[timeframe] = datetime.now(TIMEZONE).isoformat()
-    save_last_cancelled_by_tf(state)
+    now = datetime.now(TIMEZONE)
+    last = load_last_cancelled_by_tf()
+    last[timeframe] = now.isoformat()
+    save_last_cancelled_by_tf(last)
+
+    streaks = load_cancelled_streak_by_tf()
+    prev = streaks.get(timeframe) or {}
+    stale = True
+    prev_at = prev.get("at")
+    if prev_at:
+        try:
+            parsed = datetime.fromisoformat(prev_at)
+            if parsed.tzinfo is None:
+                parsed = TIMEZONE.localize(parsed)
+            gap_hours = (now - parsed.astimezone(TIMEZONE)).total_seconds() / 3600
+            stale = gap_hours > CANCELLED_SIGNAL_STREAK_RESET_HOURS
+        except (ValueError, TypeError):
+            stale = True
+    new_count = 1 if stale else int(prev.get("count", 0)) + 1
+    streaks[timeframe] = {"count": new_count, "at": now.isoformat()}
+    save_cancelled_streak_by_tf(streaks)
+
+
+def reset_cancelled_streak_on_timeframe(timeframe: str) -> None:
+    """Da chiamare quando un pending su questo timeframe si ATTIVA (non
+    viene cancellato) - la serie di cancellazioni consecutive si
+    interrompe, il prossimo eventuale CANCELLED riparte dal cooldown base."""
+    streaks = load_cancelled_streak_by_tf()
+    if timeframe in streaks:
+        del streaks[timeframe]
+        save_cancelled_streak_by_tf(streaks)
 
 
 def recently_cancelled_on_timeframe(timeframe: str) -> bool:
-    """True se un pending su questo timeframe e' stato cancellato negli
-    ultimi CANCELLED_SIGNAL_COOLDOWN_MINUTES minuti - evita di riproporre
-    subito lo stesso segnale."""
+    """True se un pending su questo timeframe e' stato cancellato entro il
+    cooldown corrente - evita di riproporre subito lo stesso segnale. Il
+    cooldown raddoppia a ogni cancellazione consecutiva sullo stesso TF
+    (vedi mark_cancelled_on_timeframe), fino a CANCELLED_SIGNAL_COOLDOWN_MAX_MINUTES."""
     ts = load_last_cancelled_by_tf().get(timeframe)
     if not ts:
         return False
@@ -1640,7 +1710,13 @@ def recently_cancelled_on_timeframe(timeframe: str) -> bool:
     except (ValueError, TypeError):
         return False
     age_minutes = (datetime.now(TIMEZONE) - cancelled_at.astimezone(TIMEZONE)).total_seconds() / 60
-    return age_minutes < CANCELLED_SIGNAL_COOLDOWN_MINUTES
+
+    streak = int(load_cancelled_streak_by_tf().get(timeframe, {}).get("count", 1) or 1)
+    cooldown = min(
+        CANCELLED_SIGNAL_COOLDOWN_MINUTES * (2 ** (streak - 1)),
+        CANCELLED_SIGNAL_COOLDOWN_MAX_MINUTES,
+    )
+    return age_minutes < cooldown
 
 
 _DECISIONS_LOG_RETENTION_DAYS = 30
