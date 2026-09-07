@@ -236,6 +236,52 @@ class TestSmcV3StrategyUsesEvaluationTime(unittest.TestCase):
         self.assertEqual(result["signal"], "NEUTRAL")
 
 
+class TestSmcV3StrategyOnlySetup1Remains(unittest.TestCase):
+    """FIX (2026-09-07): primo backtest reale su 5 anni completi (1154
+    trade) - PF 1.0 esatto nell'aggregato, ma solo perche' il Setup 1
+    (CHoCH+OB) genuinamente positivo (n=161, +106.58R, confermato su
+    ENTRAMBE le meta' cronologiche indipendenti 2021-2024 e 2024-2026)
+    veniva esattamente compensato dagli altri 3 setup (Liquidity Sweep,
+    OB+FVG Confluence, Premium/Discount - n=989, -110.12R). Rimossi.
+    Questi test verificano che i setup rimossi non possano più generare un
+    segnale (non solo che "in questo caso" non lo fanno) mockando i
+    detector in modo che le loro condizioni sarebbero soddisfatte, e che i
+    detector stessi non vengano nemmeno più chiamati."""
+
+    def _df(self, n=40):
+        idx = pd.date_range("2026-01-01", periods=n, freq="15min")
+        return pd.DataFrame({
+            "Open": [100.0] * n, "High": [100.5] * n, "Low": [99.5] * n,
+            "Close": [100.0] * n, "Volume": [100] * n,
+        }, index=idx)
+
+    def test_setup1_bullish_still_fires(self):
+        inside_hours = analyzer.TIMEZONE.localize(datetime(2026, 3, 4, 15, 30))
+        smc_result = {"choch": "CHOCH_BULLISH", "bos": None, "structure": "BULLISH"}
+        ob_result = {"bullish_ob": {"low": 99.0, "high": 100.5}}
+        with patch("analyzer.detect_bos_choch", return_value=smc_result), \
+             patch("analyzer.detect_order_blocks", return_value=ob_result):
+            result = smc_v3_strategy(self._df(), self._df(), {}, {}, {}, now=inside_hours)
+        self.assertEqual(result["signal"], "BUY")
+        self.assertEqual(result["setup"], "Setup 1: CHoCH + OB Bullish")
+
+    def test_setups_2_through_5_never_fire_even_when_their_conditions_hold(self):
+        inside_hours = analyzer.TIMEZONE.localize(datetime(2026, 3, 4, 15, 30))
+        # Nessun bullish/bearish OB -> Setup 1 non puo' scattare, cosi'
+        # isoliamo il comportamento degli altri setup.
+        smc_result = {"choch": None, "bos": "BOS_BULLISH", "structure": "BULLISH"}
+        with patch("analyzer.detect_bos_choch", return_value=smc_result), \
+             patch("analyzer.detect_order_blocks", return_value={}), \
+             patch("analyzer.detect_fvg", return_value={"bullish_fvg": {"bottom": 99.0, "top": 100.5}}) as mock_fvg, \
+             patch("analyzer.detect_liquidity", return_value={"eqh": 100.0, "eql": 99.5}) as mock_liq, \
+             patch("analyzer.detect_premium_discount", return_value="DISCOUNT") as mock_pd:
+            result = smc_v3_strategy(self._df(), self._df(), {}, {}, {}, now=inside_hours)
+        self.assertEqual(result, {"signal": "NEUTRAL", "setup": None, "score": 0})
+        mock_fvg.assert_not_called()
+        mock_liq.assert_not_called()
+        mock_pd.assert_not_called()
+
+
 class TestDetectSwingPointsVectorized(unittest.TestCase):
     """PERF (2026-09-06): il loop Python puro riga-per-riga rendeva
     impraticabile processare 1min su 5 anni pieni (1.77M barre). Sostituito

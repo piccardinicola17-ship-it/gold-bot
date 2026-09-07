@@ -622,7 +622,7 @@ def detect_premium_discount(df: pd.DataFrame, smc: dict) -> str:
 def smc_v3_strategy(df_15m: pd.DataFrame, df_1m: pd.DataFrame,
                     smc: dict, ob: dict, fvg: dict, now: datetime = None) -> dict:
     """
-    Strategia SMC v3.0 — 5 Setup su XAU/USD
+    Strategia SMC v3.0 — Setup "CHoCH + OB" su XAU/USD (unico validato)
     Timeframe contesto: 15min
     Timeframe entry: 1min (CHoCH su 1min come conferma finale)
     Sessione operativa: 14:00-19:00 IT (NY Kill Zone: 15:30-17:30)
@@ -632,6 +632,16 @@ def smc_v3_strategy(df_15m: pd.DataFrame, df_1m: pd.DataFrame,
     passare l'orario storico della barra simulata — altrimenti la funzione
     valuterebbe sempre l'ora reale del computer invece di quella simulata,
     restituendo sempre NEUTRAL a meno di girare il backtest tra le 14 e le 19.
+
+    FIX (2026-09-07): la funzione aveva 5 setup, mai validati storicamente
+    (impossibile farlo prima del fix del filtro orario sopra). Primo
+    backtest reale su 5 anni completi (1154 trade decisivi): PF 1.0 esatto
+    nell'aggregato, ma solo perché il Setup 1 (CHoCH+OB, qui sotto) genuinamente
+    positivo (n=161, +106.58R, WR 48-58%, confermato su ENTRAMBE le metà
+    cronologiche indipendenti 2021-2024 e 2024-2026) veniva esattamente
+    compensato dagli altri 3 setup (Liquidity Sweep, OB+FVG Confluence,
+    Premium/Discount — n=989, -110.12R). Rimossi i setup senza edge reale,
+    invece di lasciarli a trascinare in basso l'unico che funziona.
     """
     result = {"signal": "NEUTRAL", "setup": None, "score": 0}
     if now is None:
@@ -650,8 +660,6 @@ def smc_v3_strategy(df_15m: pd.DataFrame, df_1m: pd.DataFrame,
     # SMC su 15min (contesto)
     smc_15m   = detect_bos_choch(df_15m)
     ob_15m    = detect_order_blocks(df_15m)
-    fvg_15m   = detect_fvg(df_15m)
-    liq_15m   = detect_liquidity(df_15m)
 
     # CHoCH su 1min (conferma finale)
     smc_1m    = detect_bos_choch(df_1m)
@@ -660,7 +668,6 @@ def smc_v3_strategy(df_15m: pd.DataFrame, df_1m: pd.DataFrame,
     row_15m   = df_15m.iloc[-1]
     row_1m    = df_1m.iloc[-1]
 
-    rsi_15m   = float(row_15m["rsi"]) if not pd.isna(row_15m["rsi"]) else 50
     rsi_1m    = float(row_1m["rsi"])  if not pd.isna(row_1m["rsi"])  else 50
     atr_15m   = float(row_15m["atr"]) if not pd.isna(row_15m["atr"]) else 5
 
@@ -682,75 +689,6 @@ def smc_v3_strategy(df_15m: pd.DataFrame, df_1m: pd.DataFrame,
             if smc_1m["choch"] == "CHOCH_BEARISH" or smc_1m["bos"] == "BOS_BEARISH":
                 score = 8 + (2 if ny_kz else 0) + (1 if rsi_1m > 50 else 0)
                 result = {"signal": "SELL", "setup": "Setup 1: CHoCH + OB Bearish", "score": score}
-
-    # ── SETUP 2: BOS + FVG ──
-    # BOS conferma trend, prezzo ritorna su FVG, CHoCH 1min conferma
-    if result["signal"] == "NEUTRAL":
-        if smc_15m["bos"] == "BOS_BULLISH" and fvg_15m.get("bullish_fvg"):
-            fvg_zone = fvg_15m["bullish_fvg"]
-            if fvg_zone["bottom"] <= price <= fvg_zone["top"]:
-                if smc_1m["choch"] == "CHOCH_BULLISH":
-                    score = 7 + (2 if ny_kz else 0)
-                    result = {"signal": "BUY", "setup": "Setup 2: BOS + FVG Bullish", "score": score}
-
-        if smc_15m["bos"] == "BOS_BEARISH" and fvg_15m.get("bearish_fvg"):
-            fvg_zone = fvg_15m["bearish_fvg"]
-            if fvg_zone["bottom"] <= price <= fvg_zone["top"]:
-                if smc_1m["choch"] == "CHOCH_BEARISH":
-                    score = 7 + (2 if ny_kz else 0)
-                    result = {"signal": "SELL", "setup": "Setup 2: BOS + FVG Bearish", "score": score}
-
-    # ── SETUP 3: Liquidity Sweep + Reversal ──
-    # Prezzo sweeppa EQH/EQL, poi CHoCH 1min
-    if result["signal"] == "NEUTRAL":
-        eqh = liq_15m.get("eqh")
-        eql = liq_15m.get("eql")
-        if eqh and abs(price - eqh) <= atr_15m * 0.3:
-            if smc_1m["choch"] == "CHOCH_BEARISH":
-                score = 8 + (2 if ny_kz else 0)
-                result = {"signal": "SELL", "setup": "Setup 3: EQH Sweep + Reversal", "score": score}
-        if eql and abs(price - eql) <= atr_15m * 0.3:
-            if smc_1m["choch"] == "CHOCH_BULLISH":
-                score = 8 + (2 if ny_kz else 0)
-                result = {"signal": "BUY", "setup": "Setup 3: EQL Sweep + Reversal", "score": score}
-
-    # ── SETUP 4: OB + FVG Confluence ──
-    # OB e FVG nella stessa zona — massima confluenza
-    if result["signal"] == "NEUTRAL":
-        if ob_15m.get("bullish_ob") and fvg_15m.get("bullish_fvg"):
-            ob_z  = ob_15m["bullish_ob"]
-            fvg_z = fvg_15m["bullish_fvg"]
-            # Overlap tra OB e FVG
-            overlap_low  = max(ob_z["low"], fvg_z["bottom"])
-            overlap_high = min(ob_z["high"], fvg_z["top"])
-            if overlap_low <= overlap_high and overlap_low <= price <= overlap_high + atr_15m * 0.3:
-                if smc_1m["choch"] == "CHOCH_BULLISH":
-                    score = 10 + (2 if ny_kz else 0)
-                    result = {"signal": "BUY", "setup": "Setup 4: OB+FVG Confluence Bullish", "score": score}
-
-        if ob_15m.get("bearish_ob") and fvg_15m.get("bearish_fvg"):
-            ob_z  = ob_15m["bearish_ob"]
-            fvg_z = fvg_15m["bearish_fvg"]
-            overlap_low  = max(ob_z["low"], fvg_z["bottom"])
-            overlap_high = min(ob_z["high"], fvg_z["top"])
-            if overlap_low <= overlap_high and overlap_low - atr_15m * 0.3 <= price <= overlap_high:
-                if smc_1m["choch"] == "CHOCH_BEARISH":
-                    score = 10 + (2 if ny_kz else 0)
-                    result = {"signal": "SELL", "setup": "Setup 4: OB+FVG Confluence Bearish", "score": score}
-
-    # ── SETUP 5: Premium/Discount + Struttura ──
-    # Prezzo in zona Discount con struttura Bullish o Premium con struttura Bearish
-    if result["signal"] == "NEUTRAL":
-        pd_zone  = detect_premium_discount(df_15m, smc_15m)
-        struct   = smc_15m["structure"]
-        if pd_zone == "DISCOUNT" and struct == "BULLISH" and rsi_15m < 45:
-            if smc_1m["choch"] == "CHOCH_BULLISH":
-                score = 7 + (2 if ny_kz else 0)
-                result = {"signal": "BUY", "setup": "Setup 5: Discount + Bullish Structure", "score": score}
-        if pd_zone == "PREMIUM" and struct == "BEARISH" and rsi_15m > 55:
-            if smc_1m["choch"] == "CHOCH_BEARISH":
-                score = 7 + (2 if ny_kz else 0)
-                result = {"signal": "SELL", "setup": "Setup 5: Premium + Bearish Structure", "score": score}
 
     return result
 
