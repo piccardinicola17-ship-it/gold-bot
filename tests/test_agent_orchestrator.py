@@ -208,6 +208,80 @@ class TestBlockedDirectionByRegime(unittest.IsolatedAsyncioTestCase):
         self.assertIn("TRENDING DOWN", state.decision_reason)
 
 
+class TestHtfAlignmentFilter(unittest.IsolatedAsyncioTestCase):
+    """FIX (2026-09-07): 15min riattivato nella generazione automatica di
+    segnali (era escluso dal 1 settembre 2026, PF 0.89 su 5 anni reali) -
+    validato solo quando il segnale è allineato col trend 4h: backtest su
+    split cronologico indipendente (2021-2024 e 2024-2026) mostra PF
+    0.81->1.05 e 0.96->1.07. Senza allineamento, 15min resta un problema
+    aperto (vedi memoria progetto) e non deve eseguire."""
+
+    async def test_15min_buy_aligned_with_4h_uptrend_executes(self):
+        state = TradingState(timeframe="15min")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(
+            signal="BUY", order_type="BUY", regime="NORMAL", regime_4h="TRENDING_UP",
+        )):
+            await agent_structure_analyst(state)
+        self.assertTrue(state.structure_ok)
+
+    async def test_15min_buy_against_4h_downtrend_skips(self):
+        state = TradingState(timeframe="15min")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(
+            signal="BUY", order_type="BUY", regime="NORMAL", regime_4h="TRENDING_DOWN",
+        )):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.final_decision, "SKIP")
+        self.assertIn("allineato", state.decision_reason)
+
+    async def test_15min_sell_aligned_with_4h_downtrend_executes(self):
+        state = TradingState(timeframe="15min")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(
+            signal="SELL", regime="NORMAL", regime_4h="TRENDING_DOWN",
+        )):
+            await agent_structure_analyst(state)
+        self.assertTrue(state.structure_ok)
+
+    async def test_15min_signal_when_4h_ranging_skips(self):
+        """Nessuna direzione è "allineata" a un 4h RANGING - deve bloccare
+        sia BUY sia SELL."""
+        state = TradingState(timeframe="15min")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(
+            signal="BUY", order_type="BUY", regime="NORMAL", regime_4h="RANGING",
+        )):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.final_decision, "SKIP")
+
+    async def test_other_timeframe_not_affected_by_4h_regime(self):
+        """Il filtro è specifico per 15min - un 4h contro-trend non deve
+        toccare un segnale su un altro timeframe (es. 1h)."""
+        state = TradingState(timeframe="1h")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(
+            signal="BUY", order_type="BUY", regime="NORMAL", regime_4h="TRENDING_DOWN",
+        )):
+            await agent_structure_analyst(state)
+        self.assertTrue(state.structure_ok)
+
+    def test_report_shows_4h_trend_for_15min(self):
+        from agent_orchestrator import format_pipeline_report
+        state = TradingState(
+            timeframe="15min", signal="BUY", order_type="BUY",
+            entry=4300.0, sl=4290.0, tp1=4310.0, tp2=4320.0, tp3=4330.0,
+            regime="NORMAL", regime_4h="TRENDING_UP",
+        )
+        report = format_pipeline_report(state)
+        self.assertIn("Trend 4H: TRENDING UP", report)
+
+    def test_report_omits_4h_trend_for_other_timeframes(self):
+        from agent_orchestrator import format_pipeline_report
+        state = TradingState(
+            timeframe="1h", signal="BUY", order_type="BUY",
+            entry=4300.0, sl=4290.0, tp1=4310.0, tp2=4320.0, tp3=4330.0,
+            regime="NORMAL", regime_4h="TRENDING_UP",
+        )
+        report = format_pipeline_report(state)
+        self.assertNotIn("Trend 4H", report)
+
+
 class TestAgentRiskForwardsTimeframe(unittest.IsolatedAsyncioTestCase):
     """Regression (audit 2026-09-05): agent_risk() non passava mai
     state.timeframe a check_can_trade() - che ha una sua soglia 65%/55%
@@ -314,6 +388,16 @@ class TestStrategyFingerprint(unittest.TestCase):
             after = agent_orchestrator.get_strategy_fingerprint()
         finally:
             agent_orchestrator._BLOCKED_REGIME_DIRECTION_BY_TF = original
+        self.assertNotEqual(before, after)
+
+    def test_changes_when_htf_alignment_required_tf_changes(self):
+        before = agent_orchestrator.get_strategy_fingerprint()
+        original = agent_orchestrator._HTF_ALIGNMENT_REQUIRED_TF
+        try:
+            agent_orchestrator._HTF_ALIGNMENT_REQUIRED_TF = ("15min", "5min")
+            after = agent_orchestrator.get_strategy_fingerprint()
+        finally:
+            agent_orchestrator._HTF_ALIGNMENT_REQUIRED_TF = original
         self.assertNotEqual(before, after)
 
     def test_changes_when_ai_confidence_threshold_changes(self):

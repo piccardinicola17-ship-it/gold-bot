@@ -2106,6 +2106,17 @@ def full_analyze(timeframe_focus: str = "5min") -> dict:
     regime_data = detect_market_regime(df_main)
     regime      = regime_data["regime"]
 
+    # Regime 4h (non del TF principale) — usato per il filtro di
+    # allineamento di 15min col trend superiore (vedi Regola 6 in
+    # agent_orchestrator.py). Le 100 barre già scaricate da
+    # get_multi_timeframe_data() bastano: detect_market_regime() legge solo
+    # EMA20/50, ADX, ATR, ROC (tutti <=50 periodi), nessuno richiede le 200
+    # barre usate nel backtest di validazione — stesso risultato atteso.
+    if df_4h is not None and len(df_4h) > 30:
+        regime_4h = detect_market_regime(compute_indicators(df_4h))["regime"]
+    else:
+        regime_4h = "UNKNOWN"
+
     # Sentiment e calendario
     sentiment  = get_news_sentiment()
     calendar   = get_economic_events()
@@ -2164,6 +2175,7 @@ def full_analyze(timeframe_focus: str = "5min") -> dict:
             "signal":      "NEUTRAL",
             "price":       price,
             "regime":      regime,
+            "regime_4h":   regime_4h,
             "buy_count":   aggregated["buy_count"],
             "sell_count":  aggregated["sell_count"],
             "active":      aggregated["active"],
@@ -2227,6 +2239,7 @@ def full_analyze(timeframe_focus: str = "5min") -> dict:
 
         # Contesto
         "regime":      regime,
+        "regime_4h":   regime_4h,
         "structure":   smc["structure"],
         "pd_zone":     pd_zone,
         "bos":         smc.get("bos"),

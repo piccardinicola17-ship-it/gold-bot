@@ -80,13 +80,21 @@ def _live_min_prob_for_tf(interval: str) -> int:
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# M5 e M15 esclusi dalla generazione automatica di segnali: il backtest del
-# 1 settembre 2026 (dopo il fix del bug break-even, vedi report "GoldMind
-# Audit") mostra profit factor 0,70 e 0,97 su un anno di dati — nessun edge
-# reale, il bot perderebbe soldi in media. Restano disponibili a mano con
-# /signal e /m15 (con un avviso), per chi vuole comunque testarli.
-ALL_TIMEFRAMES = ["1h", "4h", "1day"]
-NO_EDGE_TIMEFRAMES = {"5min", "15min"}
+# M5 escluso dalla generazione automatica di segnali: backtest su 5 anni
+# reali (Dukascopy) mostra PF 0.80 — nessun edge reale trovato finora
+# nonostante piu' tentativi (vedi memoria progetto
+# project-m5-unprofitable-open-problem), il bot perderebbe soldi in media.
+# Resta disponibile a mano con /signal (con un avviso), per chi vuole
+# comunque testarlo.
+#
+# M15 RIATTIVATO il 2026-09-07 (era escluso dal 1 settembre 2026 per lo
+# stesso motivo): un filtro di allineamento col trend 4h (vedi
+# _HTF_ALIGNMENT_REQUIRED_TF in agent_orchestrator.py) porta il PF sopra
+# il pareggio su ENTRAMBE le meta' cronologiche indipendenti testate
+# (0.81->1.05 e 0.96->1.07) - primo fix validato con lo stesso rigore
+# degli altri timeframe.
+ALL_TIMEFRAMES = ["1h", "4h", "1day", "15min"]
+NO_EDGE_TIMEFRAMES = {"5min"}
 
 TF_LABEL = {"5min": "M5", "15min": "M15", "1h": "H1", "4h": "H4", "1day": "D1"}
 

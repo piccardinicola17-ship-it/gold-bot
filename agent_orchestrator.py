@@ -114,6 +114,20 @@ _BLOCKED_REGIME_DIRECTION_BY_TF = {
     "1day": {"SELL": ("NORMAL",)},
 }
 
+# Timeframe che richiedono l'allineamento col trend 4h per generare un
+# segnale (FIX 2026-09-07, riattiva 15min nella generazione automatica -
+# prima escluso, vedi ALL_TIMEFRAMES in gold_bot.py): backtest su split
+# cronologico indipendente (2021-2024 e 2024-2026, dati reali Dukascopy)
+# mostra che 15min supera il pareggio SOLO quando il segnale e' allineato
+# col regime 4h (BUY richiede 4h TRENDING_UP, SELL richiede TRENDING_DOWN,
+# tutto il resto scartato): PF 0.81->1.05 (n=754, WR 37.5%) e 0.96->1.07
+# (n=1019, WR 34.7%) nelle due meta' - senza questo filtro 15min resta
+# strutturalmente in perdita (PF 0.89 sui 5 anni interi). NON generalizzato
+# ad altri timeframe: 5min migliora con lo stesso filtro ma non supera il
+# pareggio in entrambe le meta' - resta un problema aperto (vedi memoria
+# progetto project-m5-unprofitable-open-problem).
+_HTF_ALIGNMENT_REQUIRED_TF = ("15min",)
+
 
 def get_strategy_fingerprint() -> str:
     """
@@ -149,6 +163,7 @@ def get_strategy_fingerprint() -> str:
         },
         "min_rr": MIN_RR,
         "ai_confidence_threshold": AI_CONFIDENCE_THRESHOLD,
+        "htf_alignment_required_tf": sorted(_HTF_ALIGNMENT_REQUIRED_TF),
     }
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
     return digest[:12]
@@ -188,6 +203,9 @@ class TradingState:
     tp3:           float        = 0.0
     prob:          int          = 0
     regime:        str          = ""
+    # Regime del 4h (non del timeframe del segnale) - usato per il filtro
+    # di allineamento di 15min col trend superiore, vedi Regola 6 sotto.
+    regime_4h:     str          = ""
     rr:            float        = 0.0
     structure_ok:  bool         = False
     # Livello del precedente swing high (BUY) / swing low (SELL) sul
@@ -340,6 +358,7 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
         state.tp3        = float(data.get("tp3", 0))
         state.prob       = int(data.get("prob", 0))
         state.regime     = data.get("regime", "UNKNOWN")
+        state.regime_4h  = data.get("regime_4h", "UNKNOWN")
         state.strategies = data.get("strategies", {})
         state.data_timestamp = str(data.get("data_timestamp") or "")
 
@@ -388,6 +407,26 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
             state.decision_conf   = 90.0
             state.add_log("🎯 DecisionMaker", f"SKIP — {state.signal} in {_regime_up} bloccato su {state.timeframe}")
             return AgentResult(success=True, data={"decision": "SKIP"})
+
+        # Regola 6 — Allineamento col trend 4h (vedi _HTF_ALIGNMENT_REQUIRED_TF)
+        if _tf in _HTF_ALIGNMENT_REQUIRED_TF and state.signal in ("BUY", "SELL"):
+            _regime_4h_up = str(state.regime_4h).upper().replace(" ", "_")
+            _aligned = (
+                (state.signal == "BUY" and _regime_4h_up == "TRENDING_UP") or
+                (state.signal == "SELL" and _regime_4h_up == "TRENDING_DOWN")
+            )
+            if not _aligned:
+                state.final_decision  = "SKIP"
+                state.decision_reason = (
+                    f"{state.signal} su {state.timeframe} non allineato col trend 4h "
+                    f"(regime 4h: {_regime_4h_up.replace('_', ' ')})"
+                )
+                state.decision_conf   = 90.0
+                state.add_log(
+                    "🎯 DecisionMaker",
+                    f"SKIP — {state.signal} non allineato col 4h ({_regime_4h_up}) su {state.timeframe}",
+                )
+                return AgentResult(success=True, data={"decision": "SKIP"})
 
         state.structure_ok = (
             state.signal != "NEUTRAL" and
@@ -756,5 +795,9 @@ def format_pipeline_report(state: TradingState) -> str:
         # (0 segnali per ore nonostante setup validi). Sostituito con uno
         # spazio solo per la visualizzazione.
         f"📈 Regime: {str(state.regime).replace('_', ' ')}\n"
-        f"_5 agenti | {state.timestamp[11:16]} IT_"
+        + (
+            f"🔎 Trend 4H: {str(state.regime_4h).replace('_', ' ')} (allineamento richiesto per 15min)\n"
+            if state.timeframe == "15min" else ""
+        )
+        + f"_5 agenti | {state.timestamp[11:16]} IT_"
     )
