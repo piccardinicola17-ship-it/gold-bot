@@ -313,6 +313,79 @@ class TestSetupDedup(TradeManagerTestCase):
         )
 
 
+class TestCancelledTradeIsDeleted(TradeManagerTestCase):
+    """FIX (2026-09-07): lo stesso setup rigenerato ogni 5 minuti da
+    auto_check_all_timeframes (struttura invariata, entry ricalcolata a
+    ogni giro con un prezzo leggermente diverso) veniva annunciato e
+    ricancellato in loop, intasando chat e dashboard - segnalato
+    dall'utente. close_trade() ora elimina subito la riga invece di
+    marcarla CANCELLED, e un cooldown separato (non basato sulla riga,
+    dato che ora sparisce) impedisce un nuovo segnale sullo stesso
+    timeframe per CANCELLED_SIGNAL_COOLDOWN_MINUTES minuti."""
+
+    def test_close_trade_deletes_the_row(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        self.assertTrue(tm.close_trade(trade_id, "CANCELLED", data["entry"], "prezzo troppo lontano"))
+        self.assertEqual(tm.get_trade_by_id(trade_id), {})
+
+    def test_double_cancel_returns_false(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        self.assertTrue(tm.close_trade(trade_id, "CANCELLED", data["entry"], "prima cancellazione"))
+        self.assertFalse(tm.close_trade(trade_id, "CANCELLED", data["entry"], "seconda cancellazione"))
+
+    def _session_row(self):
+        import sqlite3
+        conn = sqlite3.connect(self.tmpdb)
+        conn.row_factory = sqlite3.Row
+        today = datetime.now(tm.TIMEZONE).strftime("%Y-%m-%d")
+        row = conn.execute("SELECT * FROM sessions WHERE date=?", (today,)).fetchone()
+        conn.close()
+        return dict(row) if row else {}
+
+    def test_cancellation_does_not_touch_session_stats(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+        before = self._session_row()
+        tm.close_trade(trade_id, "CANCELLED", data["entry"], "test")
+        after = self._session_row()
+        self.assertEqual(before.get("wins", 0), after.get("wins", 0))
+        self.assertEqual(before.get("losses", 0), after.get("losses", 0))
+
+    def test_recently_cancelled_on_timeframe_true_right_after(self):
+        self.assertFalse(tm.recently_cancelled_on_timeframe("4h"))
+        data = _base_trade_data(timeframe="4h")
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "CANCELLED", data["entry"], "test")
+        self.assertTrue(tm.recently_cancelled_on_timeframe("4h"))
+
+    def test_recently_cancelled_on_timeframe_does_not_leak_to_other_tf(self):
+        data = _base_trade_data(timeframe="4h")
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "CANCELLED", data["entry"], "test")
+        self.assertFalse(
+            tm.recently_cancelled_on_timeframe("1h"),
+            "il cooldown è per timeframe, non deve bloccare gli altri TF",
+        )
+
+    def test_recently_cancelled_on_timeframe_expires(self):
+        data = _base_trade_data(timeframe="1day")
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "CANCELLED", data["entry"], "test")
+        self.assertTrue(tm.recently_cancelled_on_timeframe("1day"))
+
+        # Simula il passaggio del tempo oltre la finestra di cooldown.
+        expired = datetime.now(tm.TIMEZONE) - timedelta(
+            minutes=tm.CANCELLED_SIGNAL_COOLDOWN_MINUTES + 1
+        )
+        state = tm.load_last_cancelled_by_tf()
+        state["1day"] = expired.isoformat()
+        tm.save_last_cancelled_by_tf(state)
+        self.assertFalse(tm.recently_cancelled_on_timeframe("1day"))
+
+
 class TestPendingInvalidation(TradeManagerTestCase):
     def _pending_trade(self, timeframe: str, signal: str = "BUY", order_type: str = "BUY LIMIT",
                         entry: float = 4329.31, sl: float = 4299.11, minutes_ago: float = 1.0) -> dict:

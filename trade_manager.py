@@ -449,6 +449,20 @@ def init_db() -> None:
 
             _rebuild_sessions(conn)
             _mark_migration(conn, "rebuild_sessions_from_trades_v2")
+
+        if not _migration_done(conn, "remove_cancelled_trades_v1"):
+            # I CANCELLED non hanno mai avuto rischio reale (0R fisso, nessun
+            # impatto su sessions) - tenerli per sempre intasava dashboard e
+            # chat: lo stesso setup rigenerato ogni 5 minuti (auto_check_
+            # all_timeframes) veniva annunciato e poi annullato in loop,
+            # segnalato dall'utente il 2026-09-07. Da qui in poi close_trade()
+            # li elimina subito invece di marcarli (vedi commento li'); questa
+            # migrazione pulisce una tantum il backlog gia' accumulato.
+            removed = conn.execute(
+                "DELETE FROM trades WHERE result='CANCELLED'"
+            ).rowcount
+            logger.info("Migrazione remove_cancelled_trades_v1: rimossi %d trade CANCELLED", removed)
+            _mark_migration(conn, "remove_cancelled_trades_v1")
         conn.commit()
 
     _sync_active_snapshot()
@@ -820,6 +834,39 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
     if result not in RESULT_PNL:
         raise ValueError(f"Risultato non valido: {result}")
     now = datetime.now(TIMEZONE)
+
+    if result == "CANCELLED":
+        # 0R fisso, nessun impatto su sessions - l'unica utilita' della riga
+        # era il messaggio di annuncio, gia' costruito dal chiamante PRIMA di
+        # invocare close_trade() con i dati del trade. Eliminata subito
+        # invece di restare per sempre in dashboard/DB (FIX 2026-09-07: lo
+        # stesso setup rigenerato ogni 5 minuti da auto_check_all_timeframes
+        # veniva annunciato e ricancellato in loop, intasando chat e
+        # dashboard). Blocco separato (non dentro il with sotto) cosi'
+        # mark_cancelled_on_timeframe() apre la sua connessione DOPO che
+        # questa e' gia' stata committata e chiusa - due connessioni aperte
+        # in scrittura contemporaneamente sullo stesso file rischierebbero
+        # un blocco reciproco. Vedi CANCELLED_SIGNAL_COOLDOWN_MINUTES per il
+        # meccanismo che sostituisce l'uso della riga come "memoria"
+        # dell'ultimo annullamento su questo timeframe, dato che la riga
+        # ora non resta piu' in giro dopo la cancellazione.
+        with _write_lock, _connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM trades WHERE trade_id=? AND status='OPEN'", (trade_id,)
+            ).fetchone()
+            if not row:
+                return False
+            cursor = conn.execute(
+                "DELETE FROM trades WHERE trade_id=? AND status='OPEN'", (trade_id,)
+            )
+            if cursor.rowcount == 0:
+                logger.warning("close_trade: riga sparita tra SELECT e DELETE per %s", trade_id)
+                return False
+            timeframe = row["timeframe"]
+        mark_cancelled_on_timeframe(timeframe)
+        _sync_active_snapshot()
+        logger.info("Trade cancellato ed eliminato: %s [%s]", trade_id, timeframe)
+        return True
 
     with _write_lock, _connect() as conn:
         row = conn.execute(
@@ -1537,6 +1584,63 @@ def save_fred_last_seen(state: dict) -> None:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (json.dumps(state),),
         )
+
+
+# Minuti di cooldown su un timeframe dopo un pending CANCELLED, prima di
+# poter proporre un nuovo segnale sullo stesso TF. FIX (2026-09-07): senza
+# questo, lo stesso setup (struttura invariata, entry ricalcolata a ogni
+# giro con un prezzo leggermente diverso) poteva essere riproposto e
+# ricancellato ogni 5 minuti (frequenza di auto_check_all_timeframes),
+# spammando segnali-poi-annullati in chat e dashboard - segnalato
+# dall'utente. Il setup_key da solo non bastava a fermarlo: include
+# l'entry a 5 decimali, che cambia ad ogni ricalcolo anche a parita' di
+# candela (vedi was_setup_seen). Stato persistito separatamente (non nella
+# tabella trades) perche' un CANCELLED viene ora eliminato subito da
+# close_trade() invece di restare come riga marcata.
+CANCELLED_SIGNAL_COOLDOWN_MINUTES = 15
+
+
+def load_last_cancelled_by_tf() -> dict:
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM bot_state WHERE key='last_cancelled_by_tf'"
+            ).fetchone()
+        return json.loads(row["value"]) if row else {}
+    except Exception:
+        return {}
+
+
+def save_last_cancelled_by_tf(state: dict) -> None:
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO bot_state(key, value) VALUES('last_cancelled_by_tf', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(state),),
+        )
+
+
+def mark_cancelled_on_timeframe(timeframe: str) -> None:
+    state = load_last_cancelled_by_tf()
+    state[timeframe] = datetime.now(TIMEZONE).isoformat()
+    save_last_cancelled_by_tf(state)
+
+
+def recently_cancelled_on_timeframe(timeframe: str) -> bool:
+    """True se un pending su questo timeframe e' stato cancellato negli
+    ultimi CANCELLED_SIGNAL_COOLDOWN_MINUTES minuti - evita di riproporre
+    subito lo stesso segnale."""
+    ts = load_last_cancelled_by_tf().get(timeframe)
+    if not ts:
+        return False
+    try:
+        cancelled_at = datetime.fromisoformat(ts)
+        if cancelled_at.tzinfo is None:
+            cancelled_at = TIMEZONE.localize(cancelled_at)
+    except (ValueError, TypeError):
+        return False
+    age_minutes = (datetime.now(TIMEZONE) - cancelled_at.astimezone(TIMEZONE)).total_seconds() / 60
+    return age_minutes < CANCELLED_SIGNAL_COOLDOWN_MINUTES
 
 
 _DECISIONS_LOG_RETENTION_DAYS = 30

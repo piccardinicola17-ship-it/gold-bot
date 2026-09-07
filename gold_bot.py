@@ -30,12 +30,13 @@ from agent_orchestrator import run_pipeline, format_pipeline_report
 from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
 # ORB rimosso — gestito manualmente dall'utente
 from self_learning import analyze_last_trade, weekly_review, optimize_strategy_weights, format_learning_report
-from risk_manager import format_risk_report, calculate_lot_size, resume_session_manual
+from risk_manager import format_risk_report, calculate_lot_size, resume_session_manual, min_prob_for_timeframe
 from trade_manager import (
     init_db,
     open_trade, close_trade,
     load_all_active_trades, load_active_trade,
     get_open_trade_by_timeframe, has_open_trade_on_timeframe,
+    recently_cancelled_on_timeframe,
     monitor_active_trade,
     get_current_price, get_current_price_async,
     is_authorized, build_setup_key, was_setup_seen, DuplicateSetupError,
@@ -63,16 +64,18 @@ MIN_PROB       = 55
 
 
 def _live_min_prob_for_tf(interval: str) -> int:
-    """Stessa soglia usata dalla pipeline live (agent_orchestrator.py:259-263):
-    65% per M1/M5/M15, altrimenti 55% (o override via env MIN_PROB).
-    FIX: /backtest passava sempre MIN_PROB=55 fisso a run_backtest per
-    qualunque timeframe, mentre il testo mostrato a schermo dichiarava
-    "Soglia prob: M5/M15 >= 65% | H1/H4/D1 >= 55%" — il backtest valutava
-    quindi una popolazione di setup M5/M15 più ampia e di qualità inferiore
-    di quella che il bot live prende davvero (che richiede prob >= 65% lì)."""
-    if interval in ("5min", "1min", "15min"):
-        return 65
-    return int(os.environ.get("MIN_PROB", "55"))
+    """Stessa soglia usata dalla pipeline live — delega a
+    risk_manager.min_prob_for_timeframe() (unica fonte di verità, vedi
+    MIN_PROB_HIGH_THRESHOLD_TFS) invece di una copia propria.
+    FIX 2026-09-05: /backtest passava sempre MIN_PROB=55 fisso a
+    run_backtest per qualunque timeframe, mentre il testo mostrato a
+    schermo dichiarava soglie differenziate — il backtest valutava quindi
+    una popolazione di setup più ampia e di qualità inferiore di quella
+    che il bot live prende davvero. FIX 2026-09-06: questa funzione aveva
+    una copia propria della soglia (solo M1/M5/M15 a 65%) rimasta
+    indietro quando H4 è stato aggiunto in risk_manager - lo stesso
+    pattern di bug (due copie che divergono) risolto altrove stanotte."""
+    return min_prob_for_timeframe(interval)
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -263,6 +266,12 @@ async def _run_analysis(update, timeframe: str):
             return
         if has_open_trade_on_timeframe(timeframe):
             await update.message.reply_text(f"⏭️ Esiste già un trade/pending su {tf_label}.")
+            return
+        if recently_cancelled_on_timeframe(timeframe):
+            await update.message.reply_text(
+                f"⏳ Un pending su {tf_label} è stato annullato di recente — "
+                f"aspetta qualche minuto prima di riprovare (evita segnali ripetuti)."
+            )
             return
 
         data = {
@@ -1851,6 +1860,15 @@ async def _check_single_timeframe(bot: Bot, tf: str):
         # Trade già aperto su questo TF?
         if has_open_trade_on_timeframe(tf):
             logger.debug(f"[{tf}] Trade già aperto, skip")
+            return
+
+        # FIX (2026-09-07): senza questo, lo stesso setup (struttura
+        # invariata, entry ricalcolata ad ogni giro con un prezzo
+        # leggermente diverso) veniva riproposto e ricancellato ogni 5
+        # minuti (frequenza di questo stesso job) - spam di segnali-poi-
+        # annullati in chat e dashboard, segnalato dall'utente.
+        if recently_cancelled_on_timeframe(tf):
+            logger.debug(f"[{tf}] Annullato di recente, cooldown attivo, skip")
             return
 
         # Entry/SL/TP sono calcolati da candele GC=F (futures) — il prezzo

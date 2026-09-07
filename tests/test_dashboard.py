@@ -1,7 +1,8 @@
 """
 Test per dashboard.py — copre compute_stats() (win rate/pips aggregati) e
-la correzione del 2026-09-03 per cui i trade CANCELLED mostrano 0 pips
-invece della distanza ipotetica fino al prezzo di cancellazione.
+la rimozione automatica dei trade CANCELLED dalla dashboard (2026-09-07,
+close_trade() li elimina invece di marcarli — vedi anche
+TestCancelledTradeIsDeleted in test_trade_manager.py).
 """
 
 import os
@@ -53,9 +54,13 @@ class TestComputeStats(unittest.TestCase):
         self.assertEqual(stats["win_rate"], 0)
 
 
-class TestCancelledPipsDisplay(unittest.TestCase):
-    """_get_trades() deve mostrare 0 pips per i CANCELLED, senza toccare
-    il dato salvato in DB (solo visivo, vedi commento in dashboard.py)."""
+class TestCancelledTradeRemovedFromDashboard(unittest.TestCase):
+    """FIX (2026-09-07): un CANCELLED (nessun rischio reale, 0R fisso) non
+    deve più restare per sempre in dashboard/DB — close_trade() lo elimina
+    subito invece di marcarlo. Prima di questo fix mostrava 0 pips invece
+    della distanza ipotetica fino al prezzo di cancellazione (fix del
+    2026-09-03); ora la riga non esiste affatto, quindi il problema non si
+    pone più."""
 
     def setUp(self):
         self.tmpdb = tempfile.mktemp(suffix=".db")
@@ -76,7 +81,7 @@ class TestCancelledPipsDisplay(unittest.TestCase):
         if os.path.exists(self.tmp_active_file):
             os.remove(self.tmp_active_file)
 
-    def test_cancelled_trade_shows_zero_pips(self):
+    def test_cancelled_trade_disappears_from_dashboard(self):
         data = {
             "signal": "BUY", "order_type": "BUY LIMIT", "entry": 4312.94, "sl": 4296.66,
             "tp1": 4329.22, "tp2": 4345.51, "tp3": 4365.05, "prob": 60, "regime": "NORMAL",
@@ -85,8 +90,6 @@ class TestCancelledPipsDisplay(unittest.TestCase):
         }
         data["setup_key"] = tm.build_setup_key(data)
         trade_id = tm.open_trade(data)
-        # Cancellato con un exit_price ben lontano dall'entry: senza il fix
-        # calculate_trade_pips calcolerebbe un valore diverso da zero.
         tm.close_trade(trade_id, "CANCELLED", 4440.40, "prezzo troppo lontano")
 
         # init_db() migra sempre eventuali dati legacy da un file fisso
@@ -95,10 +98,9 @@ class TestCancelledPipsDisplay(unittest.TestCase):
         # un bug da correggere qui: filtriamo sul trade_id creato da questo
         # test invece di assumere un DB vuoto.
         trades = [t for t in db._get_trades() if t.get("trade_id") == trade_id]
-        self.assertEqual(len(trades), 1)
         self.assertEqual(
-            trades[0]["pips"], 0.0,
-            "un trade CANCELLED deve mostrare 0 pips in dashboard, non la distanza ipotetica",
+            len(trades), 0,
+            "un trade CANCELLED deve sparire dalla dashboard, non solo mostrare 0 pips",
         )
 
 

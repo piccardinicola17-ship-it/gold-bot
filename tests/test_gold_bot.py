@@ -66,20 +66,29 @@ class GoldBotTestCase(unittest.TestCase):
 
 
 class TestLiveMinProbForTf(unittest.TestCase):
+    """FIX (2026-09-06): questa funzione aveva una copia propria della
+    soglia, rimasta a "solo M1/M5/M15 a 65%" quando H4 e' stato aggiunto
+    in risk_manager.MIN_PROB_HIGH_THRESHOLD_TFS - ora delega direttamente,
+    niente piu' da tenere sincronizzato a mano."""
+
     def test_intraday_matches_live_threshold(self):
         for tf in ("5min", "15min", "1min"):
             self.assertEqual(gb._live_min_prob_for_tf(tf), 65)
 
+    def test_h4_also_uses_65_since_2026_09_06(self):
+        self.assertEqual(gb._live_min_prob_for_tf("4h"), 65)
+
     def test_other_timeframes_use_55_default(self):
-        for tf in ("1h", "4h", "1day"):
+        for tf in ("1h", "1day"):
             self.assertEqual(gb._live_min_prob_for_tf(tf), 55)
 
     def test_respects_min_prob_env_override_like_live_does(self):
         with mock.patch.dict(os.environ, {"MIN_PROB": "70"}):
             self.assertEqual(gb._live_min_prob_for_tf("1day"), 70)
-            # M5/M15/M1 restano fissi a 65 anche con l'env override,
-            # esattamente come in agent_orchestrator.py.
+            # M5/M15/M1/H4 restano fissi a 65 anche con l'env override,
+            # esattamente come in risk_manager.py.
             self.assertEqual(gb._live_min_prob_for_tf("5min"), 65)
+            self.assertEqual(gb._live_min_prob_for_tf("4h"), 65)
 
 
 class TestAsyncPosttradeForwardsTradeId(GoldBotTestCase):
@@ -430,7 +439,11 @@ class TestProtectiveCloseAgainstEventBias(GoldBotTestCase):
 
     def test_pending_trade_against_bias_is_cancelled_not_closed_early(self):
         """Un pending non attivato non ha capitale reale a rischio: si
-        cancella (CANCELLED, come un pending scaduto), non CLOSED_EARLY."""
+        cancella (CANCELLED, come un pending scaduto), non CLOSED_EARLY.
+        FIX (2026-09-07): un CANCELLED viene ora eliminato subito da
+        close_trade() invece di restare marcato - la riga non deve più
+        esistere affatto (vedi TestCancelledTradeIsDeleted in
+        test_trade_manager.py per il comportamento di close_trade stesso)."""
         import asyncio
         data = _base_trade_data(signal="BUY", order_type="BUY LIMIT", entry=4329.31, sl=4299.11)
         trade_id = tm.open_trade(data)
@@ -440,8 +453,7 @@ class TestProtectiveCloseAgainstEventBias(GoldBotTestCase):
         asyncio.run(self._run(event, "SELL"))
 
         row = tm.get_trade_by_id(trade_id)
-        self.assertEqual(row["status"], "CLOSED")
-        self.assertEqual(row["result"], "CANCELLED")
+        self.assertEqual(row, {}, "un pending CANCELLED deve essere eliminato, non solo marcato")
 
     def test_neutral_bias_touches_nothing(self):
         import asyncio
