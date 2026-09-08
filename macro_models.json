@@ -8,7 +8,7 @@
     "surprise_std": 0.13343492064965784,
     "surprise_zscore_clip": 4.0,
     "n": 83,
-    "fitted_at": "2026-09-06T18:38:36.870785+00:00"
+    "fitted_at": "2026-09-08T19:21:08.549986+00:00"
   },
   "Unemployment Claims": {
     "event_name": "Unemployment Claims",
@@ -19,6 +19,50 @@
     "surprise_std": 145259.20758490043,
     "surprise_zscore_clip": 4.0,
     "n": 130,
-    "fitted_at": "2026-09-06T18:38:36.873303+00:00"
+    "fitted_at": "2026-09-08T19:21:08.554974+00:00"
+  },
+  "ADP Non-Farm Employment Change": {
+    "event_name": "ADP Non-Farm Employment Change",
+    "horizon": "reaction_1m",
+    "slope": -1.7709154843237942,
+    "intercept": -0.08713439818305707,
+    "surprise_mean": 32880.434782608696,
+    "surprise_std": 473367.48146792396,
+    "surprise_zscore_clip": 4.0,
+    "n": 184,
+    "fitted_at": "2026-09-08T19:21:08.562000+00:00"
+  },
+  "CB Consumer Confidence": {
+    "event_name": "CB Consumer Confidence",
+    "horizon": "reaction_30m",
+    "slope": -0.3437634026268863,
+    "intercept": 0.49862222720062,
+    "surprise_mean": 0.11888888888888934,
+    "surprise_std": 5.193085098161531,
+    "surprise_zscore_clip": 4.0,
+    "n": 180,
+    "fitted_at": "2026-09-08T19:21:08.567798+00:00"
+  },
+  "ISM Manufacturing PMI": {
+    "event_name": "ISM Manufacturing PMI",
+    "horizon": "reaction_30m",
+    "slope": -1.5857672014527142,
+    "intercept": -0.048416581874517806,
+    "surprise_mean": 0.14591836734693864,
+    "surprise_std": 1.7079703574769338,
+    "surprise_zscore_clip": 4.0,
+    "n": 196,
+    "fitted_at": "2026-09-08T19:21:08.573455+00:00"
+  },
+  "ISM Services PMI": {
+    "event_name": "ISM Services PMI",
+    "horizon": "reaction_1m",
+    "slope": -0.8968143642494929,
+    "intercept": -0.11861422600843374,
+    "surprise_mean": 0.24417177914110405,
+    "surprise_std": 2.1941588607282396,
+    "surprise_zscore_clip": 4.0,
+    "n": 163,
+    "fitted_at": "2026-09-08T19:21:08.578230+00:00"
   }
 }

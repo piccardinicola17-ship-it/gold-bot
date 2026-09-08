@@ -300,11 +300,30 @@ def fit_final_model(event_name: str, horizon: str = DEPLOY_HORIZON, db_path: str
 # costante globale unica): serie diverse possono validare a orizzonti
 # diversi — Core CPI m/m regge su reaction_30m, Unemployment Claims solo
 # su reaction_1m (vedi run_all()/summarize() del 2026-09-05). Solo le
-# serie con edge validato in Fase 4 E una fonte dati live gratuita
-# affidabile (vedi macro_predictor.FRED_SERIES) vanno qui.
+# serie con edge validato in Fase 4 E una fonte dati live (FRED o RSS —
+# vedi macro_predictor.FRED_SERIES/RSS_SERIES) vanno qui.
+#
+# Estensione del 2026-09-08 (richiesta esplicita: coprire tutte le serie
+# scaricate con lo stesso rigore di Core CPI m/m): run_all() rieseguito su
+# TUTTE le 27 serie con dati nel DB, non solo le 2 già deployate — 3 serie
+# in più con edge validato su n>=100 e SENZA fonte FRED nativa (ISM
+# rimossa da FRED nel 2016, Conference Board mai stata su FRED — vedi
+# note in cima a macro_predictor.py), sbloccate via RSS PR Newswire:
+#   ISM Manufacturing PMI   n=196  5/5 orizzonti  (il piu' forte di tutti)
+#   CB Consumer Confidence  n=180  4/5 orizzonti
+#   ISM Services PMI        n=163  3/5 orizzonti
+# Piu' 1 serie in piu' CON fonte FRED nativa mai controllata prima
+# (ADPMNUSNERSA esiste su FRED, verificato via ricerca diretta):
+#   ADP Non-Farm Employment Change  n=189  1/5 orizzonti (reaction_1m)
+# Ogni serie usa l'orizzonte con cui ha effettivamente retto TUTTI gli
+# split cronologici in summarize(), non un orizzonte scelto a piacere.
 DEPLOYED_EVENTS = {
     "Core CPI m/m": DEPLOY_HORIZON,
     "Unemployment Claims": "reaction_1m",
+    "ADP Non-Farm Employment Change": "reaction_1m",
+    "CB Consumer Confidence": "reaction_30m",
+    "ISM Manufacturing PMI": "reaction_30m",
+    "ISM Services PMI": "reaction_1m",
 }
 
 

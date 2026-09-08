@@ -1617,6 +1617,33 @@ def save_fred_last_seen(state: dict) -> None:
         )
 
 
+def load_rss_macro_last_seen() -> dict:
+    """
+    Come load_fred_last_seen() ma per le serie macro senza fonte FRED
+    (ISM Manufacturing/Services PMI, CB Consumer Confidence — vedi
+    macro_predictor.RSS_SERIES, 2026-09-08): {event_name: pub_date_iso
+    dell'ultimo comunicato stampa già processato}, per non ri-notificare
+    lo stesso rilascio ogni volta che si ricontrolla il feed RSS.
+    """
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM bot_state WHERE key='rss_macro_last_seen'"
+            ).fetchone()
+        return json.loads(row["value"]) if row else {}
+    except Exception:
+        return {}
+
+
+def save_rss_macro_last_seen(state: dict) -> None:
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO bot_state(key, value) VALUES('rss_macro_last_seen', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(state),),
+        )
+
+
 # Cooldown su un timeframe dopo un pending CANCELLED, prima di poter
 # proporre un nuovo segnale sullo stesso TF. FIX (2026-09-07): senza
 # questo, lo stesso setup (struttura invariata, entry ricalcolata a ogni
