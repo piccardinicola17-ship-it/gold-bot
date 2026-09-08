@@ -623,6 +623,60 @@ class TestStrategyVersionOnOpenTrade(TradeManagerTestCase):
         self.assertEqual(row["strategy_version"], "custom-abc123")
 
 
+class TestRebuildSessionsPreservesSafetyStop(TradeManagerTestCase):
+    """_rebuild_sessions() faceva DELETE FROM sessions + replay dai trade,
+    senza mai toccare session_stopped/session_stopped_at - se rieseguita
+    con una sessione realmente fermata (3 perdite consecutive), il DELETE
+    la resettava in silenzio a 0 (il DEFAULT di schema), riattivando il
+    trading nel mezzo di un cooldown di sicurezza attivo. Bug trovato e
+    lasciato deliberatamente non corretto per giorni (nessuna evidenza
+    fosse gia' un problema attivo) - corretto ora su richiesta esplicita
+    dell'utente, 2026-09-08."""
+
+    def test_rebuild_preserves_an_active_stop(self):
+        today = "2026-09-08"
+        stopped_at = "2026-09-08T19:40:18.707526+02:00"
+        with tm._connect() as conn:
+            conn.execute(
+                "INSERT INTO sessions(date, session_stopped, session_stopped_at) VALUES (?,1,?)",
+                (today, stopped_at),
+            )
+            conn.commit()
+
+        with tm._connect() as conn:
+            tm._rebuild_sessions(conn)
+            conn.commit()
+
+        with tm._connect() as conn:
+            row = conn.execute(
+                "SELECT session_stopped, session_stopped_at FROM sessions WHERE date=?", (today,)
+            ).fetchone()
+        self.assertEqual(row["session_stopped"], 1)
+        self.assertEqual(row["session_stopped_at"], stopped_at)
+
+    def test_rebuild_leaves_a_never_stopped_date_at_zero(self):
+        data = _base_trade_data(data_timestamp="2026-09-08T11:00:00")
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "LOSS", data["sl"], "test")
+
+        with tm._connect() as conn:
+            tm._rebuild_sessions(conn)
+            conn.commit()
+
+        with tm._connect() as conn:
+            row = conn.execute(
+                "SELECT session_stopped, session_stopped_at FROM sessions WHERE date=?",
+                ("2026-09-08",),
+            ).fetchone()
+        self.assertEqual(row["session_stopped"], 0)
+        self.assertIsNone(row["session_stopped_at"])
+
+    def test_rebuild_migration_is_independently_gated(self):
+        with tm._connect() as conn:
+            self.assertTrue(tm._migration_done(conn, "fix_pip_size_v2"))
+            self.assertTrue(tm._migration_done(conn, "rebuild_sessions_from_trades_v2"))
+
+
 class TestCalculateTradePips(unittest.TestCase):
     def test_buy_direction(self):
         self.assertAlmostEqual(tm.calculate_trade_pips("BUY", 4300.00, 4310.00), 100.0, places=1)

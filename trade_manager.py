@@ -447,6 +447,12 @@ def init_db() -> None:
                 conn.execute("UPDATE trades SET pips=? WHERE id=?", (correct_pips, row["id"]))
             _mark_migration(conn, "fix_pip_size_v2")
 
+        if not _migration_done(conn, "rebuild_sessions_from_trades_v2"):
+            # Migrazione indipendente (prima era annidata dentro fix_pip_size_v2
+            # e condivideva il suo gate - se quella fosse mai stata ri-eseguita
+            # forzando un reset in schema_migrations, questa sarebbe ripartita
+            # insieme senza motivo). _rebuild_sessions() preserva comunque
+            # session_stopped/session_stopped_at (vedi sua docstring).
             _rebuild_sessions(conn)
             _mark_migration(conn, "rebuild_sessions_from_trades_v2")
 
@@ -615,7 +621,21 @@ def _migrate_legacy_active_file(conn: sqlite3.Connection) -> bool:
 
 
 def _rebuild_sessions(conn: sqlite3.Connection) -> None:
-    """Ricostruisce le statistiche giornaliere dai trade migrati."""
+    """Ricostruisce le statistiche giornaliere dai trade migrati.
+
+    Preserva session_stopped/session_stopped_at delle righe esistenti prima
+    di cancellare la tabella: non sono derivabili in modo affidabile dal
+    semplice replay storico dei trade (dipendono anche dal cooldown live),
+    e un DELETE+rebuild che li ignorasse azzererebbe silenziosamente lo
+    stop di sicurezza dopo 3 perdite consecutive se questa funzione girasse
+    di nuovo con una sessione realmente fermata in quel momento.
+    """
+    stopped_state = {
+        row["date"]: (row["session_stopped"], row["session_stopped_at"])
+        for row in conn.execute(
+            "SELECT date, session_stopped, session_stopped_at FROM sessions WHERE session_stopped"
+        ).fetchall()
+    }
     conn.execute("DELETE FROM sessions")
     rows = conn.execute("SELECT * FROM trades ORDER BY COALESCE(closed_at,timestamp), id").fetchall()
     for row in rows:
@@ -649,6 +669,13 @@ def _rebuild_sessions(conn: sqlite3.Connection) -> None:
                 """,
                 (win, loss, float(trade.get("pnl_r") or 0), win, loss, close_date),
             )
+
+    for date, (stopped, stopped_at) in stopped_state.items():
+        conn.execute("INSERT OR IGNORE INTO sessions(date) VALUES (?)", (date,))
+        conn.execute(
+            "UPDATE sessions SET session_stopped=?, session_stopped_at=? WHERE date=?",
+            (stopped, stopped_at, date),
+        )
 
 
 def build_setup_key(data: dict) -> str:
