@@ -202,6 +202,11 @@ class TradingState:
     tp2:           float        = 0.0
     tp3:           float        = 0.0
     prob:          int          = 0
+    # Win rate reale osservato per la fascia di `prob` (calibrazione solo
+    # per il display, vedi analyzer.calibrate_probability_for_display) -
+    # MIN_PROB e ogni altra decisione di trading usano ancora `prob`, mai
+    # questo campo.
+    prob_display:  int          = 0
     regime:        str          = ""
     # Regime del 4h (non del timeframe del segnale) - usato per il filtro
     # di allineamento di 15min col trend superiore, vedi Regola 6 sotto.
@@ -357,6 +362,7 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
         state.tp2        = float(data.get("tp2", 0))
         state.tp3        = float(data.get("tp3", 0))
         state.prob       = int(data.get("prob", 0))
+        state.prob_display = int(data.get("prob_display", state.prob))
         state.regime     = data.get("regime", "UNKNOWN")
         state.regime_4h  = data.get("regime_4h", "UNKNOWN")
         state.strategies = data.get("strategies", {})
@@ -785,7 +791,7 @@ def format_pipeline_report(state: TradingState) -> str:
         f"🛑 SL: ${_fmt(state.sl)} | 🎯 TP1: ${_fmt(state.tp1)}\n"
         f"🎯 TP2: ${_fmt(state.tp2)} | 🏆 TP3: ${_fmt(state.tp3)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Prob: *{state.prob}%* | R:R: *{state.rr}* | Risk: *{state.risk_pct:.2f}%*\n"
+        f"📊 Prob: *{state.prob}%* (storico ~{state.prob_display}%) | R:R: *{state.rr}* | Risk: *{state.risk_pct:.2f}%*\n"
         # state.regime (es. "TRENDING_DOWN"/"TRENDING_UP") contiene un
         # underscore che Telegram in Markdown legge come apertura di corsivo:
         # sommato all'unico "_...IT_" della riga sotto fa un numero dispari

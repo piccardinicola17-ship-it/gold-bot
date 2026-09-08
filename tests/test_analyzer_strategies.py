@@ -20,7 +20,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import analyzer
-from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy, detect_swing_points
+from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy, detect_swing_points, calibrate_probability_for_display
 from unittest.mock import patch
 
 
@@ -330,6 +330,37 @@ class TestDetectSwingPointsVectorized(unittest.TestCase):
         df = detect_swing_points(self._df(highs, lows), lookback=5)
         self.assertTrue(df["swing_high"].iloc[5])
         self.assertTrue(df["swing_high"].iloc[6])
+
+
+class TestCalibrateProbabilityForDisplay(unittest.TestCase):
+    """calibrate_probability_for_display() - solo per il testo mostrato
+    all'utente, misurata su calibration_report() su 17.596 trade reali
+    (2026-09-08). Non deve mai essere usata per MIN_PROB o altre decisioni
+    di trading - vedi commento sopra estimate_probability() in analyzer.py."""
+
+    def test_below_lowest_anchor_clamps_flat(self):
+        self.assertEqual(calibrate_probability_for_display(40), 33)
+        self.assertEqual(calibrate_probability_for_display(55), 33)
+
+    def test_above_highest_anchor_clamps_flat(self):
+        self.assertEqual(calibrate_probability_for_display(97), 30)
+        self.assertEqual(calibrate_probability_for_display(91), 30)
+
+    def test_interpolates_between_anchors(self):
+        # 63.6 e' a meta' strada tra i due primi ancoraggi (58.8 -> 68.4);
+        # il valore atteso interpola tra 33.0 e 32.8.
+        mid = calibrate_probability_for_display(63)
+        self.assertIn(mid, (32, 33))
+
+    def test_exact_anchor_returns_its_own_value(self):
+        self.assertEqual(calibrate_probability_for_display(68), 33)
+
+    def test_output_stays_close_to_observed_range(self):
+        # Su tutto il dominio [40,97] il risultato deve restare nella
+        # fascia realmente osservata (30-33%), mai un numero fuori scala.
+        for raw in range(40, 98):
+            out = calibrate_probability_for_display(raw)
+            self.assertTrue(29 <= out <= 34, f"raw={raw} -> {out}")
 
 
 if __name__ == "__main__":

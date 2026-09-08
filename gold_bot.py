@@ -1184,7 +1184,7 @@ async def _build_weekend_outlook() -> str:
             if state.signal in ("BUY", "SELL"):
                 bias_votes[state.signal] += 1
                 lines.append(
-                    f"*{tf_lbl}* — {state.signal} (prob {state.prob}%) | regime {regime_label}\n"
+                    f"*{tf_lbl}* — {state.signal} (prob {state.prob}%, storico ~{state.prob_display}%) | regime {regime_label}\n"
                     f"  Entry {state.entry} | SL {state.sl} | TP1 {state.tp1} | R:R {state.rr}"
                 )
             else:

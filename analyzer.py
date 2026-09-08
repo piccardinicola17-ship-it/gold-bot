@@ -2054,6 +2054,47 @@ def estimate_probability(total_score: float, buy_count: int, sell_count: int,
     return min(max(base, 40), 97)
 
 
+# estimate_probability() sopra resta invariata: alimenta ancora la soglia
+# MIN_PROB e ogni altra decisione di trading, esattamente come prima -
+# nessuna decisione automatica cambia in base a questa calibrazione (stesso
+# principio gia' usato per l'edge statistico macro in Fase 5: si mostra
+# accanto al numero esistente, non lo si sostituisce nella logica).
+#
+# Questi ancoraggi servono SOLO per il numero mostrato in chat. Misurati
+# il 2026-09-08 su calibration_report() aggregato su 17.596 trade decisivi
+# reali (5 anni Dukascopy, 5min/15min/1h/4h/1day, soglie MIN_PROB correnti
+# per timeframe). Risultato: il win rate reale resta quasi piatto (30-33%)
+# su tutta la fascia 55-97% dichiarata, su ogni timeframe preso da solo -
+# non e' un semplice "spostamento" dell'85%->54% misurato mesi fa su un
+# campione molto piu' piccolo (2000 barre, solo 1day+4h), e' molto piu'
+# piatto di quanto sembrasse allora. Se le strategie sottostanti cambiano
+# in modo sostanziale questi ancoraggi andrebbero ricalcolati (vedi
+# backtest.calibration_report()).
+_PROB_CALIBRATION_ANCHORS = (
+    (58.8, 33.0),
+    (68.4, 32.8),
+    (78.6, 33.0),
+    (90.1, 30.1),
+)
+
+
+def calibrate_probability_for_display(raw_prob: int) -> int:
+    """Converte lo score euristico [40,97] di estimate_probability() nel
+    win rate reale osservato per quella fascia, SOLO per il testo mostrato
+    all'utente - non tocca MIN_PROB ne' altre decisioni di trading."""
+    anchors = _PROB_CALIBRATION_ANCHORS
+    x = float(raw_prob)
+    if x <= anchors[0][0]:
+        return round(anchors[0][1])
+    if x >= anchors[-1][0]:
+        return round(anchors[-1][1])
+    for (x0, y0), (x1, y1) in zip(anchors, anchors[1:]):
+        if x0 <= x <= x1:
+            t = (x - x0) / (x1 - x0)
+            return round(y0 + t * (y1 - y0))
+    return round(anchors[-1][1])  # pragma: no cover - irraggiungibile dati gli anchor sopra
+
+
 # ═══════════════════════════════════════════════════════════════
 # ENTRY POINT PRINCIPALE — M5 e H1/H4
 # ═══════════════════════════════════════════════════════════════
@@ -2229,6 +2270,7 @@ def full_analyze(timeframe_focus: str = "5min") -> dict:
 
         # Metriche
         "prob":        prob,
+        "prob_display": calibrate_probability_for_display(prob),
         "total_score": aggregated["total_score"],
         "buy_count":   aggregated["buy_count"],
         "sell_count":  aggregated["sell_count"],

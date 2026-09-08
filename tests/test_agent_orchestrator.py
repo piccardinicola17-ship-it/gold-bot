@@ -159,6 +159,7 @@ def _full_analyze_result(**overrides) -> dict:
         "tp2": 4260.0,
         "tp3": 4220.0,
         "prob": 70,
+        "prob_display": 33,
         "regime": "NORMAL",
         "strategies": {},
         "data_timestamp": "2026-09-04",
@@ -206,6 +207,32 @@ class TestBlockedDirectionByRegime(unittest.IsolatedAsyncioTestCase):
             await agent_structure_analyst(state)
         self.assertEqual(state.final_decision, "SKIP")
         self.assertIn("TRENDING DOWN", state.decision_reason)
+
+
+class TestProbDisplayWiring(unittest.IsolatedAsyncioTestCase):
+    """state.prob_display (calibrazione solo per il testo mostrato
+    all'utente, 2026-09-08) deve arrivare intatto dal dict di full_analyze()
+    senza mai toccare state.prob (usato per MIN_PROB e le altre decisioni)."""
+
+    async def test_prob_display_populated_from_full_analyze(self):
+        state = TradingState(timeframe="4h")
+        with patch("analyzer.full_analyze", return_value=_full_analyze_result(
+            signal="BUY", order_type="BUY", regime="NORMAL", prob=70, prob_display=33,
+        )):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.prob, 70)
+        self.assertEqual(state.prob_display, 33)
+
+    async def test_prob_display_falls_back_to_prob_when_missing(self):
+        """Se full_analyze() non lo fornisce (es. dict costruito a mano in
+        un test più vecchio, o un path che non l'ha ancora popolato) non
+        deve esplodere - usa prob grezzo come fallback sicuro."""
+        result = _full_analyze_result(signal="BUY", order_type="BUY", regime="NORMAL", prob=61)
+        del result["prob_display"]
+        state = TradingState(timeframe="4h")
+        with patch("analyzer.full_analyze", return_value=result):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.prob_display, 61)
 
 
 class TestHtfAlignmentFilter(unittest.IsolatedAsyncioTestCase):
