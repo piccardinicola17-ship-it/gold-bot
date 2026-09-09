@@ -483,5 +483,126 @@ class TestProtectiveCloseAgainstEventBias(GoldBotTestCase):
         self.assertEqual(len(protective_calls), 1)
 
 
+class TestProtectiveCloseAgainstStatisticalPrediction(GoldBotTestCase):
+    """2026-09-09, richiesta esplicita dell'utente ("solo protezione, niente
+    nuovi trade"): estende la chiusura protettiva anche al caso in cui il
+    bias LLM pre-evento sia NEUTRO/debole ma la previsione statistica
+    (calibrata su dati storici reali, macro_predictor.predict_reaction) sia
+    forte e discorde da un trade già aperto. Mai apre un nuovo trade da
+    sola — solo protegge quelli esistenti, stesso principio della classe
+    gemella sopra ma con la previsione statistica al posto del bias LLM."""
+
+    def _make_event(self, minutes_away: int, title: str) -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "0.3%",
+            "previous": "0.2%",
+        }
+
+    def _prediction(self, predicted_reaction_usd: float) -> dict:
+        return {
+            "event_name": "Core CPI m/m", "value_type": "pct",
+            "source_tier": "fred", "actual_value": 0.2, "forecast_value": 0.3,
+            "surprise_raw": -0.1, "surprise_zscore": -0.8,
+            "predicted_reaction_usd": predicted_reaction_usd,
+            "horizon": "reaction_30m", "n_historical": 83,
+        }
+
+    async def _run(self, event, predicted_reaction_usd=None):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        prediction = self._prediction(predicted_reaction_usd) if predicted_reaction_usd is not None else None
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4315.0), \
+             mock.patch("gold_bot.analyze_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None), \
+             mock.patch("macro_predictor.predict_reaction", return_value=prediction), \
+             mock.patch("macro_predictor.format_prediction", return_value="previsione statistica di test"):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_activated_trade_against_strong_prediction_is_closed_early(self):
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(-10, "Core CPI m/m")  # nella finestra post-evento (-180..0)
+        asyncio.run(self._run(event, -3.4))  # previsione SELL forte, trade e' BUY
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "CLOSED")
+        self.assertEqual(row["result"], "CLOSED_EARLY")
+
+    def test_activated_trade_aligned_with_prediction_stays_open(self):
+        import asyncio
+        data = _base_trade_data(signal="SELL", order_type="SELL", entry=4400.0, sl=4430.0)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(-10, "Core CPI m/m")
+        asyncio.run(self._run(event, -3.4))  # previsione SELL, trade e' gia' SELL: non si tocca
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "OPEN")
+
+    def test_weak_prediction_below_threshold_touches_nothing(self):
+        """Una previsione sotto CONFIRM_THRESHOLD_USD ($2) e' rumore, non un
+        segnale — mai chiudere un trade per una previsione debole."""
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(-10, "Core CPI m/m")
+        asyncio.run(self._run(event, -1.0))  # sotto soglia
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "OPEN")
+
+    def test_no_prediction_available_touches_nothing(self):
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(-10, "Some Other Event")
+        asyncio.run(self._run(event, None))  # predict_reaction ritorna None
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["status"], "OPEN")
+
+    def test_pending_trade_against_strong_prediction_is_cancelled(self):
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY LIMIT", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        # niente activate_trade: resta pending
+
+        event = self._make_event(-10, "Core CPI m/m")
+        asyncio.run(self._run(event, -3.4))
+
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row, {}, "un pending CANCELLED deve essere eliminato, non solo marcato")
+
+    def test_protective_close_sends_distinct_notification(self):
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(-10, "Core CPI m/m")
+        bot = asyncio.run(self._run(event, -3.4))
+
+        protective_calls = [
+            c for c in bot.send_message.call_args_list
+            if "PREVISIONE STATISTICA" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(protective_calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

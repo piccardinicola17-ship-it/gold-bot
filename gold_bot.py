@@ -60,6 +60,11 @@ os.environ.setdefault("DB_PATH", DB_PATH)
 NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "")
 TIMEZONE       = pytz.timezone("Europe/Rome")
 MIN_PROB       = 55
+# Sotto questa soglia una variazione di prezzo (bias pre-evento vs reale, o
+# previsione statistica vs trade aperto) è rumore, non un movimento vero —
+# unica fonte di verità (2026-09-09: prima due copie locali identiche,
+# stesso pattern di bug già visto altrove in questo file).
+CONFIRM_THRESHOLD_USD = 2.0
 # ─────────────────────────────────────────────
 
 
@@ -1365,7 +1370,6 @@ async def check_breaking_news_job(bot):
         # stesso principio del POST-EVENTO macro. Scarta anche le voci più
         # vecchie di 60 minuti mai risolte (es. prezzo live irraggiungibile
         # per un'ora), per non far crescere pending all'infinito.
-        CONFIRM_THRESHOLD_USD = 2.0
         resolved = []
         for item_id, info in pending.items():
             try:
@@ -1570,7 +1574,6 @@ async def check_macro_alerts(bot):
                 # già consumato al primo tentativo fallito, perdendo il bias
                 # pre-evento anche se poi disponibile per il retry.
                 pre = _pre_event_bias.get(ev_key)
-                CONFIRM_THRESHOLD_USD = 2.0
                 if pre:
                     change = price - pre["price"]
                     pre_bias = pre["bias"]
@@ -1638,6 +1641,60 @@ async def check_macro_alerts(bot):
                             chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
                         )
                         _sent_stat_prediction.add(stat_key)
+
+                        # Chiusura protettiva basata sulla previsione statistica
+                        # (2026-09-09, richiesta esplicita dell'utente — "solo
+                        # protezione, niente nuovi trade"): stesso principio
+                        # già in produzione per il bias LLM pre-evento (vedi
+                        # sopra), qui esteso al caso in cui il bias LLM sia
+                        # NEUTRO/debole ma la previsione statistica (calibrata
+                        # su dati storici reali, non un'opinione dell'AI) sia
+                        # forte e discorde da un trade già aperto. MAI apre un
+                        # nuovo trade da sola — solo protegge quelli esistenti.
+                        # CONFIRM_THRESHOLD_USD (stessa soglia usata sotto per
+                        # il resoconto post-evento) evita di agire su previsioni
+                        # troppo piccole per essere significative.
+                        predicted_usd = prediction.get("predicted_reaction_usd", 0.0)
+                        if abs(predicted_usd) >= CONFIRM_THRESHOLD_USD:
+                            predicted_signal = "BUY" if predicted_usd > 0 else "SELL"
+                            price = await get_current_price_async()
+                            for open_trade in load_all_active_trades():
+                                trade_signal = open_trade.get("signal")
+                                if trade_signal not in ("BUY", "SELL") or trade_signal == predicted_signal:
+                                    continue
+                                trade_id = open_trade.get("trade_id")
+                                tf_label = TF_LABEL.get(open_trade.get("timeframe", ""), "?")
+                                title_safe = _escape_md(ev["title"])
+                                reason_note = (
+                                    f"Chiuso in anticipo: previsione statistica ({ev['title']}) "
+                                    f"discorde dal trade — {predicted_signal} atteso {predicted_usd:+.2f}$"
+                                )
+                                if open_trade.get("activated"):
+                                    if not close_trade(trade_id, "CLOSED_EARLY", price, reason_note):
+                                        continue
+                                    pips = calculate_trade_pips(trade_signal, open_trade.get("entry"), price)
+                                    protect_msg = (
+                                        f"🛡️ *CHIUSURA PROTETTIVA — PREVISIONE STATISTICA*\n"
+                                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                                        f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
+                                        f"💰 Chiuso a: ${_fmt(price)} ({pips:+.1f} pips)\n"
+                                        f"📐 *{title_safe}*: reazione attesa *{predicted_signal}* ({predicted_usd:+.2f}$, n={prediction.get('n_historical')})\n"
+                                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                                        f"ID: `{trade_id}`"
+                                    )
+                                else:
+                                    if not close_trade(trade_id, "CANCELLED", price, reason_note):
+                                        continue
+                                    protect_msg = (
+                                        f"🛡️ *PENDING CANCELLATO — PREVISIONE STATISTICA*\n"
+                                        f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
+                                        f"📐 *{title_safe}*: reazione attesa *{predicted_signal}* ({predicted_usd:+.2f}$, n={prediction.get('n_historical')})\n"
+                                        f"ID: `{trade_id}`"
+                                    )
+                                try:
+                                    await bot.send_message(chat_id=CHAT_ID, text=protect_msg, parse_mode="Markdown")
+                                except Exception as e:
+                                    logger.error(f"Notifica chiusura protettiva (previsione statistica) fallita per {trade_id}: {e}")
                 except Exception as e:
                     logger.debug(f"[{ev['title']}] Previsione statistica non disponibile: {e}")
 
