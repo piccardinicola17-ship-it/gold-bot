@@ -243,6 +243,15 @@ EXTENDED_EVENT_NAMES = (
     "Flash Manufacturing PMI", "Flash Services PMI", "Final GDP q/q",
     "Core PPI m/m", "Empire State Manufacturing Index", "CPI y/y",
     "Non-Farm Employment Change",
+    # Aggiunte 2026-09-09 per il progetto FOMC hawkish/dovish (vedi
+    # historical_fomc_text.py): servono le reazioni di prezzo anche per i
+    # comunicati testuali FOMC, non solo per Federal Funds Rate (l'unica
+    # parte numerica già coperta). Nessun forecast numerico per queste —
+    # restano fuori da historical_features.py (che richiede actual_num/
+    # forecast_num non nulli), il confronto avviene nel progetto FOMC
+    # separato tra punteggio hawkish/dovish e queste stesse reazioni.
+    "FOMC Statement", "FOMC Meeting Minutes", "FOMC Press Conference",
+    "FOMC Economic Projections",
 )
 
 
