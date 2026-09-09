@@ -15,7 +15,7 @@ così da isolare il comportamento della Regola 5/5bis.
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -307,6 +307,76 @@ class TestHtfAlignmentFilter(unittest.IsolatedAsyncioTestCase):
         )
         report = format_pipeline_report(state)
         self.assertNotIn("Trend 4H", report)
+
+
+class TestSniperReport(unittest.TestCase):
+    """format_pipeline_report() per il cecchino SMC+Stat Arb (2026-09-09,
+    SNIPER_TIMEFRAME) — report distinto, niente "Prob: 70%" (valore fisso
+    solo per il gate MIN_PROB, non un vero score) mostrato come se fosse
+    reale."""
+
+    def _sniper_state(self, prob=70, prob_display=47):
+        from analyzer import SNIPER_TIMEFRAME
+        return TradingState(
+            timeframe=SNIPER_TIMEFRAME, signal="BUY", order_type="BUY",
+            entry=4300.0, sl=4290.0, tp1=4310.0, tp2=4320.0, tp3=4330.0,
+            regime="NORMAL", prob=prob, prob_display=prob_display, risk_pct=1.0,
+        )
+
+    def test_header_is_distinct_from_the_normal_report(self):
+        from agent_orchestrator import format_pipeline_report
+        report = format_pipeline_report(self._sniper_state())
+        self.assertIn("CECCHINO", report)
+        self.assertNotIn("MULTI-AGENT REPORT", report)
+
+    def test_fixed_placeholder_prob_is_never_shown_as_a_real_score(self):
+        """Il 70% fisso serve solo ad attraversare MIN_PROB - mostrarlo in
+        chat farebbe credere a un vero punteggio di confidenza."""
+        from agent_orchestrator import format_pipeline_report
+        report = format_pipeline_report(self._sniper_state(prob=70))
+        self.assertNotIn("70%", report)
+
+    def test_shows_the_real_backtested_win_rate(self):
+        from agent_orchestrator import format_pipeline_report
+        report = format_pipeline_report(self._sniper_state(prob_display=47))
+        self.assertIn("47%", report)
+
+
+class TestSniperDataCollectorFetchesRealInterval(unittest.IsolatedAsyncioTestCase):
+    """agent_data_collector() chiamava get_data(interval=state.timeframe) —
+    "5min_sniper" non è un interval che l'API dati riconosce. Deve
+    scaricare candele 5min reali pur mantenendo state.timeframe invariato
+    per il resto della pipeline (dedup, cooldown, label, ecc.)."""
+
+    async def test_fetches_5min_not_5min_sniper(self):
+        from agent_orchestrator import agent_data_collector
+        from analyzer import SNIPER_TIMEFRAME
+        import pandas as pd
+
+        df = pd.DataFrame({
+            "Open": [100.0], "High": [101.0], "Low": [99.0], "Close": [100.0],
+        })
+        state = TradingState(timeframe=SNIPER_TIMEFRAME)
+
+        # get_current_price_and_scale_async/get_data/compute_indicators sono
+        # importate LOCALMENTE dentro agent_data_collector (from trade_
+        # manager import .../from analyzer import ...) - patcharle su
+        # agent_orchestrator non avrebbe effetto, serve patchare il modulo
+        # sorgente da cui vengono importate ad ogni chiamata.
+        with patch("agent_orchestrator._get_cached_data", return_value=None), \
+             patch("agent_orchestrator._set_cached_data"), \
+             patch("trade_manager.get_current_price_and_scale_async", new=AsyncMock(return_value=(4300.0, True))), \
+             patch("analyzer.get_data", return_value=df) as mock_get_data, \
+             patch("analyzer.compute_indicators", side_effect=lambda d: d):
+            result = await agent_data_collector(state)
+
+        self.assertTrue(result.success)
+        mock_get_data.assert_called_once()
+        self.assertEqual(mock_get_data.call_args.kwargs.get("interval"), "5min")
+        # Lo stato della pipeline resta "5min_sniper", solo il fetch dati
+        # usa il vero interval - altrimenti dedup/cooldown/label si
+        # confonderebbero con un eventuale "5min" reale.
+        self.assertEqual(state.timeframe, SNIPER_TIMEFRAME)
 
 
 class TestAgentRiskForwardsTimeframe(unittest.IsolatedAsyncioTestCase):

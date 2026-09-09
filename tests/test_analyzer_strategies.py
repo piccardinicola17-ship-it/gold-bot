@@ -10,6 +10,7 @@ Test per due fix nella generazione segnali di analyzer.py (audit 2026-09-05):
    train/predict) - rimosso, resta solo lo score composito rule-based.
 """
 
+import contextlib
 import os
 import sys
 import unittest
@@ -20,7 +21,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import analyzer
-from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy, detect_swing_points, calibrate_probability_for_display
+from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy, detect_swing_points, calibrate_probability_for_display, smc_generic_zone_signal, _sniper_analyze, full_analyze, SNIPER_TIMEFRAME, SNIPER_FIXED_PROB, SNIPER_BACKTEST_WIN_RATE
 from unittest.mock import patch
 
 
@@ -361,6 +362,138 @@ class TestCalibrateProbabilityForDisplay(unittest.TestCase):
         for raw in range(40, 98):
             out = calibrate_probability_for_display(raw)
             self.assertTrue(29 <= out <= 34, f"raw={raw} -> {out}")
+
+
+def _sniper_price_df(n=35, close=100.0, atr=2.0) -> pd.DataFrame:
+    rows = [
+        {"Open": close, "High": close + 1, "Low": close - 1, "Close": close,
+         "atr": atr, "rsi": 50.0, "adx": 20.0}
+        for _ in range(n)
+    ]
+    return pd.DataFrame(rows)
+
+
+class TestSmcGenericZoneSignal(unittest.TestCase):
+    """smc_generic_zone_signal() — la stessa identica logica validata nel
+    backtest 5 anni del 2026-09-08 (smc_generic_strategy in
+    strategy_blocks_test.py): CHoCH + prezzo dentro la zona dell'Order
+    Block (con margine di mezzo ATR). detect_bos_choch/detect_order_blocks
+    sono mockate: la loro correttezza è già coperta altrove, qui si
+    verifica solo la logica di zona/margine di QUESTA funzione."""
+
+    def test_too_few_rows_returns_neutral(self):
+        df = _sniper_price_df(n=10)
+        result = smc_generic_zone_signal(df)
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+    def test_bullish_choch_with_price_in_ob_zone_returns_buy(self):
+        df = _sniper_price_df(close=100.0, atr=2.0)
+        with patch("analyzer.detect_bos_choch", return_value={"choch": "CHOCH_BULLISH"}), \
+             patch("analyzer.detect_order_blocks", return_value={"bullish_ob": {"low": 98.0, "high": 100.5}}):
+            result = smc_generic_zone_signal(df)
+        self.assertEqual(result["signal"], "BUY")
+        self.assertEqual(result["score"], 8)
+
+    def test_bullish_choch_with_price_outside_ob_zone_plus_margin_returns_neutral(self):
+        df = _sniper_price_df(close=110.0, atr=2.0)  # ben oltre high(100.5)+atr*0.5
+        with patch("analyzer.detect_bos_choch", return_value={"choch": "CHOCH_BULLISH"}), \
+             patch("analyzer.detect_order_blocks", return_value={"bullish_ob": {"low": 98.0, "high": 100.5}}):
+            result = smc_generic_zone_signal(df)
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+    def test_bearish_choch_with_price_in_ob_zone_returns_sell(self):
+        df = _sniper_price_df(close=100.0, atr=2.0)
+        with patch("analyzer.detect_bos_choch", return_value={"choch": "CHOCH_BEARISH"}), \
+             patch("analyzer.detect_order_blocks", return_value={"bearish_ob": {"low": 99.5, "high": 102.0}}):
+            result = smc_generic_zone_signal(df)
+        self.assertEqual(result["signal"], "SELL")
+
+    def test_no_choch_returns_neutral_even_with_ob_present(self):
+        df = _sniper_price_df(close=100.0, atr=2.0)
+        with patch("analyzer.detect_bos_choch", return_value={"choch": None}), \
+             patch("analyzer.detect_order_blocks", return_value={"bullish_ob": {"low": 98.0, "high": 100.5}}):
+            result = smc_generic_zone_signal(df)
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+
+class TestSniperAnalyze(unittest.TestCase):
+    """_sniper_analyze() (2026-09-09) — motore separato SMC+Stat Arb per il
+    timeframe sintetico SNIPER_TIMEFRAME. La confluenza è stretta: serve
+    che SMC e Stat Arb concordino sulla STESSA direzione, esattamente come
+    validato nel backtest (mode="agree" in strategy_blocks_test.py)."""
+
+    def _run_sniper(self, smc_signal, stat_arb_signal, order_type="BUY", entry=100.0):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch("analyzer.get_data", return_value=_sniper_price_df()))
+            stack.enter_context(patch("analyzer.compute_indicators", side_effect=lambda df: df))
+            stack.enter_context(patch("analyzer.detect_swing_points", side_effect=lambda df: df))
+            stack.enter_context(patch("analyzer.get_dxy_price", return_value=104.0))
+            stack.enter_context(patch("analyzer.get_us10y_price", return_value=4.2))
+            stack.enter_context(patch("analyzer.detect_bos_choch", return_value={
+                "structure": "BULLISH", "choch": None, "bos": None, "last_high": None, "last_low": None,
+            }))
+            stack.enter_context(patch("analyzer.detect_order_blocks", return_value={}))
+            stack.enter_context(patch("analyzer.detect_fvg", return_value={}))
+            stack.enter_context(patch("analyzer.detect_premium_discount", return_value="EQUILIBRIUM"))
+            stack.enter_context(patch("analyzer.get_support_resistance", return_value={
+                "support": 90, "resistance": 110, "s_near": 95, "r_near": 105,
+            }))
+            stack.enter_context(patch("analyzer.detect_market_regime", return_value={"regime": "NORMAL"}))
+            stack.enter_context(patch("analyzer.smc_generic_zone_signal", return_value=smc_signal))
+            stack.enter_context(patch("analyzer.statistical_arbitrage_strategy", return_value=stat_arb_signal))
+            stack.enter_context(patch("analyzer.determine_order_type", return_value=(order_type, entry)))
+            stack.enter_context(patch("analyzer.calculate_risk_levels", return_value={
+                "sl": 95.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0, "be": 100.0,
+                "rr1": 1.0, "rr2": 2.0, "rr3": 3.0,
+            }))
+            return _sniper_analyze()
+
+    def test_both_agree_buy_produces_a_real_trade(self):
+        result = self._run_sniper(
+            smc_signal={"signal": "BUY", "score": 8},
+            stat_arb_signal={"signal": "BUY", "score": 5},
+        )
+        self.assertEqual(result["signal"], "BUY")
+        self.assertEqual(result["timeframe"], SNIPER_TIMEFRAME)
+        self.assertEqual(result["prob"], SNIPER_FIXED_PROB)
+        self.assertEqual(result["sl"], 95.0)
+        self.assertEqual(result["tp2"], 110.0)
+
+    def test_disagreement_returns_neutral_with_no_trade_levels(self):
+        result = self._run_sniper(
+            smc_signal={"signal": "BUY", "score": 8},
+            stat_arb_signal={"signal": "SELL", "score": 5},
+        )
+        self.assertEqual(result["signal"], "NEUTRAL")
+        self.assertEqual(result["entry"], 0.0)
+        self.assertEqual(result["prob"], 0)
+
+    def test_smc_neutral_returns_neutral_regardless_of_stat_arb(self):
+        result = self._run_sniper(
+            smc_signal={"signal": "NEUTRAL", "score": 0},
+            stat_arb_signal={"signal": "BUY", "score": 5},
+        )
+        self.assertEqual(result["signal"], "NEUTRAL")
+
+    def test_prob_display_is_the_real_backtested_win_rate_not_the_generic_calibration(self):
+        """prob_display qui NON deve passare per calibrate_probability_for_
+        display() (calibrata sull'aggregato a 8 strategie, ~30-33% ovunque)
+        — mostrerebbe un numero fuorviante per una strategia con un win
+        rate storico reale molto più alto e diverso."""
+        result = self._run_sniper(
+            smc_signal={"signal": "BUY", "score": 8},
+            stat_arb_signal={"signal": "BUY", "score": 5},
+        )
+        self.assertEqual(result["prob_display"], round(SNIPER_BACKTEST_WIN_RATE))
+
+
+class TestFullAnalyzeSniperDispatch(unittest.TestCase):
+    def test_sniper_timeframe_dispatches_to_sniper_analyze(self):
+        sentinel = {"signal": "BUY", "timeframe": SNIPER_TIMEFRAME}
+        with patch("analyzer._sniper_analyze", return_value=sentinel) as mock_sniper:
+            result = full_analyze(timeframe_focus=SNIPER_TIMEFRAME)
+        mock_sniper.assert_called_once()
+        self.assertIs(result, sentinel)
 
 
 if __name__ == "__main__":

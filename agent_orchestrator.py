@@ -300,20 +300,27 @@ async def agent_data_collector(state: TradingState) -> AgentResult:
             "1min": 120, "5min": 300, "15min": 200,
             "1h": 150, "4h": 100, "1day": 100,
         }
-        outputsize = OUTPUTSIZE.get(state.timeframe, 150)
+        # Il cecchino SMC+Stat Arb ("5min_sniper") non e' un vero interval
+        # dell'API dati — analizza candele 5min reali, full_analyze() lo sa
+        # gia' (vedi il branch su SNIPER_TIMEFRAME), qui serve solo scaricare
+        # dal fetch/cache giusto invece di passare una stringa che get_data()
+        # non riconoscerebbe.
+        from analyzer import SNIPER_TIMEFRAME
+        fetch_interval = "5min" if state.timeframe == SNIPER_TIMEFRAME else state.timeframe
+        outputsize = OUTPUTSIZE.get(fetch_interval, 150)
 
         # Usa cache se disponibile — evita 429 quando più TF girano in sequenza
-        cached = _get_cached_data(state.timeframe, outputsize)
+        cached = _get_cached_data(fetch_interval, outputsize)
         if cached is not None:
             df = cached
-            state.add_log("📊 DataCollector", f"✅ Cache hit {state.timeframe} | {len(df)} candele")
+            state.add_log("📊 DataCollector", f"✅ Cache hit {fetch_interval} | {len(df)} candele")
         else:
             loop = asyncio.get_event_loop()
             df = await loop.run_in_executor(
                 None,
-                lambda: compute_indicators(get_data(interval=state.timeframe, outputsize=outputsize))
+                lambda: compute_indicators(get_data(interval=fetch_interval, outputsize=outputsize))
             )
-            _set_cached_data(state.timeframe, outputsize, df)
+            _set_cached_data(fetch_interval, outputsize, df)
 
         state.market_data = {
             "rows":       len(df),
@@ -769,6 +776,29 @@ def format_pipeline_report(state: TradingState) -> str:
     # lasciare artefatti di arrotondamento tipo "$4382.009999999999" nel
     # messaggio del segnale — stesso bug visto e corretto oggi (2026-09-02)
     # nei messaggi di trade_manager.py.
+
+    from analyzer import SNIPER_TIMEFRAME
+    if state.timeframe == SNIPER_TIMEFRAME:
+        # Report distinto per il cecchino: niente "Prob: 70%" (e' un valore
+        # fisso per attraversare il gate MIN_PROB, non uno score reale — vedi
+        # SNIPER_FIXED_PROB in analyzer.py) — mostra invece il win rate
+        # storico vero misurato sul backtest, non la calibrazione generica
+        # dell'aggregato (calibrata su una popolazione di segnali diversa).
+        raw_order = state.order_type
+        order_label = "MARKET" if raw_order == state.signal else raw_order.split()[-1]
+        return (
+            f"🎯 *CECCHINO SMC+STAT ARB — M5*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📍 *{state.signal} {order_label}* @ *${_fmt(state.entry)}*\n"
+            f"🛑 SL: ${_fmt(state.sl)} | 🎯 TP1: ${_fmt(state.tp1)}\n"
+            f"🎯 TP2: ${_fmt(state.tp2)} | 🏆 TP3: ${_fmt(state.tp3)}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 Confluenza SMC + Stat Arb | Win rate storico ~{state.prob_display}% "
+            f"(backtest 5 anni, n=811) | R:R: *{state.rr}* | Risk: *{state.risk_pct:.2f}%*\n"
+            f"📈 Regime: {str(state.regime).replace('_', ' ')}\n"
+            f"_Motore separato dal bot principale — segnale raro per costruzione | "
+            f"{state.timestamp[11:16]} IT_"
+        )
 
     tf_label = {
         "5min": "5MIN", "15min": "15MIN", "1h": "1H",

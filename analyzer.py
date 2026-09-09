@@ -2096,14 +2096,153 @@ def calibrate_probability_for_display(raw_prob: int) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════
+# CECCHINO SMC + STAT ARB — motore separato, solo su 5min (2026-09-09)
+# ═══════════════════════════════════════════════════════════════
+# Richiesta esplicita dell'utente: SMC+Stat Arb in confluenza (CHoCH+ritorno
+# su Order Block ammorbidito nel timing con Stat Arb entro ~1 giorno di
+# grazia) e' il blocco piu' consistente di tutta la ricerca del 2026-09-08/09
+# (5/5min PF 1.39, n=811, split 1.32/1.45) ma AGGIUNGERLO come voto in piu'
+# nell'aggregato a 8 strategie NON funziona (testato e confermato: PF
+# invariato o peggiore, vedi memoria di sessione) - l'unico modo di
+# catturare davvero questo edge e' farlo girare DA SOLO, indipendente,
+# esattamente come e' stato validato. Non e' quindi una nona strategia
+# nell'aggregato: e' un secondo motore di segnali completamente separato,
+# instradato attraverso "5min_sniper" come timeframe sintetico - la stessa
+# identica pipeline a 5 agenti (dati/struttura/news/rischio/decisione) gira
+# invariata, solo agent_structure_analyst finisce qui invece che
+# nell'aggregato normale (vedi il branch in full_analyze() sotto).
+#
+# Il pool di rischio resta condiviso col motore normale per costruzione:
+# check_can_trade()/get_consecutive_losses()/session_stopped in
+# risk_manager.py sono gia' globali per sessione, non per timeframe - lo
+# stop di sicurezza dopo 3 perdite consecutive protegge l'intero conto
+# indipendentemente da quale motore ha aperto il trade. Dedup
+# (was_setup_seen), "un trade alla volta" (has_open_trade_on_timeframe) e
+# cooldown (recently_cancelled_on_timeframe) invece sono per timeframe per
+# design, quindi "5min_sniper" ha il suo contatore indipendente da un
+# eventuale "5min" futuro - corretto, sono due sistemi diversi.
+SNIPER_TIMEFRAME = "5min_sniper"
+
+# prob e' un valore fisso, non uno score graduato: la confluenza SMC+Stat
+# Arb e' un si'/no (concordano o non concordano), non ha un punteggio
+# continuo come estimate_probability(). Serve solo per attraversare lo
+# stesso cancello MIN_PROB del resto della pipeline (soglia di default 55%
+# per "5min_sniper", non essendo in MIN_PROB_HIGH_THRESHOLD_TFS) - 70 lo
+# supera con margine senza fingere una precisione che non esiste.
+SNIPER_FIXED_PROB = 70
+# Win rate REALE misurato sul backtest 5 anni (n=811, 2026-09-08) - mostrato
+# in chat al posto della calibrazione generica di calibrate_probability_for_
+# display() sopra, che e' stata misurata sull'aggregato a 8 strategie
+# (~30-33% ovunque) e sarebbe fuorviante qui: il cecchino ha un win rate
+# storico reale molto piu' alto e diverso.
+SNIPER_BACKTEST_WIN_RATE = 46.6
+
+
+def smc_generic_zone_signal(df: pd.DataFrame) -> dict:
+    """
+    SMC generico a singolo timeframe: CHoCH + ritorno su Order Block, senza
+    conferma multi-timeframe ne' filtro orario (a differenza di smc_v3_
+    strategy). E' l'esatta logica validata nel backtest del 2026-09-08
+    (smc_generic_strategy in strategy_blocks_test.py) - qualsiasi modifica
+    qui invalida quella validazione, va ritestata se cambia.
+    """
+    result = {"signal": "NEUTRAL", "score": 0, "reason": ""}
+    if len(df) < 30:
+        return result
+    smc = detect_bos_choch(df)
+    ob = detect_order_blocks(df)
+    row = df.iloc[-1]
+    price = float(row["Close"])
+    atr = max(float(row["atr"]) if not pd.isna(row["atr"]) else 5.0, 2.0)
+    if smc["choch"] == "CHOCH_BULLISH" and ob.get("bullish_ob"):
+        zone = ob["bullish_ob"]
+        if zone["low"] <= price <= zone["high"] + atr * 0.5:
+            result = {"signal": "BUY", "score": 8, "reason": "CHoCH+OB bullish"}
+    if smc["choch"] == "CHOCH_BEARISH" and ob.get("bearish_ob"):
+        zone = ob["bearish_ob"]
+        if zone["low"] - atr * 0.5 <= price <= zone["high"]:
+            result = {"signal": "SELL", "score": 8, "reason": "CHoCH+OB bearish"}
+    return result
+
+
+def _sniper_analyze() -> dict:
+    """
+    Motore di segnale separato per SNIPER_TIMEFRAME: confluenza SMC (zona)
+    + Stat Arb (regime macro), stessa logica del blocco validato. Ritorna
+    lo stesso formato di dict di full_analyze() cosi' che il resto della
+    pipeline (agent_structure_analyst e a valle) non debba saperne nulla.
+    """
+    df = compute_indicators(get_data(interval="5min", outputsize=300))
+    df = detect_swing_points(df)
+    data_timestamp = pd.Timestamp(df.index[-1]).isoformat()
+
+    row = df.iloc[-1]
+    price = round(float(row["Close"]), 2)
+    atr = max(float(row["atr"]) if not pd.isna(row["atr"]) else 5, 2.0)
+    rsi = float(row["rsi"]) if not pd.isna(row["rsi"]) else 50
+    adx = float(row["adx"]) if not pd.isna(row["adx"]) else 0
+
+    smc = detect_bos_choch(df)
+    ob = detect_order_blocks(df)
+    fvg = detect_fvg(df)
+    pd_zone = detect_premium_discount(df, smc)
+    sr = get_support_resistance(df)
+    regime_data = detect_market_regime(df)
+    regime = regime_data["regime"]
+
+    dxy = get_dxy_price()
+    us10y = get_us10y_price()
+
+    smc_signal = smc_generic_zone_signal(df)
+    stat_arb_signal = statistical_arbitrage_strategy(price, dxy, us10y)
+
+    signal = "NEUTRAL"
+    if (smc_signal["signal"] in ("BUY", "SELL")
+            and smc_signal["signal"] == stat_arb_signal.get("signal")):
+        signal = smc_signal["signal"]
+
+    base = {
+        "signal": signal, "order_type": signal, "price": price,
+        "entry": 0.0, "timeframe": SNIPER_TIMEFRAME, "data_timestamp": data_timestamp,
+        "sl": 0.0, "tp1": 0.0, "tp2": 0.0, "tp3": 0.0, "be": 0.0,
+        "rr1": 0.0, "rr2": 0.0, "rr3": 0.0,
+        "prob": 0, "prob_display": round(SNIPER_BACKTEST_WIN_RATE),
+        "total_score": 0, "buy_count": 0, "sell_count": 0, "active": [],
+        "atr": round(atr, 2), "rsi": round(rsi, 1), "adx": round(adx, 1),
+        "regime": regime, "regime_4h": "N/D", "structure": smc["structure"],
+        "pd_zone": pd_zone, "bos": smc.get("bos"), "choch": smc.get("choch"),
+        "last_high": smc.get("last_high"), "last_low": smc.get("last_low"),
+        "smc_setup": "", "strategies": {"smc": smc_signal, "stat_arb": stat_arb_signal},
+    }
+    if signal not in ("BUY", "SELL"):
+        return base
+
+    order_type, entry = determine_order_type(
+        signal, price, sr, atr, adx, rsi, smc["structure"], ob, fvg, regime, pd_zone
+    )
+    risk = calculate_risk_levels(signal, entry, atr, regime)
+    base.update({
+        "order_type": order_type, "entry": entry,
+        "sl": risk["sl"], "tp1": risk["tp1"], "tp2": risk["tp2"], "tp3": risk["tp3"],
+        "be": risk["be"], "rr1": risk["rr1"], "rr2": risk["rr2"], "rr3": risk["rr3"],
+        "prob": SNIPER_FIXED_PROB,
+    })
+    return base
+
+
+# ═══════════════════════════════════════════════════════════════
 # ENTRY POINT PRINCIPALE — M5 e H1/H4
 # ═══════════════════════════════════════════════════════════════
 
 def full_analyze(timeframe_focus: str = "5min") -> dict:
     """
     Analisi completa su tutti i livelli.
-    timeframe_focus: '5min' per segnali M5, '1h' per H1, '4h' per H4
+    timeframe_focus: '5min' per segnali M5, '1h' per H1, '4h' per H4,
+    'SNIPER_TIMEFRAME' (5min_sniper) per il motore separato SMC+Stat Arb.
     """
+    if timeframe_focus == SNIPER_TIMEFRAME:
+        return _sniper_analyze()
+
     now = datetime.now(TIMEZONE)
 
     # Dati multi-timeframe

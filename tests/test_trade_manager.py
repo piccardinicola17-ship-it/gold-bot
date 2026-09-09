@@ -655,7 +655,14 @@ class TestRebuildSessionsPreservesSafetyStop(TradeManagerTestCase):
         self.assertEqual(row["session_stopped_at"], stopped_at)
 
     def test_rebuild_leaves_a_never_stopped_date_at_zero(self):
-        data = _base_trade_data(data_timestamp="2026-09-08T11:00:00")
+        # close_trade() timbra closed_at con l'ora reale (datetime.now) — la
+        # data della sessione creata dal rebuild è quindi SEMPRE "oggi" per
+        # davvero, non una stringa fissa che si disallineerebbe al primo
+        # cambio di giorno (successo esattamente questo: scritto il
+        # 2026-09-08, la mezzanotte scoccata durante la sessione lo ha
+        # rotto il 2026-09-09).
+        today = datetime.now(tm.TIMEZONE).strftime("%Y-%m-%d")
+        data = _base_trade_data(data_timestamp=f"{today}T11:00:00")
         trade_id = tm.open_trade(data)
         tm.close_trade(trade_id, "LOSS", data["sl"], "test")
 
@@ -666,7 +673,7 @@ class TestRebuildSessionsPreservesSafetyStop(TradeManagerTestCase):
         with tm._connect() as conn:
             row = conn.execute(
                 "SELECT session_stopped, session_stopped_at FROM sessions WHERE date=?",
-                ("2026-09-08",),
+                (today,),
             ).fetchone()
         self.assertEqual(row["session_stopped"], 0)
         self.assertIsNone(row["session_stopped_at"])
