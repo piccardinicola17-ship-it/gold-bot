@@ -2096,21 +2096,21 @@ def calibrate_probability_for_display(raw_prob: int) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════
-# CECCHINO SMC + STAT ARB — motore separato, solo su 5min (2026-09-09)
+# CECCHINI — motori separati, indipendenti dall'aggregato (2026-09-09)
 # ═══════════════════════════════════════════════════════════════
-# Richiesta esplicita dell'utente: SMC+Stat Arb in confluenza (CHoCH+ritorno
-# su Order Block ammorbidito nel timing con Stat Arb entro ~1 giorno di
-# grazia) e' il blocco piu' consistente di tutta la ricerca del 2026-09-08/09
-# (5/5min PF 1.39, n=811, split 1.32/1.45) ma AGGIUNGERLO come voto in piu'
+# Richiesta esplicita dell'utente: certi blocchi validati stanotte (SMC in
+# confluenza con Stat Arb o Candlestick) sono i piu' consistenti di tutta
+# la ricerca del 2026-09-08/09 ma AGGIUNGERLI come voto in piu'
 # nell'aggregato a 8 strategie NON funziona (testato e confermato: PF
 # invariato o peggiore, vedi memoria di sessione) - l'unico modo di
-# catturare davvero questo edge e' farlo girare DA SOLO, indipendente,
-# esattamente come e' stato validato. Non e' quindi una nona strategia
-# nell'aggregato: e' un secondo motore di segnali completamente separato,
-# instradato attraverso "5min_sniper" come timeframe sintetico - la stessa
-# identica pipeline a 5 agenti (dati/struttura/news/rischio/decisione) gira
-# invariata, solo agent_structure_analyst finisce qui invece che
-# nell'aggregato normale (vedi il branch in full_analyze() sotto).
+# catturarli davvero e' farli girare DA SOLI, indipendenti, esattamente
+# come sono stati validati. Non sono quindi una nona strategia
+# nell'aggregato: sono motori di segnali completamente separati,
+# instradati attraverso un timeframe sintetico per ciascuno (SNIPER_
+# CONFIGS sotto) - la stessa identica pipeline a 5 agenti (dati/struttura/
+# news/rischio/decisione) gira invariata, solo agent_structure_analyst
+# finisce su _sniper_analyze() invece che sull'aggregato normale (vedi il
+# branch in full_analyze() sotto).
 #
 # Il pool di rischio resta condiviso col motore normale per costruzione:
 # check_can_trade()/get_consecutive_losses()/session_stopped in
@@ -2119,23 +2119,12 @@ def calibrate_probability_for_display(raw_prob: int) -> int:
 # indipendentemente da quale motore ha aperto il trade. Dedup
 # (was_setup_seen), "un trade alla volta" (has_open_trade_on_timeframe) e
 # cooldown (recently_cancelled_on_timeframe) invece sono per timeframe per
-# design, quindi "5min_sniper" ha il suo contatore indipendente da un
-# eventuale "5min" futuro - corretto, sono due sistemi diversi.
-SNIPER_TIMEFRAME = "5min_sniper"
-
-# prob e' un valore fisso, non uno score graduato: la confluenza SMC+Stat
-# Arb e' un si'/no (concordano o non concordano), non ha un punteggio
-# continuo come estimate_probability(). Serve solo per attraversare lo
-# stesso cancello MIN_PROB del resto della pipeline (soglia di default 55%
-# per "5min_sniper", non essendo in MIN_PROB_HIGH_THRESHOLD_TFS) - 70 lo
-# supera con margine senza fingere una precisione che non esiste.
-SNIPER_FIXED_PROB = 70
-# Win rate REALE misurato sul backtest 5 anni (n=811, 2026-09-08) - mostrato
-# in chat al posto della calibrazione generica di calibrate_probability_for_
-# display() sopra, che e' stata misurata sull'aggregato a 8 strategie
-# (~30-33% ovunque) e sarebbe fuorviante qui: il cecchino ha un win rate
-# storico reale molto piu' alto e diverso.
-SNIPER_BACKTEST_WIN_RATE = 46.6
+# design, quindi ogni cecchino ha il suo contatore indipendente dagli
+# altri e dal vero timeframe che condivide (es. "1h" del bot normale non
+# si accorge mai di "1h_sniper_candlestick") - corretto, sono sistemi
+# diversi che devono poter operare in parallelo senza mai bloccarsi a
+# vicenda.
+SNIPER_TIMEFRAME = "5min_sniper"  # nome storico del primo cecchino (retrocompatibilita')
 
 
 def smc_generic_zone_signal(df: pd.DataFrame) -> dict:
@@ -2165,14 +2154,62 @@ def smc_generic_zone_signal(df: pd.DataFrame) -> dict:
     return result
 
 
-def _sniper_analyze() -> dict:
+def _sniper_second_signal_stat_arb(df: pd.DataFrame, price: float, dxy: float, us10y: float) -> dict:
+    return statistical_arbitrage_strategy(price, dxy, us10y)
+
+
+def _sniper_second_signal_candlestick(df: pd.DataFrame, price: float, dxy: float, us10y: float) -> dict:
+    return candlestick_strategy(df)
+
+
+# Un cecchino per ciascun blocco validato (2026-09-08/09), tenuti separati
+# anche quando condividono lo stesso timeframe reale (i due su 1h NON si
+# uniscono in un solo blocco, per esplicita richiesta dell'utente: operano
+# ognuno per conto proprio, in parallelo, sullo stesso 1h). "backtest_wr"
+# e "backtest_n" sono i numeri REALI del backtest 5 anni (strategy_blocks_
+# test.py / phase2_stat_arb_recent.py), mostrati in chat al posto della
+# calibrazione generica di calibrate_probability_for_display() (misurata
+# sull'aggregato a 8 strategie, ~30-33% ovunque - fuorviante qui, questi
+# blocchi hanno un win rate storico reale molto piu' alto).
+SNIPER_CONFIGS = {
+    "5min_sniper": {
+        "real_interval": "5min", "outputsize": 300,
+        "second_signal_fn": _sniper_second_signal_stat_arb,
+        "label": "SMC + Stat Arb — M5", "backtest_wr": 46.6, "backtest_n": 811,
+    },
+    "1h_sniper_stat_arb": {
+        "real_interval": "1h", "outputsize": 250,
+        "second_signal_fn": _sniper_second_signal_stat_arb,
+        "label": "SMC + Stat Arb — H1", "backtest_wr": 42.2, "backtest_n": 64,
+    },
+    "1h_sniper_candlestick": {
+        "real_interval": "1h", "outputsize": 250,
+        "second_signal_fn": _sniper_second_signal_candlestick,
+        "label": "SMC + Candlestick — H1", "backtest_wr": 43.5, "backtest_n": 92,
+    },
+}
+
+# prob e' un valore fisso, non uno score graduato, per OGNI cecchino: la
+# confluenza a due e' un si'/no (concordano o non concordano), non ha un
+# punteggio continuo come estimate_probability(). Serve solo per
+# attraversare lo stesso cancello MIN_PROB del resto della pipeline
+# (soglia di default 55% per un timeframe sintetico, non essendo in
+# MIN_PROB_HIGH_THRESHOLD_TFS) - 70 lo supera con margine senza fingere
+# una precisione che non esiste.
+SNIPER_FIXED_PROB = 70
+
+
+def _sniper_analyze(timeframe_key: str) -> dict:
     """
-    Motore di segnale separato per SNIPER_TIMEFRAME: confluenza SMC (zona)
-    + Stat Arb (regime macro), stessa logica del blocco validato. Ritorna
-    lo stesso formato di dict di full_analyze() cosi' che il resto della
-    pipeline (agent_structure_analyst e a valle) non debba saperne nulla.
+    Motore di segnale separato per un cecchino (vedi SNIPER_CONFIGS):
+    confluenza SMC (zona) + un secondo segnale (Stat Arb o Candlestick a
+    seconda del cecchino), stessa logica dei blocchi validati stanotte.
+    Ritorna lo stesso formato di dict di full_analyze() cosi' che il resto
+    della pipeline (agent_structure_analyst e a valle) non debba saperne
+    nulla.
     """
-    df = compute_indicators(get_data(interval="5min", outputsize=300))
+    cfg = SNIPER_CONFIGS[timeframe_key]
+    df = compute_indicators(get_data(interval=cfg["real_interval"], outputsize=cfg["outputsize"]))
     df = detect_swing_points(df)
     data_timestamp = pd.Timestamp(df.index[-1]).isoformat()
 
@@ -2194,25 +2231,25 @@ def _sniper_analyze() -> dict:
     us10y = get_us10y_price()
 
     smc_signal = smc_generic_zone_signal(df)
-    stat_arb_signal = statistical_arbitrage_strategy(price, dxy, us10y)
+    second_signal = cfg["second_signal_fn"](df, price, dxy, us10y)
 
     signal = "NEUTRAL"
     if (smc_signal["signal"] in ("BUY", "SELL")
-            and smc_signal["signal"] == stat_arb_signal.get("signal")):
+            and smc_signal["signal"] == second_signal.get("signal")):
         signal = smc_signal["signal"]
 
     base = {
         "signal": signal, "order_type": signal, "price": price,
-        "entry": 0.0, "timeframe": SNIPER_TIMEFRAME, "data_timestamp": data_timestamp,
+        "entry": 0.0, "timeframe": timeframe_key, "data_timestamp": data_timestamp,
         "sl": 0.0, "tp1": 0.0, "tp2": 0.0, "tp3": 0.0, "be": 0.0,
         "rr1": 0.0, "rr2": 0.0, "rr3": 0.0,
-        "prob": 0, "prob_display": round(SNIPER_BACKTEST_WIN_RATE),
+        "prob": 0, "prob_display": round(cfg["backtest_wr"]),
         "total_score": 0, "buy_count": 0, "sell_count": 0, "active": [],
         "atr": round(atr, 2), "rsi": round(rsi, 1), "adx": round(adx, 1),
         "regime": regime, "regime_4h": "N/D", "structure": smc["structure"],
         "pd_zone": pd_zone, "bos": smc.get("bos"), "choch": smc.get("choch"),
         "last_high": smc.get("last_high"), "last_low": smc.get("last_low"),
-        "smc_setup": "", "strategies": {"smc": smc_signal, "stat_arb": stat_arb_signal},
+        "smc_setup": "", "strategies": {"smc": smc_signal, "second": second_signal},
     }
     if signal not in ("BUY", "SELL"):
         return base
@@ -2238,10 +2275,10 @@ def full_analyze(timeframe_focus: str = "5min") -> dict:
     """
     Analisi completa su tutti i livelli.
     timeframe_focus: '5min' per segnali M5, '1h' per H1, '4h' per H4,
-    'SNIPER_TIMEFRAME' (5min_sniper) per il motore separato SMC+Stat Arb.
+    o una chiave di SNIPER_CONFIGS per uno dei motori separati (cecchini).
     """
-    if timeframe_focus == SNIPER_TIMEFRAME:
-        return _sniper_analyze()
+    if timeframe_focus in SNIPER_CONFIGS:
+        return _sniper_analyze(timeframe_focus)
 
     now = datetime.now(TIMEZONE)
 

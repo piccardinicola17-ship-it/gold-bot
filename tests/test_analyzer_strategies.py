@@ -21,7 +21,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import analyzer
-from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy, detect_swing_points, calibrate_probability_for_display, smc_generic_zone_signal, _sniper_analyze, full_analyze, SNIPER_TIMEFRAME, SNIPER_FIXED_PROB, SNIPER_BACKTEST_WIN_RATE
+from analyzer import candlestick_strategy, ml_alpha_strategy, _stat_arb_score_from_means, statistical_arbitrage_strategy, smc_v3_strategy, detect_swing_points, calibrate_probability_for_display, smc_generic_zone_signal, _sniper_analyze, full_analyze, SNIPER_TIMEFRAME, SNIPER_FIXED_PROB, SNIPER_CONFIGS
 from unittest.mock import patch
 
 
@@ -417,12 +417,14 @@ class TestSmcGenericZoneSignal(unittest.TestCase):
 
 
 class TestSniperAnalyze(unittest.TestCase):
-    """_sniper_analyze() (2026-09-09) — motore separato SMC+Stat Arb per il
-    timeframe sintetico SNIPER_TIMEFRAME. La confluenza è stretta: serve
-    che SMC e Stat Arb concordino sulla STESSA direzione, esattamente come
-    validato nel backtest (mode="agree" in strategy_blocks_test.py)."""
+    """_sniper_analyze(timeframe_key) (2026-09-09, generalizzato per
+    ospitare piu' cecchini — vedi SNIPER_CONFIGS) — qui testato sul primo
+    cecchino, SMC+Stat Arb su "5min_sniper". La confluenza è stretta: serve
+    che SMC e il secondo segnale concordino sulla STESSA direzione,
+    esattamente come validato nel backtest (mode="agree" in strategy_
+    blocks_test.py)."""
 
-    def _run_sniper(self, smc_signal, stat_arb_signal, order_type="BUY", entry=100.0):
+    def _run_sniper(self, smc_signal, second_signal, order_type="BUY", entry=100.0, timeframe_key=SNIPER_TIMEFRAME):
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch("analyzer.get_data", return_value=_sniper_price_df()))
             stack.enter_context(patch("analyzer.compute_indicators", side_effect=lambda df: df))
@@ -440,18 +442,19 @@ class TestSniperAnalyze(unittest.TestCase):
             }))
             stack.enter_context(patch("analyzer.detect_market_regime", return_value={"regime": "NORMAL"}))
             stack.enter_context(patch("analyzer.smc_generic_zone_signal", return_value=smc_signal))
-            stack.enter_context(patch("analyzer.statistical_arbitrage_strategy", return_value=stat_arb_signal))
+            stack.enter_context(patch("analyzer.statistical_arbitrage_strategy", return_value=second_signal))
+            stack.enter_context(patch("analyzer.candlestick_strategy", return_value=second_signal))
             stack.enter_context(patch("analyzer.determine_order_type", return_value=(order_type, entry)))
             stack.enter_context(patch("analyzer.calculate_risk_levels", return_value={
                 "sl": 95.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0, "be": 100.0,
                 "rr1": 1.0, "rr2": 2.0, "rr3": 3.0,
             }))
-            return _sniper_analyze()
+            return _sniper_analyze(timeframe_key)
 
     def test_both_agree_buy_produces_a_real_trade(self):
         result = self._run_sniper(
             smc_signal={"signal": "BUY", "score": 8},
-            stat_arb_signal={"signal": "BUY", "score": 5},
+            second_signal={"signal": "BUY", "score": 5},
         )
         self.assertEqual(result["signal"], "BUY")
         self.assertEqual(result["timeframe"], SNIPER_TIMEFRAME)
@@ -462,16 +465,16 @@ class TestSniperAnalyze(unittest.TestCase):
     def test_disagreement_returns_neutral_with_no_trade_levels(self):
         result = self._run_sniper(
             smc_signal={"signal": "BUY", "score": 8},
-            stat_arb_signal={"signal": "SELL", "score": 5},
+            second_signal={"signal": "SELL", "score": 5},
         )
         self.assertEqual(result["signal"], "NEUTRAL")
         self.assertEqual(result["entry"], 0.0)
         self.assertEqual(result["prob"], 0)
 
-    def test_smc_neutral_returns_neutral_regardless_of_stat_arb(self):
+    def test_smc_neutral_returns_neutral_regardless_of_second_signal(self):
         result = self._run_sniper(
             smc_signal={"signal": "NEUTRAL", "score": 0},
-            stat_arb_signal={"signal": "BUY", "score": 5},
+            second_signal={"signal": "BUY", "score": 5},
         )
         self.assertEqual(result["signal"], "NEUTRAL")
 
@@ -482,9 +485,68 @@ class TestSniperAnalyze(unittest.TestCase):
         rate storico reale molto più alto e diverso."""
         result = self._run_sniper(
             smc_signal={"signal": "BUY", "score": 8},
-            stat_arb_signal={"signal": "BUY", "score": 5},
+            second_signal={"signal": "BUY", "score": 5},
         )
-        self.assertEqual(result["prob_display"], round(SNIPER_BACKTEST_WIN_RATE))
+        self.assertEqual(result["prob_display"], round(SNIPER_CONFIGS[SNIPER_TIMEFRAME]["backtest_wr"]))
+
+
+class TestSniperConfigsRegistry(unittest.TestCase):
+    """I due cecchini H1 (2026-09-09, richiesta esplicita: SMC+Candlestick
+    e SMC+Stat Arb operano SEPARATI sullo stesso H1, mai uniti in un solo
+    blocco) devono usare il vero secondo segnale della loro config, e mai
+    scambiarsi tra loro o coi timeframe reali."""
+
+    def _run(self, timeframe_key, smc_signal, second_signal):
+        with contextlib.ExitStack() as stack:
+            get_data_mock = stack.enter_context(patch("analyzer.get_data", return_value=_sniper_price_df()))
+            stack.enter_context(patch("analyzer.compute_indicators", side_effect=lambda df: df))
+            stack.enter_context(patch("analyzer.detect_swing_points", side_effect=lambda df: df))
+            stack.enter_context(patch("analyzer.get_dxy_price", return_value=104.0))
+            stack.enter_context(patch("analyzer.get_us10y_price", return_value=4.2))
+            stack.enter_context(patch("analyzer.detect_bos_choch", return_value={
+                "structure": "BULLISH", "choch": None, "bos": None, "last_high": None, "last_low": None,
+            }))
+            stack.enter_context(patch("analyzer.detect_order_blocks", return_value={}))
+            stack.enter_context(patch("analyzer.detect_fvg", return_value={}))
+            stack.enter_context(patch("analyzer.detect_premium_discount", return_value="EQUILIBRIUM"))
+            stack.enter_context(patch("analyzer.get_support_resistance", return_value={
+                "support": 90, "resistance": 110, "s_near": 95, "r_near": 105,
+            }))
+            stack.enter_context(patch("analyzer.detect_market_regime", return_value={"regime": "NORMAL"}))
+            stack.enter_context(patch("analyzer.smc_generic_zone_signal", return_value=smc_signal))
+            stack.enter_context(patch("analyzer.statistical_arbitrage_strategy", return_value=second_signal))
+            stack.enter_context(patch("analyzer.candlestick_strategy", return_value=second_signal))
+            stack.enter_context(patch("analyzer.determine_order_type", return_value=("BUY", 100.0)))
+            stack.enter_context(patch("analyzer.calculate_risk_levels", return_value={
+                "sl": 95.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0, "be": 100.0,
+                "rr1": 1.0, "rr2": 2.0, "rr3": 3.0,
+            }))
+            return _sniper_analyze(timeframe_key), get_data_mock
+
+    def test_h1_candlestick_and_h1_stat_arb_have_independent_real_win_rates(self):
+        result_cs, _ = self._run(
+            "1h_sniper_candlestick",
+            smc_signal={"signal": "BUY", "score": 8}, second_signal={"signal": "BUY", "score": 5},
+        )
+        result_sa, _ = self._run(
+            "1h_sniper_stat_arb",
+            smc_signal={"signal": "BUY", "score": 8}, second_signal={"signal": "BUY", "score": 5},
+        )
+        self.assertEqual(result_cs["timeframe"], "1h_sniper_candlestick")
+        self.assertEqual(result_sa["timeframe"], "1h_sniper_stat_arb")
+        # Win rate storici diversi (43.5% vs 42.2%, backtest 2026-09-08) -
+        # se fossero uguali vorrebbe dire che uno dei due sta leggendo la
+        # config dell'altro.
+        self.assertNotEqual(result_cs["prob_display"], result_sa["prob_display"])
+        self.assertEqual(result_cs["prob_display"], round(SNIPER_CONFIGS["1h_sniper_candlestick"]["backtest_wr"]))
+        self.assertEqual(result_sa["prob_display"], round(SNIPER_CONFIGS["1h_sniper_stat_arb"]["backtest_wr"]))
+
+    def test_h1_snipers_fetch_1h_candles_not_5min(self):
+        _, get_data_mock = self._run(
+            "1h_sniper_stat_arb",
+            smc_signal={"signal": "BUY", "score": 8}, second_signal={"signal": "BUY", "score": 5},
+        )
+        self.assertEqual(get_data_mock.call_args.kwargs.get("interval"), "1h")
 
 
 class TestFullAnalyzeSniperDispatch(unittest.TestCase):

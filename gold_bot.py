@@ -25,7 +25,7 @@ from telegram import Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_data_success, SNIPER_TIMEFRAME
+from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_data_success, SNIPER_CONFIGS
 from agent_orchestrator import run_pipeline, format_pipeline_report
 from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
 # ORB rimosso — gestito manualmente dall'utente
@@ -96,7 +96,10 @@ logger = logging.getLogger(__name__)
 ALL_TIMEFRAMES = ["1h", "4h", "1day", "15min"]
 NO_EDGE_TIMEFRAMES = {"5min"}
 
-TF_LABEL = {"5min": "M5", "15min": "M15", "1h": "H1", "4h": "H4", "1day": "D1", SNIPER_TIMEFRAME: "M5 🎯"}
+TF_LABEL = {
+    "5min": "M5", "15min": "M15", "1h": "H1", "4h": "H4", "1day": "D1",
+    "5min_sniper": "M5 🎯", "1h_sniper_stat_arb": "H1 🎯 SA", "1h_sniper_candlestick": "H1 🎯 CS",
+}
 
 # Soglia di disaccordo tra due fonti spot indipendenti (gold-api.com e Twelve
 # Data) oltre la quale il basis GC=F-spot calcolato in _check_single_timeframe
@@ -1852,17 +1855,22 @@ async def auto_check_all_timeframes(bot: Bot):
         # Stagger 2s tra TF per non esaurire il rate limit API
         await asyncio.sleep(2)
 
-    # Cecchino SMC+Stat Arb (2026-09-09) — motore separato, non fa parte di
-    # ALL_TIMEFRAMES perche' non e' un vero timeframe/interval dati, e le
-    # sue regole (NO_EDGE_TIMEFRAMES, ecc.) non gli si applicano. Stessa
-    # funzione generica _check_single_timeframe, vedi analyzer.SNIPER_
-    # TIMEFRAME/_sniper_analyze per la logica di segnale separata.
-    try:
-        await _check_single_timeframe(bot, SNIPER_TIMEFRAME)
-    except DuplicateSetupError:
-        logger.debug("[%s] setup duplicato intercettato dal DB", SNIPER_TIMEFRAME)
-    except Exception as e:
-        logger.error(f"[{SNIPER_TIMEFRAME}] Errore pipeline: {e}")
+    # Cecchini (2026-09-09) — motori separati, non fanno parte di ALL_
+    # TIMEFRAMES perche' non sono veri timeframe/interval dati, e le loro
+    # regole (NO_EDGE_TIMEFRAMES, ecc.) non gli si applicano. Stessa
+    # funzione generica _check_single_timeframe per ognuno, vedi analyzer.
+    # SNIPER_CONFIGS/_sniper_analyze per la logica di segnale separata di
+    # ciascuno. Due cecchini possono condividere lo stesso vero timeframe
+    # (es. i due su 1h) senza mai interferire tra loro: ognuno ha la sua
+    # chiave sintetica propria per dedup/cooldown/trade aperti.
+    for sniper_tf in SNIPER_CONFIGS:
+        try:
+            await _check_single_timeframe(bot, sniper_tf)
+        except DuplicateSetupError:
+            logger.debug("[%s] setup duplicato intercettato dal DB", sniper_tf)
+        except Exception as e:
+            logger.error(f"[{sniper_tf}] Errore pipeline: {e}")
+        await asyncio.sleep(2)
 
     await _check_data_blindness(bot)
 
@@ -1972,12 +1980,12 @@ async def _check_single_timeframe(bot: Bot, tf: str):
             "price_basis": basis,
             "early_be_level": state.early_be_level,
         }
-        # Tag distinto per i trade del cecchino (2026-09-09): permette di
+        # Tag distinto per i trade dei cecchini (2026-09-09): permette di
         # filtrarli separatamente nel DB/dashboard (WHERE strategy_version=
-        # 'smc_stat_arb_sniper_v1') senza una migrazione di schema — open_
-        # trade() calcola il fingerprint normale solo se questo campo manca.
-        if tf == SNIPER_TIMEFRAME:
-            data["strategy_version"] = "smc_stat_arb_sniper_v1"
+        # 'sniper_<tf>_v1') senza una migrazione di schema — open_trade()
+        # calcola il fingerprint normale solo se questo campo manca.
+        if tf in SNIPER_CONFIGS:
+            data["strategy_version"] = f"sniper_{tf}_v1"
         data["setup_key"] = build_setup_key(data)
         if was_setup_seen(data["setup_key"]):
             logger.debug("[%s] setup già registrato, skip", tf)
