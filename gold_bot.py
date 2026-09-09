@@ -93,8 +93,18 @@ logger = logging.getLogger(__name__)
 # il pareggio su ENTRAMBE le meta' cronologiche indipendenti testate
 # (0.81->1.05 e 0.96->1.07) - primo fix validato con lo stesso rigore
 # degli altri timeframe.
-ALL_TIMEFRAMES = ["1h", "4h", "1day", "15min"]
-NO_EDGE_TIMEFRAMES = {"5min"}
+#
+# H1 escluso dall'aggregato normale il 2026-09-09: backtest su 5 anni
+# mostra PF 0.96 (n=2.523, totale -57,6R) — due tentativi di fix mirato
+# (blocco SELL, soglia min_prob piu' alta) scartati perche' non reggono
+# lo split cronologico (vedi memoria progetto). I due cecchini dedicati
+# gia' attivi su H1 (SMC+Candlestick +29,5R n=92, SMC+Stat Arb +22,2R
+# n=64, entrambi validati su split indipendente) portano da soli H1 a
+# +51,7R — molto meglio che sommarli al bot normale in perdita (-5,9R
+# combinato). L'aggregato a 8 strategie resta disponibile a mano con /h1
+# (con lo stesso avviso di M5).
+ALL_TIMEFRAMES = ["4h", "1day", "15min"]
+NO_EDGE_TIMEFRAMES = {"5min", "1h"}
 
 TF_LABEL = {
     "5min": "M5", "15min": "M15", "1h": "H1", "4h": "H4", "1day": "D1",
@@ -310,10 +320,12 @@ async def _run_analysis(update, timeframe: str):
         await update.message.reply_text(format_pipeline_report(state), parse_mode="Markdown")
         if timeframe in NO_EDGE_TIMEFRAMES:
             await update.message.reply_text(
-                f"⚠️ Promemoria: il backtest mostra che {tf_label} non ha edge "
-                f"positivo su un anno di dati (profit factor sotto o vicino a 1) — "
-                f"per questo non genera più segnali automatici. Questo trade è "
-                f"stato aperto solo perché richiesto a mano."
+                f"⚠️ Promemoria: il backtest mostra che l'aggregato normale su "
+                f"{tf_label} non ha edge positivo (profit factor sotto il "
+                f"pareggio) — per questo non genera più segnali automatici. "
+                f"Restano attivi eventuali cecchini dedicati su questo "
+                f"timeframe. Questo trade è stato aperto solo perché "
+                f"richiesto a mano."
             )
         logger.info(f"[MANUAL] Trade aperto: {trade_id}")
 
