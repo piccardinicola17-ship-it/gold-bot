@@ -252,6 +252,16 @@ EXTENDED_EVENT_NAMES = (
     # separato tra punteggio hawkish/dovish e queste stesse reazioni.
     "FOMC Statement", "FOMC Meeting Minutes", "FOMC Press Conference",
     "FOMC Economic Projections",
+    # Aggiunte 2026-09-09 per l'estensione BCE/BOJ (stessa fonte HF, mai
+    # sfruttata su EUR/JPY finora — nessun nuovo download). La reazione
+    # misurata resta sempre sui tick XAU/USD (l'oro), la valuta dell'evento
+    # e' solo metadato su quale banca centrale l'ha generato.
+    "Main Refinancing Rate", "ECB Press Conference", "ECB Monetary Policy Meeting Accounts",
+    "Overnight Call Rate", "BOJ Policy Rate", "BOJ Press Conference", "BOJ Outlook Report",
+    # "Monetary Policy Statement" copre SIA BCE SIA BOJ (stesso nome
+    # evento, valuta diversa) - un'unica voce qui basta, il filtro di
+    # dukascopy_ticks.py e' per event_name non per currency+event_name.
+    "Monetary Policy Statement",
 )
 
 

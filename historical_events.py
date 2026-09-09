@@ -121,7 +121,23 @@ CATEGORY_KEYWORDS = {
     "JOLTS":  ("jolts", "job openings"),
     "RETAIL": ("retail sales",),
     "UNEMPLOYMENT": ("unemployment rate",),
+    "ECB":    ("ecb", "main refinancing rate"),
+    "BOJ":    ("boj", "overnight call rate"),
 }
+
+# Estensione 2026-09-09 (altre banche centrali, richiesta esplicita): la
+# fonte HF copre GIA' EUR/JPY (mai sfruttato finora, filtrato solo su USD)
+# - nessun nuovo download o scraping, stessa identica fonte primaria. Solo
+# gli eventi banca-centrale rilevanti per l'oro, non l'intero calendario
+# EUR/JPY (che include centinaia di dati macro locali tedeschi/francesi/
+# giapponesi senza relazione diretta con XAU/USD, fuori scope qui).
+CENTRAL_BANK_EXTRA_CURRENCIES = ("EUR", "JPY")
+CENTRAL_BANK_EVENT_NAMES = (
+    "Main Refinancing Rate", "ECB Press Conference", "Monetary Policy Statement",
+    "ECB Monetary Policy Meeting Accounts",
+    "Overnight Call Rate", "BOJ Policy Rate", "BOJ Press Conference",
+    "BOJ Outlook Report", "Monetary Policy Meeting Minutes",
+)
 
 # Suffisso unità -> moltiplicatore. "%" non viene scalato (4.2% -> 4.2, non 0.042):
 # è il numero così come lo leggerebbe un trader, non una frazione.
@@ -275,9 +291,18 @@ def _load_hf_dataframe(skip_download: bool) -> pd.DataFrame:
     return df
 
 
-def _normalize_hf(df: pd.DataFrame) -> pd.DataFrame:
-    out = df[(df["Currency"] == "USD") & (df["Impact"] == "High Impact Expected")].copy()
-    logger.info(f"HF: {len(out):,} righe USD/High Impact dopo il filtro")
+def _normalize_hf(df: pd.DataFrame, currencies: tuple = ("USD",), event_names: tuple | None = None) -> pd.DataFrame:
+    """event_names=None -> tutti gli eventi High Impact di quelle valute
+    (comportamento originale, usato per USD). Con event_names impostato,
+    filtra anche per nome esatto — usato per le estensioni BCE/BOJ, dove
+    vogliamo solo i pochi eventi banca-centrale rilevanti per l'oro, non
+    l'intero calendario EUR/JPY (che include centinaia di dati locali
+    tedeschi/francesi/giapponesi senza relazione diretta con XAU/USD)."""
+    mask = df["Currency"].isin(currencies) & (df["Impact"] == "High Impact Expected")
+    if event_names is not None:
+        mask &= df["Event"].isin(event_names)
+    out = df[mask].copy()
+    logger.info(f"HF: {len(out):,} righe ({','.join(currencies)}/High Impact) dopo il filtro")
 
     out["datetime_utc"] = pd.to_datetime(out["DateTime"], utc=True)
     out = out.dropna(subset=["datetime_utc"])
@@ -319,7 +344,7 @@ def _normalize_hf(df: pd.DataFrame) -> pd.DataFrame:
     out["macro_category"] = out["Event"].apply(_tag_category)
     now_iso = datetime.now(timezone.utc).isoformat()
     out["event_uid"] = out.apply(
-        lambda r: _event_uid("USD", r["Event"], r["datetime_utc"], HF_SOURCE_NAME), axis=1
+        lambda r: _event_uid(r["Currency"], r["Event"], r["datetime_utc"], HF_SOURCE_NAME), axis=1
     )
     out["ingested_at"] = now_iso
     out["source"] = HF_SOURCE_NAME
@@ -328,16 +353,18 @@ def _normalize_hf(df: pd.DataFrame) -> pd.DataFrame:
     return out.rename(columns={
         "Event": "event_name", "Actual": "actual_raw",
         "Forecast": "forecast_raw", "Previous": "previous_raw", "Detail": "source_detail",
+        "Currency": "currency",
     })[[
         "event_uid", "datetime_utc", "date_utc", "impact", "event_name", "macro_category",
         "actual_raw", "forecast_raw", "previous_raw", "actual_num", "forecast_num", "previous_num",
-        "unit", "source", "source_detail", "ingested_at",
-    ]].assign(currency="USD")
+        "unit", "source", "source_detail", "ingested_at", "currency",
+    ]]
 
 
-def ingest_hf_source(skip_download: bool = False, db_path: str = HIST_DB_PATH) -> int:
+def ingest_hf_source(skip_download: bool = False, db_path: str = HIST_DB_PATH,
+                      currencies: tuple = ("USD",), event_names: tuple | None = None) -> int:
     df = _load_hf_dataframe(skip_download)
-    norm = _normalize_hf(df)
+    norm = _normalize_hf(df, currencies=currencies, event_names=event_names)
 
     init_historical_db(db_path)
     inserted = 0
