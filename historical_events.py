@@ -47,6 +47,38 @@ HF_ROW_TOLERANCE = 0.05  # 5%: il dataset upstream potrebbe crescere/cambiare le
 
 EPSOFT_CSV_URL = "https://raw.githubusercontent.com/EPSOFT/dataset-forexfactory/master/events.csv"
 
+# Fonte 2 (2026-09-09): scrape ForexFactory INDIPENDENTE (autore diverso,
+# scraping separato) usato SOLO per colmare buchi veri della fonte
+# principale (HF, sopra) — mai per duplicare eventi già presenti altrove,
+# altrimenti lo stesso evento reale finirebbe contato due volte nelle
+# statistiche con due event_uid diversi. Verificato riga per riga: di 5
+# serie storicamente assenti dalla fonte HF (PCE headline, Unemployment
+# Rate, Retail Sales headline, Core CPI y/y, PPI y/y), questa fonte ne
+# copre 2 con continuità piena 2010-2023 (n=168 ciascuna) — le altre 3
+# restano assenti anche qui (probabilmente mai pubblicate da ForexFactory
+# come voci di calendario separate in quella forma esatta, non un limite
+# dello scraper). Vedi GITHUB_FF_EVENT_NAMES per l'elenco esatto ingerito.
+GITHUB_FF_BASE_URL = "https://raw.githubusercontent.com/spoluan/forex-factory-scraper/master/datasets/forex_factory_calendar_{year}.csv"
+GITHUB_FF_SOURCE_NAME = "github_ff_spoluan"
+GITHUB_FF_YEARS = range(2010, 2024)  # 2010-2023 incluso, unico range disponibile in questo repo
+
+# Ora locale nel CSV di questa fonte = UTC+8 FISSO (nessun DST proprio) —
+# verificato empiricamente su 3 eventi ricorrenti a orario noto (Core CPI
+# m/m, Retail Sales m/m, Unemployment Rate, tutti 8:30am ET real):
+# 9:30pm nei mesi EST (UTC-5, inverno) e 8:30pm nei mesi EDT (UTC-4,
+# estate) - 8:30am ET + 8h = 21:30/20:30, coerente su tutti i 12 mesi
+# testati. Non è un fuso reale del mondo con DST propria che si scontra
+# con quella USA - è un offset costante da sottrarre sempre allo stesso
+# modo, la variazione stagionale visibile nel dato arriva SOLO dal lato
+# USA (l'evento vero è definito a un orario locale USA fisso).
+GITHUB_FF_UTC_OFFSET_HOURS = 8
+
+# Solo questi due, quelli confermati mancanti dalla fonte principale E
+# presenti con continuità qui. Non ingeriamo l'intero calendario di questa
+# fonte: per tutti gli altri eventi la fonte HF resta primaria, mescolare
+# le due creerebbe duplicati dello stesso evento reale sotto due event_uid.
+GITHUB_FF_EVENT_NAMES = ("Unemployment Rate", "Retail Sales m/m")
+
 # Stesse chiavi di news_analyst.MACRO_DB — qui solo per etichettare, mai per
 # scartare righe: meglio salvare un superset ora che dover riscaricare tutto
 # in futuro per una categoria non prevista oggi.
@@ -61,6 +93,7 @@ CATEGORY_KEYWORDS = {
     "PCE":    ("pce", "personal consumption expenditures", "core pce"),
     "JOLTS":  ("jolts", "job openings"),
     "RETAIL": ("retail sales",),
+    "UNEMPLOYMENT": ("unemployment rate",),
 }
 
 # Suffisso unità -> moltiplicatore. "%" non viene scalato (4.2% -> 4.2, non 0.042):
@@ -323,6 +356,138 @@ def ingest_hf_source(skip_download: bool = False, db_path: str = HIST_DB_PATH) -
         )
 
     logger.info(f"Inserite {inserted:,} righe nuove (le altre erano già presenti, idempotente)")
+    return inserted
+
+
+def _load_github_ff_dataframe(skip_download: bool = False) -> pd.DataFrame:
+    """Scarica (o riusa) i 14 CSV annuali 2010-2023 della fonte 2 e li concatena."""
+    frames = []
+    for year in GITHUB_FF_YEARS:
+        dest = RAW_DIR / f"github_ff_spoluan_{year}.csv"
+        if not (skip_download and dest.exists()):
+            _download(GITHUB_FF_BASE_URL.format(year=year), dest, min_size_bytes=100_000)
+        df = pd.read_csv(dest)
+        expected_cols = {"Date", "Time", "Currency", "Event", "Impact", "Actual", "Forecast", "Previous"}
+        missing = expected_cols - set(df.columns)
+        if missing:
+            raise ValueError(f"Schema github_ff cambiato per {year}, colonne mancanti: {missing}")
+        frames.append(df)
+    out = pd.concat(frames, ignore_index=True)
+    logger.info(f"github_ff: {len(out):,} righe grezze lette (2010-2023)")
+    return out
+
+
+def _normalize_github_ff(df: pd.DataFrame) -> pd.DataFrame:
+    out = df[
+        (df["Currency"] == "USD") & (df["Event"].isin(GITHUB_FF_EVENT_NAMES))
+    ].copy()
+    logger.info(f"github_ff: {len(out):,} righe USD nei nomi target dopo il filtro")
+
+    # Ora locale del CSV -> UTC: offset fisso, vedi commento su
+    # GITHUB_FF_UTC_OFFSET_HOURS. "Date"+"Time" invece di "Combined
+    # DateTime" perché quest'ultima è già una stringa pre-formattata nello
+    # stesso fuso locale, nessun vantaggio a parsarla invece delle due
+    # colonne separate.
+    naive_local = pd.to_datetime(out["Date"] + " " + out["Time"], format="%Y-%m-%d %I:%M%p", errors="coerce")
+    bad_time = naive_local.isna()
+    if bad_time.any():
+        logger.info(f"github_ff: {bad_time.sum():,} righe con orario non parsabile scartate")
+    out = out[~bad_time]
+    naive_local = naive_local[~bad_time]
+    # tz_localize("UTC") esplicito: senza, il timestamp resta naive e
+    # .isoformat() più sotto produce una stringa senza suffisso +00:00 —
+    # historical_features.py si aspetta timestamp UTC-aware (stesso
+    # formato prodotto da _normalize_hf via pd.to_datetime(..., utc=True)),
+    # altrimenti il parsing fallisce su queste righe (trovato testando la
+    # pipeline end-to-end).
+    out["datetime_utc"] = (naive_local - pd.Timedelta(hours=GITHUB_FF_UTC_OFFSET_HOURS)).dt.tz_localize("UTC")
+
+    # FIX scraper (verificato 2026-09-09): lo scrape annuale include a
+    # volte, in coda al file, un report di gennaio dell'ANNO SUCCESSIVO ma
+    # etichettato con l'anno del file corrente (stesso giorno/mese, anno
+    # sbagliato) — un doppione con valori IDENTICI a quelli del report
+    # corretto dell'anno giusto, solo con la data sbagliata. Il BLS
+    # Employment Situation (Unemployment Rate) esce SEMPRE di venerdì:
+    # ogni riga che cade su un altro giorno della settimana è uno di questi
+    # doppioni mal datati, scartata. Verificato su tutte le occorrenze
+    # 2010-2023: sempre e solo eventi extra fuori-venerdì, mai un venerdì
+    # vero perso nel filtro.
+    is_unemployment = out["Event"] == "Unemployment Rate"
+    not_friday = out["datetime_utc"].dt.dayofweek != 4  # 4 = venerdì
+    bad_dupe = is_unemployment & not_friday
+    if bad_dupe.any():
+        logger.info(f"github_ff: {bad_dupe.sum():,} righe Unemployment Rate fuori-venerdì (doppioni mal datati) scartate")
+    out = out[~bad_dupe]
+
+    out["date_utc"] = out["datetime_utc"].dt.strftime("%Y-%m-%d")
+    out["datetime_utc"] = out["datetime_utc"].apply(lambda ts: ts.isoformat())
+
+    parsed = out["Actual"].apply(_parse_number)
+    out["actual_num"], out["unit_actual"] = zip(*parsed) if len(parsed) else ([], [])
+    parsed = out["Forecast"].apply(_parse_number)
+    out["forecast_num"], out["unit_forecast"] = zip(*parsed) if len(parsed) else ([], [])
+    parsed = out["Previous"].apply(_parse_number)
+    out["previous_num"], out["unit_previous"] = zip(*parsed) if len(parsed) else ([], [])
+    out["unit"] = out["unit_actual"].combine_first(out["unit_forecast"]).combine_first(out["unit_previous"])
+
+    out["macro_category"] = out["Event"].apply(_tag_category)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    out["event_uid"] = out.apply(
+        lambda r: _event_uid("USD", r["Event"], r["datetime_utc"], GITHUB_FF_SOURCE_NAME), axis=1
+    )
+    out["ingested_at"] = now_iso
+    out["source"] = GITHUB_FF_SOURCE_NAME
+    out["source_detail"] = None
+    out["impact"] = "HIGH"
+
+    return out.rename(columns={
+        "Event": "event_name", "Actual": "actual_raw",
+        "Forecast": "forecast_raw", "Previous": "previous_raw",
+    })[[
+        "event_uid", "datetime_utc", "date_utc", "impact", "event_name", "macro_category",
+        "actual_raw", "forecast_raw", "previous_raw", "actual_num", "forecast_num", "previous_num",
+        "unit", "source", "source_detail", "ingested_at",
+    ]].assign(currency="USD")
+
+
+def ingest_github_ff_source(skip_download: bool = False, db_path: str = HIST_DB_PATH) -> int:
+    df = _load_github_ff_dataframe(skip_download)
+    norm = _normalize_github_ff(df)
+
+    init_historical_db(db_path)
+    inserted = 0
+    with _connect(db_path) as conn:
+        for row in norm.itertuples(index=False):
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO macro_events (
+                    event_uid, datetime_utc, date_utc, currency, impact, event_name,
+                    macro_category, actual_raw, forecast_raw, previous_raw,
+                    actual_num, forecast_num, previous_num, unit, source, source_detail, ingested_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    row.event_uid, row.datetime_utc, row.date_utc, row.currency, row.impact,
+                    row.event_name, row.macro_category, row.actual_raw, row.forecast_raw, row.previous_raw,
+                    row.actual_num, row.forecast_num, row.previous_num, row.unit,
+                    row.source, row.source_detail, row.ingested_at,
+                ),
+            )
+            inserted += cur.rowcount
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        date_min, date_max = norm["date_utc"].min(), norm["date_utc"].max()
+        conn.execute(
+            "INSERT OR IGNORE INTO macro_events_coverage "
+            "(source, range_start_utc, range_end_utc, row_count, ingested_at, notes) VALUES (?,?,?,?,?,?)",
+            (
+                GITHUB_FF_SOURCE_NAME, date_min, date_max, len(norm), now_iso,
+                "GitHub spoluan/forex-factory-scraper, solo Unemployment Rate + Retail Sales m/m "
+                "(buchi veri della fonte HF principale)",
+            ),
+        )
+
+    logger.info(f"github_ff: inserite {inserted:,} righe nuove (le altre erano già presenti, idempotente)")
     return inserted
 
 
