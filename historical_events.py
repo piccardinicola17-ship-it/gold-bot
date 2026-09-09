@@ -48,16 +48,28 @@ HF_ROW_TOLERANCE = 0.05  # 5%: il dataset upstream potrebbe crescere/cambiare le
 EPSOFT_CSV_URL = "https://raw.githubusercontent.com/EPSOFT/dataset-forexfactory/master/events.csv"
 
 # Fonte 2 (2026-09-09): scrape ForexFactory INDIPENDENTE (autore diverso,
-# scraping separato) usato SOLO per colmare buchi veri della fonte
-# principale (HF, sopra) — mai per duplicare eventi già presenti altrove,
-# altrimenti lo stesso evento reale finirebbe contato due volte nelle
-# statistiche con due event_uid diversi. Verificato riga per riga: di 5
-# serie storicamente assenti dalla fonte HF (PCE headline, Unemployment
-# Rate, Retail Sales headline, Core CPI y/y, PPI y/y), questa fonte ne
-# copre 2 con continuità piena 2010-2023 (n=168 ciascuna) — le altre 3
-# restano assenti anche qui (probabilmente mai pubblicate da ForexFactory
-# come voci di calendario separate in quella forma esatta, non un limite
-# dello scraper). Vedi GITHUB_FF_EVENT_NAMES per l'elenco esatto ingerito.
+# scraping separato) usato per colmare i buchi della fonte principale (HF,
+# sopra) — sia i 5 buchi veri (assenti del tutto da HF) sia le serie con
+# "dati insufficienti" (presenti in HF ma con uno storico troncato, es.
+# fermate a un certo anno). MAI per duplicare un evento reale già coperto
+# da HF per la stessa data: vedi _filter_to_gap_dates, che tiene solo le
+# date NON già presenti in macro_events per quello stesso event_name,
+# indipendentemente dalla fonte — altrimenti lo stesso rilascio reale
+# finirebbe contato due volte nelle statistiche con due event_uid diversi.
+#
+# Estensione 2026-09-09 (seconda ondata, su richiesta esplicita di
+# copertura massima): oltre a Unemployment Rate/Retail Sales m/m (già
+# integrate, nessun edge dopo validazione — vedi memoria progetto), questa
+# fonte copre con continuità 2010-2023 anche gran parte delle serie oggi
+# "dati insufficienti": Non-Farm Employment Change (n=174, il più
+# importante recuperato — HF si fermava al 2015 con n=59), PPI m/m,
+# Federal Funds Rate, Existing Home Sales, TIC Long-Term Purchases,
+# Building Permits, Core PCE Price Index m/m, GDP (Advance/Prelim/Final),
+# Average Hourly Earnings m/m, JOLTS Job Openings, Core PPI m/m, New Home
+# Sales, Philly Fed Manufacturing Index, Pending Home Sales m/m, Core
+# Durable Goods Orders m/m, Empire State Manufacturing Index, Trade
+# Balance. Le 3 serie mai trovate in nessuna fonte (PCE headline non-core,
+# Core CPI y/y, PPI y/y) restano fuori, non ingeribili da qui.
 GITHUB_FF_BASE_URL = "https://raw.githubusercontent.com/spoluan/forex-factory-scraper/master/datasets/forex_factory_calendar_{year}.csv"
 GITHUB_FF_SOURCE_NAME = "github_ff_spoluan"
 GITHUB_FF_YEARS = range(2010, 2024)  # 2010-2023 incluso, unico range disponibile in questo repo
@@ -73,11 +85,26 @@ GITHUB_FF_YEARS = range(2010, 2024)  # 2010-2023 incluso, unico range disponibil
 # USA (l'evento vero è definito a un orario locale USA fisso).
 GITHUB_FF_UTC_OFFSET_HOURS = 8
 
-# Solo questi due, quelli confermati mancanti dalla fonte principale E
+# Solo questi, quelli verificati mancanti/troncati nella fonte principale E
 # presenti con continuità qui. Non ingeriamo l'intero calendario di questa
-# fonte: per tutti gli altri eventi la fonte HF resta primaria, mescolare
-# le due creerebbe duplicati dello stesso evento reale sotto due event_uid.
-GITHUB_FF_EVENT_NAMES = ("Unemployment Rate", "Retail Sales m/m")
+# fonte: per tutti gli altri eventi la fonte HF resta primaria.
+GITHUB_FF_EVENT_NAMES = (
+    "Unemployment Rate", "Retail Sales m/m", "Non-Farm Employment Change",
+    "PPI m/m", "Federal Funds Rate", "Existing Home Sales",
+    "TIC Long-Term Purchases", "Building Permits", "Core PCE Price Index m/m",
+    "Advance GDP q/q", "Prelim GDP q/q", "Final GDP q/q",
+    "Average Hourly Earnings m/m", "JOLTS Job Openings", "Core PPI m/m",
+    "New Home Sales", "Philly Fed Manufacturing Index", "Pending Home Sales m/m",
+    "Core Durable Goods Orders m/m", "Empire State Manufacturing Index",
+    "Trade Balance",
+)
+
+# Bug scraper generico (non solo su Unemployment Rate, vedi commento più
+# sotto in _normalize_github_ff): entro questa finestra due rilasci della
+# stessa serie sono quasi certamente lo stesso evento reale duplicato con
+# una data sbagliata, mai due rilasci mensili legittimi (anche i più
+# ravvicinati, es. GDP trimestrale, distano molto di più).
+GITHUB_FF_DUPLICATE_WINDOW_DAYS = 15
 
 # Stesse chiavi di news_analyst.MACRO_DB — qui solo per etichettare, mai per
 # scartare righe: meglio salvare un superset ora che dover riscaricare tutto
@@ -360,14 +387,17 @@ def ingest_hf_source(skip_download: bool = False, db_path: str = HIST_DB_PATH) -
 
 
 def _load_github_ff_dataframe(skip_download: bool = False) -> pd.DataFrame:
-    """Scarica (o riusa) i 14 CSV annuali 2010-2023 della fonte 2 e li concatena."""
+    """Scarica (o riusa) i 14 CSV annuali 2010-2023 della fonte 2 e li concatena.
+    L'indice risultante preserva l'ordine di riga originale (anno per anno,
+    poi dentro ogni anno l'ordine del file) — usato in _normalize_github_ff
+    per distinguere una riga "fuori posto" (bug scraper) da quella corretta."""
     frames = []
     for year in GITHUB_FF_YEARS:
         dest = RAW_DIR / f"github_ff_spoluan_{year}.csv"
         if not (skip_download and dest.exists()):
             _download(GITHUB_FF_BASE_URL.format(year=year), dest, min_size_bytes=100_000)
         df = pd.read_csv(dest)
-        expected_cols = {"Date", "Time", "Currency", "Event", "Impact", "Actual", "Forecast", "Previous"}
+        expected_cols = {"Combined DateTime", "Currency", "Event", "Impact", "Actual", "Forecast", "Previous"}
         missing = expected_cols - set(df.columns)
         if missing:
             raise ValueError(f"Schema github_ff cambiato per {year}, colonne mancanti: {missing}")
@@ -377,18 +407,23 @@ def _load_github_ff_dataframe(skip_download: bool = False) -> pd.DataFrame:
     return out
 
 
-def _normalize_github_ff(df: pd.DataFrame) -> pd.DataFrame:
+def _normalize_github_ff(df: pd.DataFrame, existing_dates: dict[str, set] | None = None) -> pd.DataFrame:
+    """existing_dates: {event_name: {date_utc gia' presenti in macro_events
+    per QUALSIASI fonte}} — se passato, tiene solo le righe che colmano un
+    vero buco (data non ancora coperta), per non duplicare lo stesso
+    rilascio reale sotto un secondo event_uid quando la fonte HF lo copre
+    già per quella data."""
     out = df[
         (df["Currency"] == "USD") & (df["Event"].isin(GITHUB_FF_EVENT_NAMES))
     ].copy()
     logger.info(f"github_ff: {len(out):,} righe USD nei nomi target dopo il filtro")
 
-    # Ora locale del CSV -> UTC: offset fisso, vedi commento su
-    # GITHUB_FF_UTC_OFFSET_HOURS. "Date"+"Time" invece di "Combined
-    # DateTime" perché quest'ultima è già una stringa pre-formattata nello
-    # stesso fuso locale, nessun vantaggio a parsarla invece delle due
-    # colonne separate.
-    naive_local = pd.to_datetime(out["Date"] + " " + out["Time"], format="%Y-%m-%d %I:%M%p", errors="coerce")
+    # "Combined DateTime" invece di "Date"+"Time" separate: più robusta.
+    # Trovato un giorno bisestile (29 feb 2012) dove la colonna "Date" da
+    # sola contiene "Wed Feb 29" invece di "2012-02-29" (bug di formattazione
+    # dello scraper solo su quel tipo di riga) — "Combined DateTime" resta
+    # invece sempre nel formato standard anche lì, verificato.
+    naive_local = pd.to_datetime(out["Combined DateTime"], format="%Y-%m-%d %H:%M:%S", errors="coerce")
     bad_time = naive_local.isna()
     if bad_time.any():
         logger.info(f"github_ff: {bad_time.sum():,} righe con orario non parsabile scartate")
@@ -402,22 +437,38 @@ def _normalize_github_ff(df: pd.DataFrame) -> pd.DataFrame:
     # pipeline end-to-end).
     out["datetime_utc"] = (naive_local - pd.Timedelta(hours=GITHUB_FF_UTC_OFFSET_HOURS)).dt.tz_localize("UTC")
 
-    # FIX scraper (verificato 2026-09-09): lo scrape annuale include a
-    # volte, in coda al file, un report di gennaio dell'ANNO SUCCESSIVO ma
-    # etichettato con l'anno del file corrente (stesso giorno/mese, anno
-    # sbagliato) — un doppione con valori IDENTICI a quelli del report
-    # corretto dell'anno giusto, solo con la data sbagliata. Il BLS
-    # Employment Situation (Unemployment Rate) esce SEMPRE di venerdì:
-    # ogni riga che cade su un altro giorno della settimana è uno di questi
-    # doppioni mal datati, scartata. Verificato su tutte le occorrenze
-    # 2010-2023: sempre e solo eventi extra fuori-venerdì, mai un venerdì
-    # vero perso nel filtro.
-    is_unemployment = out["Event"] == "Unemployment Rate"
-    not_friday = out["datetime_utc"].dt.dayofweek != 4  # 4 = venerdì
-    bad_dupe = is_unemployment & not_friday
-    if bad_dupe.any():
-        logger.info(f"github_ff: {bad_dupe.sum():,} righe Unemployment Rate fuori-venerdì (doppioni mal datati) scartate")
-    out = out[~bad_dupe]
+    # FIX scraper GENERICO (esteso 2026-09-09 da un caso singolo su
+    # Unemployment Rate a tutte le serie mensili/trimestrali): lo scrape
+    # annuale include a volte, in coda al file, un rilascio dell'ANNO
+    # SUCCESSIVO ma etichettato con l'anno del file corrente (stesso
+    # giorno/mese, anno sbagliato) — un doppione con valori quasi identici
+    # al rilascio corretto, solo con la data sbagliata. Nessun evento
+    # mensile/trimestrale legittimo si ripete entro
+    # GITHUB_FF_DUPLICATE_WINDOW_DAYS — quando succede, è questo bug.
+    # L'artefatto è SEMPRE quello aggiunto fuori sequenza in coda al file
+    # (indice di riga originale più alto, indipendentemente dalla data che
+    # porta) — teniamo quindi la riga con indice di riga più BASSO in ogni
+    # coppia ravvicinata, scartiamo l'altra. Verificato su Unemployment
+    # Rate/Non-Farm Employment Change/Average Hourly Earnings (stesso
+    # report BLS, stesso bug su tutte e tre) che questo non scarta mai un
+    # rilascio vero.
+    dupe_mask = pd.Series(False, index=out.index)
+    for event_name, group in out.groupby("Event"):
+        # L'indice di riga (da pd.concat(..., ignore_index=True) su file
+        # letti in ordine 2010->2023) riflette già l'ordine originale di
+        # riga: valore più alto = comparso più avanti/fuori sequenza nel
+        # file. Ordinare per data serve solo a trovare le coppie vicine.
+        g = group.sort_values("datetime_utc")
+        gap_days = g["datetime_utc"].diff().dt.total_seconds() / 86400
+        idx = g.index.to_numpy()
+        for i in range(1, len(g)):
+            if gap_days.iloc[i] < GITHUB_FF_DUPLICATE_WINDOW_DAYS:
+                a, b = idx[i - 1], idx[i]
+                loser = a if a > b else b
+                dupe_mask[loser] = True
+    if dupe_mask.any():
+        logger.info(f"github_ff: {int(dupe_mask.sum()):,} righe scartate come doppioni ravvicinati (<{GITHUB_FF_DUPLICATE_WINDOW_DAYS}gg, bug scraper)")
+    out = out[~dupe_mask]
 
     out["date_utc"] = out["datetime_utc"].dt.strftime("%Y-%m-%d")
     out["datetime_utc"] = out["datetime_utc"].apply(lambda ts: ts.isoformat())
@@ -440,7 +491,7 @@ def _normalize_github_ff(df: pd.DataFrame) -> pd.DataFrame:
     out["source_detail"] = None
     out["impact"] = "HIGH"
 
-    return out.rename(columns={
+    out = out.rename(columns={
         "Event": "event_name", "Actual": "actual_raw",
         "Forecast": "forecast_raw", "Previous": "previous_raw",
     })[[
@@ -449,10 +500,41 @@ def _normalize_github_ff(df: pd.DataFrame) -> pd.DataFrame:
         "unit", "source", "source_detail", "ingested_at",
     ]].assign(currency="USD")
 
+    if existing_dates is not None:
+        before = len(out)
+        keep = out.apply(
+            lambda r: r["date_utc"] not in existing_dates.get(r["event_name"], set()), axis=1
+        )
+        out = out[keep]
+        logger.info(
+            f"github_ff: {before - len(out):,} righe scartate perché la data era già coperta "
+            f"da un'altra fonte per lo stesso evento (gap-filling, mai duplicati)"
+        )
+
+    return out
+
+
+def _existing_dates_by_event(event_names: tuple, db_path: str = HIST_DB_PATH) -> dict[str, set]:
+    """Date già coperte in macro_events per ciascun event_name, a prescindere
+    dalla fonte — usato per limitare l'ingestione della fonte 2 ai soli buchi
+    veri (mai ri-coprire una data che HF ha già)."""
+    init_historical_db(db_path)
+    out: dict[str, set] = {name: set() for name in event_names}
+    with _connect(db_path) as conn:
+        placeholders = ",".join("?" for _ in event_names)
+        rows = conn.execute(
+            f"SELECT event_name, date_utc FROM macro_events WHERE event_name IN ({placeholders})",
+            event_names,
+        ).fetchall()
+    for row in rows:
+        out.setdefault(row["event_name"], set()).add(row["date_utc"])
+    return out
+
 
 def ingest_github_ff_source(skip_download: bool = False, db_path: str = HIST_DB_PATH) -> int:
+    existing_dates = _existing_dates_by_event(GITHUB_FF_EVENT_NAMES, db_path)
     df = _load_github_ff_dataframe(skip_download)
-    norm = _normalize_github_ff(df)
+    norm = _normalize_github_ff(df, existing_dates=existing_dates)
 
     init_historical_db(db_path)
     inserted = 0
