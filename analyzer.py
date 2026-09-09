@@ -27,7 +27,14 @@ TIMEZONE       = pytz.timezone("Europe/Rome")
 _data_cache = {}  # {interval: (timestamp_unix, dataframe)}
 _price_cache = {"timestamp": 0, "price": 0.0}
 _data_fail_cache = {}  # {interval: timestamp_unix ultimo fallimento totale}
-_FAIL_BACKOFF = 30  # secondi di pausa dopo un fallimento totale su un TF
+# 2026-09-09: era 30s. Con yfinance rate-limitato e Stooq bloccato da una
+# verifica anti-bot lato loro (entrambi fuori dal nostro controllo), un
+# backoff di 30s permetteva a get_multi_timeframe_data() e ai vari motori
+# di ri-tentare lo stesso timeframe più volte all'interno di un solo ciclo
+# da 5 minuti, cascando ripetutamente su Twelve Data. Allineato al ciclo di
+# auto_check_all_timeframes (5 min): al massimo un tentativo pieno per
+# timeframe per ciclo, invece di diversi.
+_FAIL_BACKOFF = 300  # secondi di pausa dopo un fallimento totale su un TF
 
 # Timestamp dell'ultimo fetch candele riuscito, su QUALSIASI timeframe/fonte.
 # Inizializzato a "ora" (non 0) per non generare un falso allarme "cieco" nei
@@ -47,8 +54,31 @@ def seconds_since_last_data_success() -> float:
 _twelvedata_blocked_until = 0.0
 
 
-def _twelvedata_quota_exceeded(exc: Exception) -> bool:
+def _twelvedata_quota_exceeded(exc) -> bool:
+    """Accetta sia un'eccezione (get_data) che una stringa messaggio
+    (_twelvedata_price) — entrambe portano il testo di errore di Twelve
+    Data da controllare."""
     return "api credits" in str(exc).lower()
+
+
+def _twelvedata_available() -> bool:
+    return time.time() >= _twelvedata_blocked_until
+
+
+def _mark_twelvedata_blocked() -> None:
+    """Sospende Twelve Data fino a mezzanotte UTC — condivisa da tutte le
+    funzioni che lo usano (get_data, get_current_price, get_dxy_price,
+    get_us10y_price), non solo da get_data(): trovato in produzione che le
+    altre tre continuavano a richiamare Twelve Data anche dopo che get_data()
+    aveva già rilevato la quota esaurita (i log mostrano il contatore
+    "crediti usati" salire anche sulle chiamate rifiutate), sprecando
+    ulteriori chiamate senza alcun beneficio."""
+    global _twelvedata_blocked_until
+    _twelvedata_blocked_until = time.time() + _seconds_until_utc_midnight()
+    logger.warning(
+        f"Twelve Data: quota esaurita, sospesa per "
+        f"{(_twelvedata_blocked_until - time.time()) / 3600:.1f}h (fino a mezzanotte UTC)"
+    )
 
 
 def _seconds_until_utc_midnight() -> float:
@@ -202,7 +232,7 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
     che li ri-scarica tutti per ciascuno, senza backoff un blackout
     diventa decine di tentativi falliti al minuto.
     """
-    global _twelvedata_blocked_until, _last_data_success_ts
+    global _last_data_success_ts
     now = time.time()
     cache_key = (interval, outputsize)
     cached = _data_cache.get(cache_key)
@@ -221,7 +251,7 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
         ("yfinance", lambda: _fetch_yfinance(interval, outputsize)),
         ("Stooq",    lambda: _fetch_stooq(interval, outputsize)),
     ]
-    if now >= _twelvedata_blocked_until:
+    if _twelvedata_available():
         sources.append(("Twelve Data", lambda: _fetch_twelvedata(interval, outputsize)))
 
     for attempt in (1, 2):
@@ -236,11 +266,7 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
                     return df.copy()
             except Exception as e:
                 if name == "Twelve Data" and _twelvedata_quota_exceeded(e):
-                    _twelvedata_blocked_until = now + _seconds_until_utc_midnight()
-                    logger.warning(
-                        f"Twelve Data: quota esaurita, sospesa per "
-                        f"{(_twelvedata_blocked_until - now) / 3600:.1f}h (fino a mezzanotte UTC)"
-                    )
+                    _mark_twelvedata_blocked()
                 logger.warning(f"{name} fallito per {interval} (tentativo {attempt}/2): {e}")
         if attempt == 1:
             time.sleep(3)
@@ -254,11 +280,38 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
     raise ValueError(f"Nessun dato disponibile per {interval}")
 
 
+def _twelvedata_price(symbol: str) -> float:
+    """Helper condiviso per l'endpoint /price di Twelve Data. Rispetta lo
+    stesso blocco quota di get_data() (_twelvedata_blocked_until) — prima
+    get_current_price/get_dxy_price/get_us10y_price avevano una copia
+    propria che non lo controllava affatto, continuando a chiamare Twelve
+    Data anche quando get_data() aveva già rilevato la quota esaurita
+    (trovato in produzione il 2026-09-09: il contatore "crediti usati"
+    nella risposta di errore sale anche sulle chiamate rifiutate, quindi
+    ogni chiamata inutile in più peggiora la situazione senza alcun
+    beneficio). Stesso pattern di bug delle altre volte in questo codebase:
+    due copie della stessa logica che divergono nel tempo."""
+    if not _twelvedata_available():
+        return 0.0
+    try:
+        r = requests.get(
+            "https://api.twelvedata.com/price",
+            params={"symbol": symbol, "apikey": TWELVE_API_KEY},
+            timeout=5,
+        )
+        data = r.json()
+        if _twelvedata_quota_exceeded(str(data.get("message", ""))):
+            _mark_twelvedata_blocked()
+            return 0.0
+        return float(data.get("price", 0))
+    except Exception:
+        return 0.0
+
+
 def get_current_price() -> float:
     """Prezzo live XAU/USD. yfinance primario, Twelve Data fallback."""
-    import time
     now = time.time()
-    if now - _price_cache["timestamp"] < 30 and _price_cache["price"] > 100:
+    if now - _price_cache["timestamp"] < 90 and _price_cache["price"] > 100:
         return _price_cache["price"]
 
     try:
@@ -271,19 +324,11 @@ def get_current_price() -> float:
     except Exception:
         pass
 
-    try:
-        r = requests.get(
-            "https://api.twelvedata.com/price",
-            params={"symbol":"XAU/USD","apikey":TWELVE_API_KEY},
-            timeout=5
-        )
-        price = float(r.json()["price"])
-        if price > 0:
-            _price_cache["price"] = price
-            _price_cache["timestamp"] = now
-            return price
-    except Exception:
-        pass
+    price = _twelvedata_price("XAU/USD")
+    if price > 0:
+        _price_cache["price"] = price
+        _price_cache["timestamp"] = now
+        return price
 
     return _price_cache["price"]
 
@@ -294,12 +339,7 @@ def get_dxy_price() -> float:
         import yfinance as yf
         return float(yf.Ticker("DX-Y.NYB").fast_info.last_price or 0)
     except Exception:
-        try:
-            r = requests.get("https://api.twelvedata.com/price",
-                params={"symbol":"DXY","apikey":TWELVE_API_KEY},timeout=5)
-            return float(r.json().get("price",0))
-        except Exception:
-            return 0.0
+        return _twelvedata_price("DXY")
 
 
 def get_us10y_price() -> float:
@@ -308,12 +348,7 @@ def get_us10y_price() -> float:
         import yfinance as yf
         return float(yf.Ticker("TLT").fast_info.last_price or 0)
     except Exception:
-        try:
-            r = requests.get("https://api.twelvedata.com/price",
-                params={"symbol":"TLT","apikey":TWELVE_API_KEY},timeout=5)
-            return float(r.json().get("price",0))
-        except Exception:
-            return 0.0
+        return _twelvedata_price("TLT")
 
 
 def get_multi_timeframe_data() -> dict:
