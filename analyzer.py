@@ -247,13 +247,22 @@ def _fetch_binance_paxg(interval: str, outputsize: int) -> pd.DataFrame:
     l'entry/SL/TP di un trade reale (resta un proxy, non lo spot esatto)
     — qui serve solo a tenere il bot vivo (candele per gli indicatori)
     quando le fonti "vere" sono giù insieme.
+
+    Host data-api.binance.vision, NON api.binance.com: il dominio
+    principale risponde 451 "Unavailable For Legal Reasons" dalla region
+    US di Railway (sfo) — scoperto SOLO in produzione, il test locale
+    (da IP non-US) aveva funzionato. data-api.binance.vision è il
+    sottodominio ufficiale di Binance dedicato ai soli dati di mercato
+    pubblici (nessun trading), esplicitamente pensato per restare
+    accessibile anche dove il dominio principale è geo-bloccato —
+    stessa identica API/risposta, verificato anche da IP US.
     """
     binance_interval = _BINANCE_INTERVAL_MAP.get(interval)
     if binance_interval is None:
         raise ValueError(f"Binance: intervallo non supportato {interval}")
 
     r = requests.get(
-        "https://api.binance.com/api/v3/klines",
+        "https://data-api.binance.vision/api/v3/klines",
         params={"symbol": "PAXGUSDT", "interval": binance_interval, "limit": min(outputsize, 1000)},
         timeout=10,
     )
@@ -374,11 +383,13 @@ def _twelvedata_price(symbol: str) -> float:
 
 def _binance_paxg_price() -> float:
     """Prezzo spot PAXG/USDT via Binance — vedi _fetch_binance_paxg per
-    il perché è un proxy affidabile. Usa l'endpoint /price (un singolo
-    numero, non klines) per un fetch più leggero."""
+    il perché è un proxy affidabile e per l'host data-api.binance.vision
+    (non api.binance.com, geo-bloccato dalla region US di Railway). Usa
+    l'endpoint /price (un singolo numero, non klines) per un fetch più
+    leggero."""
     try:
         r = requests.get(
-            "https://api.binance.com/api/v3/ticker/price",
+            "https://data-api.binance.vision/api/v3/ticker/price",
             params={"symbol": "PAXGUSDT"},
             timeout=5,
         )
