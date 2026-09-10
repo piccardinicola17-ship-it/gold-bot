@@ -165,8 +165,18 @@ def _fetch_twelvedata(interval: str, outputsize: int) -> pd.DataFrame:
 
 def _fetch_stooq(interval: str, outputsize: int) -> pd.DataFrame:
     """
-    Stooq.com — fonte storica gratuita, funziona da Railway.
-    Supporta dati daily e intraday per XAUUSD.
+    Stooq.com — TENUTA SOLO COME ULTIMISSIMA RISORSA, non più affidabile.
+    Dal 2026-09 Stooq ha attivato una verifica anti-bot con proof-of-work
+    JavaScript (risposta HTML con uno script che calcola un hash SHA-256 e
+    lo posta a /__verify prima di servire il CSV vero) su OGNI endpoint
+    intraday e daily — verificato che il blocco è GLOBALE (stesso
+    risultato da IP completamente diversi, non solo Railway), quindi non
+    è un problema di reputazione IP che si risolve da solo. Non c'è un
+    modo onesto di superarlo (eseguire il loro JS per aggirarlo sarebbe
+    esattamente il tipo di anti-bot bypass da evitare). Rimossa dalla
+    cascata principale di get_data() (sostituita da Binance PAXG, vedi
+    _fetch_binance_paxg sotto) — la funzione resta solo per non rompere
+    eventuali chiamate dirette residue, ma fallirà sempre.
     """
     # Stooq usa periodi fissi, non outputsize — prendiamo il massimo e tronchiamo
     stooq_interval = {
@@ -214,12 +224,66 @@ def _fetch_stooq(interval: str, outputsize: int) -> pd.DataFrame:
     return df
 
 
+_BINANCE_INTERVAL_MAP = {
+    "1min": "1m", "5min": "5m", "15min": "15m",
+    "1h": "1h", "4h": "4h", "1day": "1d",
+}
+
+
+def _fetch_binance_paxg(interval: str, outputsize: int) -> pd.DataFrame:
+    """
+    Binance — PAXG/USDT (PAX Gold, token backed 1:1 da un'oncia troy di
+    oro fisico in caveau, quotato in USDT ~1:1 col dollaro). Aggiunta
+    2026-09-10 per rimpiazzare Stooq (rotto, vedi _fetch_stooq sopra) come
+    secondo anello della cascata, tra yfinance e Twelve Data.
+
+    Perché è una buona fonte di emergenza: API pubblica, NESSUNA chiave,
+    NESSUNA registrazione, rate limit generosissimo (peso usato ~3 su un
+    budget di 6000/min — verificato in produzione), intervalli nativi
+    (non serve ricampionare come per Stooq/Twelve Data su "4h"). Basis
+    verificato contro il prezzo XAU/USD reale del bot: differenza di
+    pochi dollari su ~4400 (~0.1-0.3%), stesso ordine di grandezza dello
+    scostamento GC=F-vs-spot già accettato per yfinance. NON usare per
+    l'entry/SL/TP di un trade reale (resta un proxy, non lo spot esatto)
+    — qui serve solo a tenere il bot vivo (candele per gli indicatori)
+    quando le fonti "vere" sono giù insieme.
+    """
+    binance_interval = _BINANCE_INTERVAL_MAP.get(interval)
+    if binance_interval is None:
+        raise ValueError(f"Binance: intervallo non supportato {interval}")
+
+    r = requests.get(
+        "https://api.binance.com/api/v3/klines",
+        params={"symbol": "PAXGUSDT", "interval": binance_interval, "limit": min(outputsize, 1000)},
+        timeout=10,
+    )
+    r.raise_for_status()
+    raw = r.json()
+    if not raw:
+        raise ValueError(f"Binance: nessun dato per {interval}")
+
+    df = pd.DataFrame(raw, columns=[
+        "open_time", "Open", "High", "Low", "Close", "Volume",
+        "close_time", "quote_volume", "n_trades", "taker_base", "taker_quote", "ignore",
+    ])
+    df.index = pd.to_datetime(df["open_time"], unit="ms")
+    df = df[["Open", "High", "Low", "Close", "Volume"]].astype(float)
+    df.sort_index(inplace=True)
+    df.dropna(inplace=True)
+    return df
+
+
 def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFrame:
     """
     Scarica candele XAU/USD con 3 fonti in cascata.
-    1. yfinance — GC=F futures (gratuito, se non bloccato dall'IP Railway)
-    2. Stooq (gratuito, funziona da server)
-    3. Twelve Data (a pagamento, fallback finale)
+    1. yfinance — GC=F futures (gratuito, ma Yahoo rate-limita a volte
+       l'IP condiviso di Railway — non prevedibile, non risolvibile lato
+       nostro)
+    2. Binance PAXG/USDT (gratuito, nessuna chiave, rate limit
+       generosissimo — sostituisce Stooq dal 2026-09-10, bloccato da una
+       verifica anti-bot JS globale e irreversibile, vedi _fetch_stooq)
+    3. Twelve Data (quota gratuita molto scarsa, fallback finale — se
+       esaurita resta bloccata fino a mezzanotte UTC)
 
     Se TUTTE le fonti falliscono nello stesso giro (es. rate limit
     transitorio dopo diversi download pesanti di fila, come in
@@ -248,8 +312,8 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
             raise ValueError(f"Nessun dato disponibile per {interval} (backoff dopo fallimento recente)")
 
     sources = [
-        ("yfinance", lambda: _fetch_yfinance(interval, outputsize)),
-        ("Stooq",    lambda: _fetch_stooq(interval, outputsize)),
+        ("yfinance",     lambda: _fetch_yfinance(interval, outputsize)),
+        ("Binance PAXG", lambda: _fetch_binance_paxg(interval, outputsize)),
     ]
     if _twelvedata_available():
         sources.append(("Twelve Data", lambda: _fetch_twelvedata(interval, outputsize)))
@@ -308,8 +372,25 @@ def _twelvedata_price(symbol: str) -> float:
         return 0.0
 
 
+def _binance_paxg_price() -> float:
+    """Prezzo spot PAXG/USDT via Binance — vedi _fetch_binance_paxg per
+    il perché è un proxy affidabile. Usa l'endpoint /price (un singolo
+    numero, non klines) per un fetch più leggero."""
+    try:
+        r = requests.get(
+            "https://api.binance.com/api/v3/ticker/price",
+            params={"symbol": "PAXGUSDT"},
+            timeout=5,
+        )
+        return float(r.json().get("price", 0))
+    except Exception:
+        return 0.0
+
+
 def get_current_price() -> float:
-    """Prezzo live XAU/USD. yfinance primario, Twelve Data fallback."""
+    """Prezzo live XAU/USD. yfinance primario, Binance PAXG e Twelve Data
+    fallback (in quest'ordine — vedi get_data() per il perché di questa
+    cascata)."""
     now = time.time()
     if now - _price_cache["timestamp"] < 90 and _price_cache["price"] > 100:
         return _price_cache["price"]
@@ -323,6 +404,12 @@ def get_current_price() -> float:
             return price
     except Exception:
         pass
+
+    price = _binance_paxg_price()
+    if price > 0:
+        _price_cache["price"] = price
+        _price_cache["timestamp"] = now
+        return price
 
     price = _twelvedata_price("XAU/USD")
     if price > 0:

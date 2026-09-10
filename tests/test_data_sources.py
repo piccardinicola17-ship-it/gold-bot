@@ -91,19 +91,90 @@ class TestTwelveDataPriceHelper(_TwelveDataStateResetMixin, unittest.TestCase):
         self.assertTrue(analyzer._twelvedata_available())
 
 
+class TestBinancePaxgSource(unittest.TestCase):
+    """Fix del 2026-09-10: Stooq ha attivato una verifica anti-bot
+    proof-of-work JavaScript su ogni endpoint (verificato globale, non
+    solo IP Railway) — sostituita in get_data()/get_current_price() da
+    Binance PAXG/USDT (oro tokenizzato, nessuna chiave, rate limit
+    ampissimo) come secondo anello tra yfinance e Twelve Data."""
+
+    def test_fetch_binance_paxg_parses_klines(self):
+        import pandas as pd
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            [1700000000000, "4400.0", "4410.0", "4395.0", "4405.0", "12.5",
+             1700000899999, "55000.0", 100, "6.0", "26400.0", "0"],
+            [1700000900000, "4405.0", "4415.0", "4400.0", "4412.0", "10.0",
+             1700001799999, "44000.0", 90, "5.0", "22000.0", "0"],
+        ]
+        mock_resp.raise_for_status = MagicMock()
+        with patch("analyzer.requests.get", return_value=mock_resp):
+            df = analyzer._fetch_binance_paxg("15min", 500)
+        self.assertEqual(len(df), 2)
+        self.assertAlmostEqual(df["Close"].iloc[-1], 4412.0)
+        self.assertIsInstance(df.index, pd.DatetimeIndex)
+
+    def test_fetch_binance_paxg_raises_on_empty_response(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = []
+        mock_resp.raise_for_status = MagicMock()
+        with patch("analyzer.requests.get", return_value=mock_resp):
+            with self.assertRaises(ValueError):
+                analyzer._fetch_binance_paxg("15min", 500)
+
+    def test_fetch_binance_paxg_rejects_unsupported_interval(self):
+        with self.assertRaises(ValueError):
+            analyzer._fetch_binance_paxg("3min", 500)
+
+    def test_binance_price_helper_returns_zero_on_error(self):
+        with patch("analyzer.requests.get", side_effect=Exception("network down")):
+            price = analyzer._binance_paxg_price()
+        self.assertEqual(price, 0.0)
+
+    def test_binance_price_helper_parses_ticker_response(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"symbol": "PAXGUSDT", "price": "4408.31"}
+        with patch("analyzer.requests.get", return_value=mock_resp):
+            price = analyzer._binance_paxg_price()
+        self.assertEqual(price, 4408.31)
+
+    def test_stooq_no_longer_in_get_data_sources(self):
+        """Stooq deve restare fuori dalla cascata attiva — la funzione
+        _fetch_stooq esiste ancora (non rotta) ma get_data() non deve
+        più chiamarla."""
+        analyzer._data_cache.clear()
+        analyzer._data_fail_cache.clear()
+        with patch("analyzer._fetch_yfinance", side_effect=ValueError("yfinance down")), \
+             patch("analyzer._fetch_stooq") as mock_stooq, \
+             patch("analyzer._fetch_binance_paxg", side_effect=ValueError("binance down")), \
+             patch("analyzer._fetch_twelvedata", side_effect=ValueError("twelvedata down")), \
+             patch("analyzer.time.sleep"):
+            with self.assertRaises(ValueError):
+                analyzer.get_data(interval="1h", outputsize=50, bypass_cache=True)
+        mock_stooq.assert_not_called()
+
+
 class TestGetCurrentPriceRespectsBlock(_TwelveDataStateResetMixin, unittest.TestCase):
     def test_does_not_call_twelvedata_when_yfinance_fails_and_quota_blocked(self):
         analyzer._mark_twelvedata_blocked()
         with patch("yfinance.Ticker", side_effect=Exception("rate limited")), \
+             patch("analyzer._binance_paxg_price", return_value=0.0), \
              patch("analyzer.requests.get") as mock_get:
             price = analyzer.get_current_price()
         mock_get.assert_not_called()
         self.assertEqual(price, 0.0)
 
-    def test_falls_back_to_twelvedata_when_not_blocked(self):
+    def test_falls_back_to_binance_when_yfinance_fails(self):
+        with patch("yfinance.Ticker", side_effect=Exception("rate limited")), \
+             patch("analyzer._binance_paxg_price", return_value=4401.2):
+            price = analyzer.get_current_price()
+        self.assertEqual(price, 4401.2)
+
+    def test_falls_back_to_twelvedata_when_binance_also_fails_and_not_blocked(self):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"price": "4401.2"}
         with patch("yfinance.Ticker", side_effect=Exception("rate limited")), \
+             patch("analyzer._binance_paxg_price", return_value=0.0), \
              patch("analyzer.requests.get", return_value=mock_resp):
             price = analyzer.get_current_price()
         self.assertEqual(price, 4401.2)
@@ -115,7 +186,7 @@ class TestGetDataSkipsTwelveDataWhenBlocked(_TwelveDataStateResetMixin, unittest
         analyzer._data_cache.clear()
         analyzer._data_fail_cache.clear()
         with patch("analyzer._fetch_yfinance", side_effect=ValueError("yfinance down")), \
-             patch("analyzer._fetch_stooq", side_effect=ValueError("stooq down")), \
+             patch("analyzer._fetch_binance_paxg", side_effect=ValueError("binance down")), \
              patch("analyzer._fetch_twelvedata") as mock_td, \
              patch("analyzer.time.sleep"):
             with self.assertRaises(ValueError):
