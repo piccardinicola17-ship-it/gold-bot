@@ -257,7 +257,14 @@ EXTENDED_EVENT_NAMES = (
     # misurata resta sempre sui tick XAU/USD (l'oro), la valuta dell'evento
     # e' solo metadato su quale banca centrale l'ha generato.
     "Main Refinancing Rate", "ECB Press Conference", "ECB Monetary Policy Meeting Accounts",
-    "Overnight Call Rate", "BOJ Policy Rate", "BOJ Press Conference", "BOJ Outlook Report",
+    "Overnight Call Rate", "BOJ Policy Rate", "BOJ Outlook Report",
+    # "BOJ Press Conference" RIMOSSA 2026-09-10: verificato che la BOJ non
+    # pubblica alcuna trascrizione/riassunto in inglese di queste
+    # conferenze (dichiarato esplicitamente dalla BOJ stessa: "available
+    # only in Japanese") — senza testo da scorare, calcolare la reazione
+    # di prezzo per questi eventi non serve a nulla nel progetto FOMC/BCE/
+    # BOJ hawkish-dovish, e sottrae solo tempo al rate limit condiviso di
+    # Dukascopy per le altre 44 serie che invece hanno testo.
     # "Monetary Policy Statement" copre SIA BCE SIA BOJ (stesso nome
     # evento, valuta diversa) - un'unica voce qui basta, il filtro di
     # dukascopy_ticks.py e' per event_name non per currency+event_name.

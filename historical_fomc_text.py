@@ -9,34 +9,42 @@ trovi. Questo modulo copre FOMC con un approccio diverso: un punteggio
 hawkish/dovish del testo del comunicato, confrontato con la reazione di
 prezzo reale (stessa tabella event_price_reactions già usata altrove).
 
-Fasi:
-1. fetch_fomc_statements() — scarica il testo ufficiale da
-   federalreserve.gov per ogni data "FOMC Statement" già in macro_events
-   (URL pattern verificato: /newsevents/pressreleases/monetary{YYYYMMDD}a.htm).
-2. Punteggio hawkish/dovish — fatto a mano (lettura diretta, non un
-   classificatore automatico) per il primo batch di 25 comunicati
-   2011-2021, salvato in FOMC_HAWKISH_SCORES sotto. Scala -2 (fortemente
-   dovish/allentamento) a +2 (fortemente hawkish/restrizione), 0 = nessun
-   cambiamento di stance rispetto alla riunione precedente. Criteri:
-   direzione della decisione sui tassi, variazioni nel ritmo di
-   acquisto/riduzione titoli (QE/QT), cambi nella forward guidance,
-   variazioni nel linguaggio sulla valutazione economica rispetto al
-   comunicato PRECEDENTE (non in assoluto — il FOMC comunica per
-   incrementi, un comunicato "identico" al precedente è neutro anche se il
-   contenuto resta accomodante).
-3. validate_fomc_scores() — Theil-Sen + split cronologico, stesso standard
-   di historical_model.py, tra punteggio e reazione di prezzo reale — PUò
-   GIRARE SOLO DOPO che dukascopy_ticks.py ha calcolato le reazioni per
-   "FOMC Statement" (aggiunto a EXTENDED_EVENT_NAMES il 2026-09-09, ma il
-   job in corso in quel momento non lo includeva ancora nella sua coda —
-   serve un secondo giro di dukascopy_ticks.py --extended dopo che il
-   primo (2.237 eventi) finisce).
+Copre TRE fonti testuali, stessa scala (-2 fortemente dovish a +2
+fortemente hawkish, 0 = nessun cambio di stance vs la volta precedente),
+stesso standard di validazione (Theil-Sen + split cronologico multiplo +
+soglia n>=100, vedi validate_fomc_scores):
+
+1. FOMC Statement — 25 comunicati 2011-2021, scorati A MANO (lettura
+   diretta mia, non un classificatore) in FOMC_HAWKISH_SCORES sotto.
+   Testo scaricato da fetch_fomc_statements() (federalreserve.gov,
+   pattern /newsevents/pressreleases/monetary{YYYYMMDD}a.htm).
+2. FOMC Meeting Minutes — 129 verbali 2007-2025 (30-95k caratteri
+   ciascuno, 7.1M caratteri totali: troppo testo per una lettura diretta
+   in una sessione), scorati da sotto-agenti paralleli con lo STESSO
+   criterio di FOMC_HAWKISH_SCORES, punteggi in
+   data/fomc_minutes_hawkish_scores.json (vedi save_minutes_scores()).
+3. FOMC Press Conference — 82 conferenze 2011-2025 (dichiarazione + Q&A
+   del Presidente, spesso muove il mercato più della dichiarazione
+   scritta — es. giugno 2013 "taper tantrum", dicembre 2018 "QT on
+   autopilot"), stesso approccio a sotto-agenti, punteggi in
+   data/fomc_presconf_hawkish_scores.json (vedi save_presconf_scores()).
+   L'evento "FOMC Press Conference" esiste già come riga propria in
+   macro_events (fonte primaria hf_forexfactory_cache, orario reale)
+   — NON serve creare uno pseudo-evento.
+
+validate_fomc_scores() richiede che dukascopy_ticks.py --extended abbia
+calcolato le reazioni di prezzo per questi event_name (tutti e 3 in
+EXTENDED_EVENT_NAMES dal 2026-09-09) — la copertura cresce mentre il job
+gira in background, i verdetti "DATI INSUFFICIENTI" si aggiornano da soli
+ad ogni nuova esecuzione.
 
 Locale, non tocca il bot live — stesso principio di historical_events.py.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import sqlite3
 import time
@@ -44,9 +52,31 @@ from datetime import datetime, timezone
 
 import requests
 
-from historical_events import HIST_DB_PATH, _connect
+from historical_events import HIST_DB_PATH, _connect, _event_uid
 
 FOMC_STATEMENT_URL = "https://www.federalreserve.gov/newsevents/pressreleases/monetary{ymd}a.htm"
+
+# Punteggio hawkish/dovish dei 129 verbali (Minutes) FOMC, testo completo
+# (30-95k caratteri ciascuno) letto e valutato con la STESSA scala e gli
+# STESSI criteri di FOMC_HAWKISH_SCORES sotto (vedi docstring del modulo),
+# suddiviso in lotti cronologici e assegnato in parallelo — troppo testo
+# (7.1M caratteri totali) per essere letto in una sessione singola. File
+# dati separato (non un dict Python inline come FOMC_HAWKISH_SCORES) per
+# via del volume: 129 voci contro 25.
+MINUTES_HAWKISH_SCORES_PATH = os.path.join(
+    os.path.dirname(__file__), "data", "fomc_minutes_hawkish_scores.json"
+)
+
+# Stesso principio di MINUTES_HAWKISH_SCORES_PATH, per le 82 conferenze
+# stampa (dichiarazione + Q&A del Presidente, iniziate aprile 2011) che
+# hanno reazione di prezzo calcolabile su "Federal Funds Rate" (data
+# riunione = data conferenza, coincidono). Il Q&A spesso muove il mercato
+# più della dichiarazione scritta (vedi es. giugno 2013 "taper tantrum",
+# dicembre 2018 "QT on autopilot") — criterio esplicito nel prompt di
+# scoring usato per questi 82 punteggi.
+PRESCONF_HAWKISH_SCORES_PATH = os.path.join(
+    os.path.dirname(__file__), "data", "fomc_presconf_hawkish_scores.json"
+)
 
 # Punteggio hawkish/dovish assegnato con lettura diretta del testo
 # ufficiale (non un classificatore automatico) — vedi il docstring sopra
@@ -153,54 +183,199 @@ def save_fomc_scores(db_path: str = HIST_DB_PATH) -> int:
     return saved
 
 
-def validate_fomc_scores(db_path: str = HIST_DB_PATH) -> dict:
-    """Confronta punteggio hawkish/dovish vs reazione di prezzo reale a 30
-    minuti — stesso standard Theil-Sen + split cronologico di
-    historical_model.py. Ritorna {"available": False, ...} se le reazioni
-    di prezzo per FOMC Statement non sono ancora state calcolate."""
-    import numpy as np
-    import pandas as pd
+def save_minutes_scores(db_path: str = HIST_DB_PATH) -> int:
+    """Salva i punteggi hawkish/dovish dei verbali (Minutes) da
+    MINUTES_HAWKISH_SCORES_PATH nel DB, agganciati all'event_uid reale di
+    macro_events (event_name='FOMC Meeting Minutes') per quella data."""
+    init_fomc_scores_table(db_path)
+    if not os.path.exists(MINUTES_HAWKISH_SCORES_PATH):
+        return 0
+    with open(MINUTES_HAWKISH_SCORES_PATH, encoding="utf-8") as f:
+        scores = json.load(f)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    saved = 0
+    with _connect(db_path) as conn:
+        for date_utc, info in scores.items():
+            row = conn.execute(
+                "SELECT event_uid FROM macro_events WHERE event_name='FOMC Meeting Minutes' AND date_utc=?",
+                (date_utc,),
+            ).fetchone()
+            if row is None:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO fomc_hawkish_scores (event_uid, date_utc, score, note, scored_at) "
+                "VALUES (?,?,?,?,?)",
+                (row["event_uid"], date_utc, info["score"], info["note"], now_iso),
+            )
+            saved += 1
+    return saved
 
+
+def save_presconf_scores(db_path: str = HIST_DB_PATH) -> int:
+    """Salva i punteggi hawkish/dovish delle conferenze stampa da
+    PRESCONF_HAWKISH_SCORES_PATH nel DB. 'FOMC Press Conference' esiste
+    già come riga propria in macro_events (fonte primaria
+    hf_forexfactory_cache, orario reale 14:15/14:30 ET a seconda
+    dell'anno) — inizialmente avevo creato uno pseudo-evento sintetico
+    (Statement + 30min) pensando che non esistesse, ma l'orario reale
+    della fonte primaria è più accurato (varia leggermente nel tempo, non
+    è un offset fisso) e la riga esisteva già: pseudo-eventi rimossi,
+    filtro esplicito per source per evitare ambiguità se in futuro
+    tornassero ad esistere righe doppie."""
+    init_fomc_scores_table(db_path)
+    if not os.path.exists(PRESCONF_HAWKISH_SCORES_PATH):
+        return 0
+    with open(PRESCONF_HAWKISH_SCORES_PATH, encoding="utf-8") as f:
+        scores = json.load(f)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    saved = 0
+    with _connect(db_path) as conn:
+        for date_utc, info in scores.items():
+            row = conn.execute(
+                "SELECT event_uid FROM macro_events WHERE event_name='FOMC Press Conference' "
+                "AND date_utc=? AND source='hf_forexfactory_cache'",
+                (date_utc,),
+            ).fetchone()
+            if row is None:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO fomc_hawkish_scores (event_uid, date_utc, score, note, scored_at) "
+                "VALUES (?,?,?,?,?)",
+                (row["event_uid"], date_utc, info["score"], info["note"], now_iso),
+            )
+            saved += 1
+    return saved
+
+
+_PRICE_HORIZONS = {
+    "reaction_1m": "price_t+1m", "reaction_5m": "price_t+5m", "reaction_15m": "price_t+15m",
+    "reaction_30m": "price_t+30m", "reaction_60m": "price_t+60m",
+}
+
+
+def _evaluate_score_split(df, horizon: str, train_fraction: float) -> dict | None:
+    """Stessa logica di historical_model._evaluate_split /
+    historical_combined_events._evaluate_split, applicata al punteggio
+    hawkish/dovish invece del surprise_zscore numerico."""
+    import numpy as np
+    from historical_model import _theil_sen_fit, _r2
+
+    valid = df.dropna(subset=["score", horizon])
+    if len(valid) < 20:
+        return None
+    split_idx = int(len(valid) * train_fraction)
+    train, test = valid.iloc[:split_idx], valid.iloc[split_idx:]
+    if len(train) < 10 or len(test) < 5:
+        return None
+
+    slope, intercept = _theil_sen_fit(train["score"].to_numpy(dtype=float), train[horizon].to_numpy(dtype=float))
+    pred_test = slope * test["score"].to_numpy(dtype=float) + intercept
+    r2_test = _r2(test[horizon].to_numpy(dtype=float), pred_test)
+
+    naive_pred = np.full(len(test), train[horizon].mean())
+    r2_naive = _r2(test[horizon].to_numpy(dtype=float), naive_pred)
+
+    direction_correct = np.sign(pred_test) == np.sign(test[horizon].to_numpy(dtype=float))
+    direction_acc = float(direction_correct.mean())
+
+    return {
+        "train_fraction": train_fraction, "n_train": len(train), "n_test": len(test),
+        "r2_test": round(r2_test, 3), "r2_naive_test": round(r2_naive, 3),
+        "beats_naive": bool(r2_test > r2_naive),
+        "direction_accuracy": round(direction_acc, 3),
+    }
+
+
+def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = None) -> dict:
+    """Confronta punteggio hawkish/dovish vs reazione di prezzo reale —
+    STESSO standard Theil-Sen + split cronologico multiplo + soglia n>=100
+    usato ovunque nel progetto (historical_model.py,
+    historical_combined_events.py, historical_cot_feature.py). Prima
+    versione di questa funzione usava solo una correlazione grezza con
+    soglia n>=10 — sostituita per coerenza, la stessa soglia bassa aveva
+    già mostrato falsi "edge" su altre serie di questo progetto (vedi
+    historical_combined_events.py, n=35). Ritorna {"available": False,
+    ...} se le reazioni di prezzo non sono ancora state calcolate.
+
+    event_name: None = tutti i punteggi salvati (Statement + Minutes
+    insieme), oppure 'FOMC Statement' / 'FOMC Meeting Minutes' per
+    validare le due fonti separatamente (hanno dinamiche di mercato
+    diverse: lo Statement è "prima notizia", i Minutes confermano/
+    dettagliano una decisione già nota da 3 settimane)."""
+    import pandas as pd
+    from historical_model import TRAIN_FRACTIONS
+
+    filter_sql = ""
+    params: tuple = ()
+    if event_name is not None:
+        filter_sql = "AND m.event_name = ?"
+        params = (event_name,)
+
+    price_cols = ", ".join(f'r."{col}" AS {name}_price' for name, col in _PRICE_HORIZONS.items())
     with _connect(db_path) as conn:
         df = pd.read_sql_query(
-            """
-            SELECT s.date_utc, s.score, r."price_t-1m" AS price_base, r."price_t+30m" AS price_30m
+            f"""
+            SELECT s.date_utc, s.score, r."price_t-1m" AS price_base, {price_cols}
             FROM fomc_hawkish_scores s
             JOIN event_price_reactions r ON s.event_uid = r.event_uid
-            WHERE r."price_t-1m" IS NOT NULL AND r."price_t+30m" IS NOT NULL
+            JOIN macro_events m ON s.event_uid = m.event_uid
+            WHERE r."price_t-1m" IS NOT NULL
+            {filter_sql}
             ORDER BY s.date_utc
             """,
             conn,
+            params=params,
         )
 
     if df.empty:
         return {
             "available": False,
-            "reason": "Nessuna reazione di prezzo calcolata ancora per FOMC Statement — "
-                      "serve rilanciare dukascopy_ticks.py --extended (aggiunto a "
-                      "EXTENDED_EVENT_NAMES dopo l'avvio dell'ultimo giro in corso).",
+            "reason": "Nessuna reazione di prezzo calcolata ancora — serve che "
+                      "dukascopy_ticks.py --extended completi FOMC Statement/Meeting Minutes.",
         }
 
-    df["reaction_30m"] = df["price_30m"] - df["price_base"]
-    n = len(df)
-    if n < 10:
-        return {"available": True, "n": n, "verdict": f"DATI INSUFFICIENTI (n={n}, servono almeno 10 comunicati con reazione)"}
+    for name in _PRICE_HORIZONS:
+        df[name] = df[f"{name}_price"] - df["price_base"]
 
-    x = df["score"].to_numpy(dtype=float)
-    y = df["reaction_30m"].to_numpy(dtype=float)
-    corr = float(np.corrcoef(x, y)[0, 1]) if np.std(x) > 0 else None
+    n = len(df)
+    results = []
+    for horizon in _PRICE_HORIZONS:
+        for frac in TRAIN_FRACTIONS:
+            r = _evaluate_score_split(df, horizon, frac)
+            if r:
+                r["horizon"] = horizon
+                results.append(r)
+
+    if not results:
+        return {"available": True, "n": n, "verdict": f"DATI INSUFFICIENTI (n={n}, serve almeno 20 comunicati con reazione per ogni split)"}
+
+    res_df = pd.DataFrame(results)
+    beats_all_by_horizon = res_df.groupby("horizon")["beats_naive"].agg(lambda s: s.all())
+    n_horizons_ok = int(beats_all_by_horizon.sum())
+
+    if n < 100:
+        verdict = f"DATI INSUFFICIENTI PER UN VERDETTO AFFIDABILE (n={n}, serve n>=100)"
+    elif n_horizons_ok > 0:
+        verdict = f"EDGE VALIDATO su {n_horizons_ok}/{len(_PRICE_HORIZONS)} orizzonti (n={n})"
+    else:
+        verdict = f"NESSUN EDGE — risultato pulito (n={n})"
 
     return {
         "available": True,
         "n": n,
-        "correlation": round(corr, 3) if corr is not None else None,
-        "note": "Punteggio negativo = dovish atteso -> reazione positiva per l'oro (correlazione negativa attesa se il segnale funziona)",
-        "rows": df[["date_utc", "score", "reaction_30m"]].to_dict("records"),
+        "event_name": event_name or "Statement+Minutes",
+        "verdict": verdict,
+        "details": results,
     }
 
 
 if __name__ == "__main__":
-    n = save_fomc_scores()
-    print(f"Punteggi salvati: {n}")
-    result = validate_fomc_scores()
-    print(result)
+    n_s = save_fomc_scores()
+    n_m = save_minutes_scores()
+    n_pc = save_presconf_scores()
+    print(f"Punteggi Statement salvati: {n_s} | Minutes: {n_m} | Press Conference: {n_pc}")
+    for label, ev in (("Statement", "FOMC Statement"), ("Minutes", "FOMC Meeting Minutes"),
+                      ("Press Conference", "FOMC Press Conference"), ("Combinato", None)):
+        result = validate_fomc_scores(event_name=ev)
+        print(f"\n=== {label} ===")
+        print(f"n={result.get('n')} disponibile={result.get('available')} verdetto={result.get('verdict', result.get('reason'))}")

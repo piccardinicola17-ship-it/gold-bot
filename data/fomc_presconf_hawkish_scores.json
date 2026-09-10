@@ -1,0 +1,330 @@
+{
+  "2011-04-27": {
+    "score": 0,
+    "note": "Prima press conference storica: nessuna novita, QE2 completato come da programma, tasso invariato, inflazione vista transitoria."
+  },
+  "2011-06-22": {
+    "score": 0,
+    "note": "Nessuna nuova azione nonostante crescita rivista al ribasso; Bernanke non ritiene condizioni ancora sufficienti per altro easing."
+  },
+  "2011-11-02": {
+    "score": 0,
+    "note": "Solo conferma di Operation Twist gia annunciata; previsioni riviste al ribasso ma nessuna nuova misura oggi."
+  },
+  "2012-01-25": {
+    "score": -1,
+    "note": "Forward guidance estesa da meta 2013 a fine 2014 nonostante dati recenti migliori del previsto: sorpresa dovish."
+  },
+  "2012-04-25": {
+    "score": 1,
+    "note": "Nessun QE3 nonostante pressioni; Bernanke definisce 'reckless' un allentamento aggiuntivo, guidance invariata, inflazione rivista lievemente su."
+  },
+  "2012-06-20": {
+    "score": -1,
+    "note": "Operation Twist estesa a fine anno oltre la scadenza prevista di giugno; previsioni di crescita riviste al ribasso."
+  },
+  "2012-09-13": {
+    "score": -2,
+    "note": "Lancio di QE3 open-ended ($40mld/mese MBS), guidance estesa a meta 2015, accomodamento promesso oltre la ripresa."
+  },
+  "2012-12-12": {
+    "score": -1,
+    "note": "Twist sostituito da acquisti Treasury espliciti (balance sheet cresce), guidance passa a soglie numeriche 6,5%/2,5%."
+  },
+  "2013-03-20": {
+    "score": 0,
+    "note": "Nessuna modifica al ritmo di acquisti nonostante dati migliori; Comitato giudica non necessario alcun aggiustamento."
+  },
+  "2013-06-19": {
+    "score": 2,
+    "note": "Bernanke delinea per la prima volta un calendario di tapering (taper tantrum), mercati reagiscono con forte sorpresa hawkish."
+  },
+  "2013-09-18": {
+    "score": -2,
+    "note": "Sorpresa dovish maggiore del 2013: tapering atteso da mercati ma QE lasciato invariato, Bernanke evita di indicare una data fissa."
+  },
+  "2013-12-18": {
+    "score": 0,
+    "note": "Primo vero taper ($85→75mld) ma bilanciato da guidance dovish rafforzata ('well past' 6.5%); il classico 'dovish taper', letto neutro dai mercati."
+  },
+  "2014-03-19": {
+    "score": 1,
+    "note": "Taper prosegue come atteso, ma il celebre 'six months' di Yellen nel Q&A letto come sorpresa hawkish, dots in lieve salita."
+  },
+  "2014-06-18": {
+    "score": 0,
+    "note": "Taper continua come previsto, Yellen minimizza i dati di inflazione più alti definendoli 'rumore', tono complessivamente dovish-neutro."
+  },
+  "2014-09-17": {
+    "score": 1,
+    "note": "Taper prosegue verso fine QE3, linguaggio 'considerable time' mantenuto ma due dissensi hawkish e dots proiettati più in alto."
+  },
+  "2014-12-17": {
+    "score": 1,
+    "note": "Fine QE3 confermata; 'considerable time' sostituito da 'patient', letto come apertura hawkish al rialzo pur con rassicurazioni; tre dissensi."
+  },
+  "2015-03-18": {
+    "score": -1,
+    "note": "Rimosso 'patient' dalla guidance ma dot plot abbassato nettamente su crescita/inflazione/tassi: sorpresa netta dovish nonostante il cambio lessicale."
+  },
+  "2015-06-17": {
+    "score": 0,
+    "note": "Nessuna variazione, stime di crescita/inflazione riviste leggermente al ribasso ma liftoff entro l'anno confermato: riunione sostanzialmente sul copione atteso."
+  },
+  "2015-09-17": {
+    "score": -1,
+    "note": "Rialzo atteso da molti ma rinviato per turbolenza mercati/Cina e rischi globali, quattro partecipanti spostano i dots al 2016."
+  },
+  "2015-12-16": {
+    "score": 2,
+    "note": "Liftoff storico: primo rialzo tassi dal 2006 (+25pb), decisione hawkish più forte del gruppo pur con toni 'graduali' nel Q&A."
+  },
+  "2016-03-16": {
+    "score": -1,
+    "note": "Tassi fermi, dot plot abbassato nettamente (4 rialzi attesi diventano 2), Yellen cauta su rischi globali e Cina/dollaro."
+  },
+  "2016-06-15": {
+    "score": -1,
+    "note": "Tassi fermi, dot plot rivisto ancora al ribasso, jobs report debole, Brexit citata esplicitamente come motivo di cautela."
+  },
+  "2016-09-21": {
+    "score": 1,
+    "note": "Tassi fermi ma \"caso per rialzo rafforzato\", rischi ora \"bilanciati\", tre dissensi hawkish per alzare subito."
+  },
+  "2016-12-14": {
+    "score": 1,
+    "note": "Rialzo di 25bp effettuato, dot plot 2017 sale a 3 rialzi da 2, Yellen minimizza ma segnale piu' hawkish."
+  },
+  "2017-03-15": {
+    "score": 0,
+    "note": "Rialzo 25bp pienamente atteso, proiezioni quasi identiche a dicembre, Yellen minimizza rimozione di \"only\" da gradual."
+  },
+  "2017-06-14": {
+    "score": 1,
+    "note": "Rialzo 25bp atteso, ma annuncio dettagliato e concreto del piano QT (importi e tempistiche precise) e' segnale hawkish."
+  },
+  "2017-09-20": {
+    "score": 0,
+    "note": "Tassi fermi, avvio QT a ottobre confermato come gia' annunciato a giugno, dot plot quasi invariato, in linea con attese."
+  },
+  "2017-12-13": {
+    "score": 0,
+    "note": "Rialzo 25bp atteso (ultimo di Yellen), dot plot sostanzialmente invariato, crescita rivista lievemente al rialzo per riforma fiscale."
+  },
+  "2018-03-21": {
+    "score": 1,
+    "note": "Primo presser di Powell: rialzo atteso ma proiezioni di crescita/disoccupazione migliorate, dot plot 2019-2020 alzato per stimolo fiscale."
+  },
+  "2018-06-13": {
+    "score": 2,
+    "note": "Dot plot 2018 sale da 3 a 4 rialzi, rimossa guidance chiave su tassi \"sotto neutrale per tempo\", inflazione raggiunge target 2%."
+  },
+  "2018-09-26": {
+    "score": 1,
+    "note": "Rialzo atteso, tolto 'accommodative' dallo statement; Powell fiducioso su crescita forte, nessun freno segnalato."
+  },
+  "2018-12-19": {
+    "score": 2,
+    "note": "Rialzo, dot plot ridotto ma QT 'on autopilot' e rifiuto di ammorbidire il tono: forte sell-off, sorpresa hawkish nel Q&A."
+  },
+  "2019-01-30": {
+    "score": -2,
+    "note": "Svolta dovish netta: tolta guidance su ulteriori rialzi, introdotto 'patient', apertura a rivedere la normalizzazione del bilancio."
+  },
+  "2019-03-20": {
+    "score": -1,
+    "note": "Dot plot azzerato per il 2019, fine QT annunciata per settembre: conferma e rafforza la pausa dovish di gennaio."
+  },
+  "2019-05-01": {
+    "score": 1,
+    "note": "Tassi fermi, Powell respinge le attese di taglio definendo bassa inflazione 'transitoria': sorpresa hawkish, mercati delusi."
+  },
+  "2019-06-19": {
+    "score": -2,
+    "note": "Tolto 'patient', 8 partecipanti su 17 scrivono tagli nei dots, primo dissenso: segnale dovish forte di taglio imminente."
+  },
+  "2019-07-31": {
+    "score": 1,
+    "note": "Primo taglio ma definito 'midcycle adjustment' non inizio ciclo: Q&A hawkish delude mercati, forte vendita post-conferenza."
+  },
+  "2019-09-18": {
+    "score": 0,
+    "note": "Secondo taglio, ma dots piatti per il 2020 e doppio dissenso opposto: stance sostanzialmente invariata rispetto a luglio."
+  },
+  "2019-10-30": {
+    "score": 1,
+    "note": "Terzo taglio ma nuova guidance 'likely to remain appropriate' segnala pausa: tono più hawkish, probabile fine del ciclo tagli."
+  },
+  "2019-12-11": {
+    "score": 0,
+    "note": "Tassi fermi, dots piatti per il 2020, barra alta per futuri rialzi confermata: nessun cambio di stance da ottobre."
+  },
+  "2020-01-29": {
+    "score": 0,
+    "note": "Tassi invariati, nessuna variazione di forward guidance; Q&A su coronavirus prudente, rischio non ancora quantificato."
+  },
+  "2020-03-03": {
+    "score": -2,
+    "note": "Taglio di emergenza intermeeting di 50bp (a 1-1.25%) a sorpresa per il rischio COVID; Powell pronto ad agire ancora."
+  },
+  "2020-04-29": {
+    "score": -2,
+    "note": "Tassi a 0-0.25%, QE 'negli importi necessari', linee 13(3) dispiegate aggressivamente; piena crisi, nessun limite dichiarato."
+  },
+  "2020-06-10": {
+    "score": -1,
+    "note": "Tassi fermi a zero, QE rafforzato ('almeno al ritmo attuale'); Powell: 'non pensiamo nemmeno a pensare' di alzare i tassi."
+  },
+  "2020-07-29": {
+    "score": -1,
+    "note": "Stance emergenziale invariata, swap line estese; primi segnali di ripresa ma piena accomodazione mantenuta nel Q&A."
+  },
+  "2020-09-16": {
+    "score": -1,
+    "note": "Nuova forward guidance outcome-based (average inflation targeting): tassi fermi finché occupazione max e inflazione oltre 2% per un periodo."
+  },
+  "2020-11-05": {
+    "score": -1,
+    "note": "Framework AIT riconfermato, guidance tassi/QE invariata; Powell segnala rallentamento della ripresa e rischio COVID crescente."
+  },
+  "2020-12-16": {
+    "score": -1,
+    "note": "Guidance sugli acquisti resa esplicitamente outcome-based ('fino a progressi sostanziali'), rafforzando l'impegno accomodante rispetto a novembre."
+  },
+  "2021-01-27": {
+    "score": -1,
+    "note": "Framework riconfermato annualmente, importi QE espliciti (80+40 mld/mese); nessun accenno a tapering nelle risposte."
+  },
+  "2021-03-17": {
+    "score": -1,
+    "note": "Stance invariata nonostante stime economiche riviste al rialzo; Powell: 'non ancora' al tapering, serve progresso reale non previsto."
+  },
+  "2021-04-28": {
+    "score": -1,
+    "note": "Tassi e QE invariati; Powell esclude di parlare di tapering, inflazione ancora 'transitoria', nessun segnale di stretta."
+  },
+  "2021-06-16": {
+    "score": 1,
+    "note": "Dot plot anticipa 2 rialzi nel 2023 (sorpresa hawkish); avviata discussione 'talking about tapering', pur senza azioni concrete."
+  },
+  "2021-07-28": {
+    "score": 0,
+    "note": "Tassi e QE invariati; primo riconoscimento esplicito di valutare i progressi verso il tapering, nessuna decisione presa."
+  },
+  "2021-09-22": {
+    "score": 1,
+    "note": "Powell segnala moderazione 'presto' degli acquisti; metà dei partecipanti anticipa liftoff nel 2022, chiaro passo verso restrizione."
+  },
+  "2021-11-03": {
+    "score": 1,
+    "note": "Avviato il tapering effettivo ($15mld/mese); Q&A conferma progressi su occupazione e inflazione, pur rimandando i rialzi dei tassi."
+  },
+  "2021-12-15": {
+    "score": 2,
+    "note": "Raddoppiato il ritmo del tapering; dot plot sale a 3 rialzi nel 2022; Powell ammette in Q&A il 'pivot' sull'inflazione."
+  },
+  "2022-01-26": {
+    "score": 1,
+    "note": "QE termina come previsto; Powell precommette un rialzo 'presto appropriato' a marzo; pubblicati i principi per ridurre il bilancio."
+  },
+  "2022-03-16": {
+    "score": 2,
+    "note": "Primo rialzo dei tassi (25pb); dot plot balza a 7 rialzi nel 2022; proiezioni di inflazione riviste nettamente al rialzo."
+  },
+  "2022-05-04": {
+    "score": 1,
+    "note": "Rialzo di 50pb e avvio del QT, ma Powell esclude in Q&A un rialzo da 75pb, moderando parzialmente le attese hawkish."
+  },
+  "2022-06-15": {
+    "score": 2,
+    "note": "Rialzo shock di 75pb (il più alto dal 1994), sorpresa rispetto alla guidance di maggio; dot plot sale a 3,4%."
+  },
+  "2022-07-27": {
+    "score": -1,
+    "note": "Rialzo 75pb come atteso, ma Q&A più conciliante su rallentamento futuro; mercati lo lessero come pivot dovish."
+  },
+  "2022-09-21": {
+    "score": 2,
+    "note": "Terzo 75pb consecutivo, dot plot alzato nettamente (4.4% fine 2022), Powell respinge idea di pivot: picco hawkish del ciclo."
+  },
+  "2022-11-02": {
+    "score": 2,
+    "note": "Quarto 75pb; Powell segnala tasso terminale più alto del previsto e definisce 'prematuro' parlare di pausa: forte sorpresa hawkish."
+  },
+  "2022-12-14": {
+    "score": 1,
+    "note": "Rallentamento a 50pb ma dot plot sale a 5.1%, Powell respinge attese di tagli 2023: messaggio ancora hawkish nonostante rialzo minore."
+  },
+  "2023-02-01": {
+    "score": -1,
+    "note": "Rialzo ridotto a 25pb, Powell usa ripetutamente 'disinflazione' nel Q&A, tono meno duro: reazione dovish, forte rally di mercato."
+  },
+  "2023-03-22": {
+    "score": 0,
+    "note": "Rialzo 25pb nonostante crisi SVB/Credit Suisse; guidance ammorbidita ('may be appropriate') ma dati pre-crisi restavano forti: segnale misto."
+  },
+  "2023-05-03": {
+    "score": -1,
+    "note": "Rialzo 25pb, ma abbandonata la guidance esplicita su rialzi futuri, Powell segnala vicinanza alla fine del ciclo: virata dovish."
+  },
+  "2023-06-14": {
+    "score": 1,
+    "note": "Pausa (skip) ma dot plot alzato a 5.6% con due rialzi attesi nel 2023, Powell insiste su rischi ancora al rialzo: pausa hawkish."
+  },
+  "2023-07-26": {
+    "score": 0,
+    "note": "Rialzo 25pb atteso al 5.25-5.50% (poi tasso terminale), linguaggio bilanciato senza impegno chiaro sulle prossime mosse: sostanzialmente neutro."
+  },
+  "2023-09-20": {
+    "score": 2,
+    "note": "Pausa ma dot plot 2024/2025 alzato nettamente ('higher for longer'), Powell insiste su restrizione prolungata: forte sorpresa hawkish."
+  },
+  "2023-11-01": {
+    "score": -1,
+    "note": "Tassi fermi come atteso; Powell minimizza il rialzo dei rendimenti, esclude modifiche al QT, rischi piu bilanciati: reazione dovish."
+  },
+  "2023-12-13": {
+    "score": -2,
+    "note": "Pivot dovish storico: dot plot indica 3 tagli nel 2024, aggiunto 'any' ai rialzi, si discute apertamente dei tempi dei tagli."
+  },
+  "2024-01-31": {
+    "score": 1,
+    "note": "Powell esclude un taglio a marzo come caso base, rimossa la easing bias, serve piu fiducia sull'inflazione: pushback hawkish."
+  },
+  "2024-03-20": {
+    "score": -1,
+    "note": "Nonostante inflazione di gennaio-febbraio piu calda, la SEP conferma 3 tagli nel 2024; Powell minimizza i dati come 'bumps'."
+  },
+  "2024-05-01": {
+    "score": 1,
+    "note": "Statement ammette 'mancanza di ulteriori progressi', fiducia richiedera piu tempo del previsto; tapering QT annunciato attenua parzialmente."
+  },
+  "2024-06-12": {
+    "score": 1,
+    "note": "SEP taglia le proiezioni da 3 a 1 taglio nel 2024 nonostante CPI piu freddo dello stesso giorno: segnale netto hawkish."
+  },
+  "2024-07-31": {
+    "score": -2,
+    "note": "Powell apre esplicitamente a un taglio a settembre ('potrebbe essere sul tavolo'), focus ora bilanciato sul lavoro: forte segnale dovish."
+  },
+  "2024-09-18": {
+    "score": -2,
+    "note": "Taglio aggressivo di 50pb, primo della fase di easing; tutti i 19 partecipanti scrivono tagli multipli nel 2024."
+  },
+  "2024-11-07": {
+    "score": 0,
+    "note": "Taglio di 25pb come atteso, linguaggio bilanciato, 'nessun percorso prestabilito': prosecuzione lineare senza sorprese di stance."
+  },
+  "2024-12-18": {
+    "score": 2,
+    "note": "Hawkish cut: taglio di 25pb ma SEP riduce i tagli 2025 da 4 a 2, inflazione rivista al rialzo, toni piu cauti."
+  },
+  "2025-01-29": {
+    "score": 0,
+    "note": "Tassi fermi come atteso, QT invariato; rimozione frase su progressi inflazione detta solo 'pulizia linguaggio'. Fed in wait-and-see su dazi, nessuna fretta."
+  },
+  "2025-03-19": {
+    "score": -1,
+    "note": "Tassi fermi ma QT dimezzato (dovish tecnico); SEP conferma 2 tagli nonostante inflazione rivista al rialzo, Powell vede dazi come transitorie."
+  }
+}

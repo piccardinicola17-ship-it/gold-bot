@@ -1,0 +1,518 @@
+{
+  "2007-11-20": {
+    "score": -1,
+    "note": "Taglio 25pb a 4,5%, dissenso hawkish (Hoenig, no taglio), Comitato giudica rischi ora bilanciati dopo l'azione."
+  },
+  "2008-01-02": {
+    "score": -1,
+    "note": "Taglio 25pb a 4,25%, nessuna valutazione bilancio rischi per incertezza, dissenso dovish (Rosengren voleva di più), creati TAF e swap ECB/SNB."
+  },
+  "2008-02-20": {
+    "score": -2,
+    "note": "Taglio emergenza 75pb (22 gen) piu 50pb a riunione, 125pb in 8 giorni a 3%, risposta aggressiva a crisi, dissensi per taglio minore."
+  },
+  "2008-04-08": {
+    "score": -2,
+    "note": "Taglio 75pb a 2,25% dopo crollo Bear Stearns, creata TSLF da 200 mld, due dissensi hawkish per rischio inflazione."
+  },
+  "2008-05-21": {
+    "score": -1,
+    "note": "Taglio 25pb a 2%, ma Comitato dichiara rischi crescita/inflazione ora bilanciati, segnale esplicito di pausa nel ciclo di easing."
+  },
+  "2008-08-26": {
+    "score": 0,
+    "note": "Tassi invariati a 2%, dissenso hawkish (Fisher voleva rialzo), rischi crescita/inflazione bilanciati, linguaggio sostanzialmente identico a giugno."
+  },
+  "2008-10-07": {
+    "score": 0,
+    "note": "Tassi invariati a 2% nonostante fallimento Lehman days prima, voto unanime, linguaggio sui rischi quasi identico al meeting precedente."
+  },
+  "2008-11-19": {
+    "score": -2,
+    "note": "Taglio 50pb a 1% (piu 50pb emergenza coordinato 8 ott a 1,5%), crisi AIG/Lehman/WaMu, nuove facility di liquidita, azione coordinata globale."
+  },
+  "2009-01-06": {
+    "score": -2,
+    "note": "Tasso portato a 0-0,25% (ZIRP), primo annuncio QE (fino 600 mld GSE/MBS), forward guidance tassi bassi 'per qualche tempo'."
+  },
+  "2009-02-18": {
+    "score": -1,
+    "note": "Tassi confermati a 0-0,25%, mantenuta la stance massimamente accomodante di dicembre, apertura piu esplicita ad acquisti di Treasury."
+  },
+  "2009-04-08": {
+    "score": -2,
+    "note": "Forte espansione QE: MBS portati a 1.250 mld, agency debt a 200 mld, nuovo programma di acquisti Treasury da 300 mld."
+  },
+  "2009-07-15": {
+    "score": 0,
+    "note": "Nessuna modifica; QE1 confermato come da programma, tono lievemente migliorato sulla ripresa"
+  },
+  "2009-09-02": {
+    "score": 0,
+    "note": "Rallentamento tecnico del ritmo acquisti Treasury, importo totale invariato; nessun cambio di stance"
+  },
+  "2009-10-14": {
+    "score": -1,
+    "note": "Estesa tempistica acquisti MBS/debito a Q1 2010 pur con economia in miglioramento; piena accomodazione mantenuta"
+  },
+  "2009-11-24": {
+    "score": 0,
+    "note": "Riduzione tecnica limite debito agenzia (200 a 175 mld), esplicitamente non un cambio di policy"
+  },
+  "2010-01-06": {
+    "score": 0,
+    "note": "Nessuna modifica a QE o tassi; chiusura facility di crisi come gia programmato a giugno"
+  },
+  "2010-02-17": {
+    "score": 1,
+    "note": "Primo dissenso di Hoenig su 'extended period'; avvio normalizzazione tasso sconto, dibattito su exit strategy"
+  },
+  "2010-04-06": {
+    "score": 1,
+    "note": "QE1 completato come da programma; secondo dissenso consecutivo di Hoenig sulla forward guidance"
+  },
+  "2010-05-19": {
+    "score": 0,
+    "note": "Nessun cambio di policy; terzo dissenso Hoenig, ampia discussione ma nessuna decisione su vendite asset"
+  },
+  "2010-07-14": {
+    "score": -1,
+    "note": "Outlook peggiorato per crisi debito europeo, condizioni finanziarie meno favorevoli alla crescita; quarto dissenso"
+  },
+  "2010-08-31": {
+    "score": -1,
+    "note": "Avviato reinvestimento principal MBS/debito in Treasury per fermare la contrazione del bilancio; outlook indebolito"
+  },
+  "2010-10-12": {
+    "score": -1,
+    "note": "Nuovo linguaggio: pronti a fornire presto ulteriore accomodazione; prepara il terreno per il lancio di QE2"
+  },
+  "2010-11-23": {
+    "score": -2,
+    "note": "Lancio QE2: $600B a $75B/mese, reinvestimento confermato, guidance tassi bassi estesa; un dissenso (Hoenig)."
+  },
+  "2011-01-04": {
+    "score": 0,
+    "note": "Continuazione QE2 come annunciato, nessuna modifica; tono lievemente migliorato, un dissenso invariato (Hoenig)."
+  },
+  "2011-02-16": {
+    "score": 0,
+    "note": "QE2 confermato invariato, voto unanime; maggiore fiducia nella ripresa ma nessun cambio di policy o guidance."
+  },
+  "2011-04-05": {
+    "score": 1,
+    "note": "Nessun cambio di policy, ma nuova frase su attenzione all'inflazione e primi accenni interni a possibile stretta entro l'anno."
+  },
+  "2011-05-18": {
+    "score": 1,
+    "note": "QE2 confermato in chiusura come da programma; avviata discussione dettagliata su strategia di normalizzazione/exit, segnale hawkish incipiente."
+  },
+  "2011-07-12": {
+    "score": 0,
+    "note": "QE2 completato come previsto, nessun nuovo stimolo nonostante dati piu' deboli; view divise tra piu' e meno accomodamento."
+  },
+  "2011-08-30": {
+    "score": -2,
+    "note": "Guidance rafforzata con data esplicita 'almeno fino a meta' 2013' al posto di 'extended period'; tre dissensi hawkish."
+  },
+  "2011-10-12": {
+    "score": -1,
+    "note": "Operation Twist: $400B di estensione scadenze, reinvestimento MBS; tre dissensi contrari a maggiore accomodamento."
+  },
+  "2011-11-22": {
+    "score": 0,
+    "note": "Prosecuzione Operation Twist senza nuove misure; crescita Q3 rafforzata, dissenso dovish di Evans per piu' stimolo."
+  },
+  "2012-01-03": {
+    "score": 0,
+    "note": "Nessuna nuova azione, mantenimento Twist e guidance mid-2013; tono lievemente migliorato, un dissenso dovish (Evans)."
+  },
+  "2012-02-15": {
+    "score": -1,
+    "note": "Guidance estesa da mid-2013 a fine 2014, adottato target inflazione 2%; accenno a possibili nuovi acquisti futuri, un dissenso hawkish (Lacker)."
+  },
+  "2012-04-03": {
+    "score": 0,
+    "note": "Nessun cambio di policy, guidance a fine 2014 riconfermata, dissenso hawkish di Lacker."
+  },
+  "2012-05-16": {
+    "score": 0,
+    "note": "Policy invariata, guidance riconfermata, outlook 'ampiamente simile' a marzo, Lacker dissente di nuovo."
+  },
+  "2012-07-11": {
+    "score": -1,
+    "note": "Operation Twist esteso fino a fine anno (+$267B), accomodamento aggiuntivo prima della scadenza prevista."
+  },
+  "2012-08-22": {
+    "score": -1,
+    "note": "Aggiunta guidance 'accomodamento aggiuntivo se necessario', ampio dibattito su nuovo QE, prepara il mercato a settembre."
+  },
+  "2012-10-04": {
+    "score": -2,
+    "note": "QE3 lanciato: MBS $40B/mese open-ended, guidance estesa a metà 2015, linguaggio 'tempo considerevole' dopo la ripresa."
+  },
+  "2012-11-14": {
+    "score": 0,
+    "note": "Nessun cambio di policy, riconferma senza modifiche sostanziali degli acquisti QE3 avviati a settembre."
+  },
+  "2013-01-03": {
+    "score": -2,
+    "note": "Aggiunti Treasury $45B/mese (totale $85B/mese), Evans Rule sostituisce la guidance a data fissa con soglie numeriche."
+  },
+  "2013-02-20": {
+    "score": -1,
+    "note": "Ritmo $85B/mese confermato, primo dissenso hawkish di George contro l'accomodamento continuato."
+  },
+  "2013-04-10": {
+    "score": 1,
+    "note": "Policy invariata ma linguaggio lega acquisti ai 'progressi verso gli obiettivi'; emerge dibattito interno su tapering a metà anno."
+  },
+  "2013-05-22": {
+    "score": 1,
+    "note": "Aggiunta guidance bidirezionale 'aumentare o ridurre' gli acquisti; discusso possibile taper da giugno, avviata revisione dei principi di uscita."
+  },
+  "2013-07-10": {
+    "score": 2,
+    "note": "Taper tantrum: Bernanke delinea in conferenza stampa una roadmap esplicita per ridurre e terminare gli acquisti entro metà 2014."
+  },
+  "2013-08-21": {
+    "score": -1,
+    "note": "Verbale 30-31 lug 2013: ritmo $85B/mese invariato; dissenso hawkish (George) per taper subito; aggiunta lingua dovish su rischi da inflazione bassa persistente."
+  },
+  "2013-10-09": {
+    "score": -2,
+    "note": "Verbale 17-18 set 2013: 'no taper' a sorpresa, mercati attendevano riduzione; quasi tutti i membri contrari a tagliare; solo George in dissenso hawkish."
+  },
+  "2013-11-20": {
+    "score": -1,
+    "note": "Verbale 29-30 ott 2013: ritmo $85B/mese confermato invariato, nessuna sorpresa rispetto a settembre; ancora dissenso hawkish di George."
+  },
+  "2014-01-08": {
+    "score": 1,
+    "note": "Verbale 17-18 dic 2013: avvio effettivo del taper ($85B->$75B), pur atteso dai mercati; forward guidance rafforzata in senso dovish come contrappeso; dissenso dovish di Rosengren."
+  },
+  "2014-02-19": {
+    "score": 0,
+    "note": "Verbale 28-29 gen 2014: seconda riduzione taper a $65B come da percorso annunciato a dicembre, voto unanime, nessuna sorpresa."
+  },
+  "2014-04-09": {
+    "score": 1,
+    "note": "Verbale 18-19 mar 2014: taper prosegue come atteso ma forward guidance passa da soglie numeriche a qualitativa, letto dai mercati come hawkish; dissenso dovish di Kocherlakota."
+  },
+  "2014-05-21": {
+    "score": 0,
+    "note": "Verbale 29-30 apr 2014: taper continua a $45B/mese come da percorso annunciato, voto unanime, nessun cambio di linguaggio sostanziale."
+  },
+  "2014-07-09": {
+    "score": 0,
+    "note": "Verbale 17-18 giu 2014: taper continua a $35B/mese come atteso, confermata fine QE a ottobre come da piano, voto unanime."
+  },
+  "2014-08-20": {
+    "score": 1,
+    "note": "Verbale 29-30 lug 2014: taper a $10B come atteso ma toni piu' hawkish, membri 'a disagio' con la forward guidance dovish, dissenso hawkish di Plosser."
+  },
+  "2014-10-08": {
+    "score": 1,
+    "note": "Verbale 16-17 set 2014: fine taper confermata, pubblicati i principi di normalizzazione della politica monetaria, due dissensi hawkish (Fisher e Plosser) per rialzo tassi anticipato."
+  },
+  "2014-11-19": {
+    "score": 1,
+    "note": "Verbale 28-29 ott 2014: QE3 concluso ufficialmente, la Fed non arretra nonostante la volatilita' di mercato di meta' ottobre; unico dissenso e' dovish (Kocherlakota)."
+  },
+  "2015-01-07": {
+    "score": 1,
+    "note": "Tassi invariati ma guidance passa da 'considerable time' a 'patient': primo passo verso normalizzazione, due dissensi hawkish"
+  },
+  "2015-02-18": {
+    "score": 0,
+    "note": "Nessun cambiamento: linguaggio 'patient' confermato identico, statement quasi invariato rispetto a dicembre"
+  },
+  "2015-04-08": {
+    "score": -1,
+    "note": "Rimosso 'patient' ma outlook indebolito (crescita moderata, export in calo) e dot plot abbassato: letto come dovish"
+  },
+  "2015-05-20": {
+    "score": -1,
+    "note": "Riconosciuta esplicitamente debolezza Q1: spesa, investimenti ed export peggiorati nel linguaggio del comunicato"
+  },
+  "2015-07-08": {
+    "score": 1,
+    "note": "Valutazione economica migliorata dopo il calo di aprile, Comitato più vicino alle condizioni per il liftoff"
+  },
+  "2015-08-19": {
+    "score": 1,
+    "note": "Soglia per il rialzo abbassata a 'some further improvement': condizioni percepite in avvicinamento al liftoff"
+  },
+  "2015-11-18": {
+    "score": 2,
+    "note": "Statement segnala esplicitamente possibile rialzo alla prossima riunione: forte preparazione al liftoff di dicembre"
+  },
+  "2016-01-06": {
+    "score": 1,
+    "note": "Liftoff: primo rialzo tassi dopo anni a zero (a 1/4-1/2%), voto unanime, linguaggio fiducioso sull'inflazione"
+  },
+  "2016-02-17": {
+    "score": -1,
+    "note": "Tassi fermi, rimossa formula 'rischi bilanciati', aggiunto monitoraggio stretto dei rischi globali dopo turbolenza mercati"
+  },
+  "2016-04-06": {
+    "score": -1,
+    "note": "Tassi fermi, dot plot tagliato nettamente (da 4 a 2 rialzi 2016), confermato linguaggio su rischi globali persistenti"
+  },
+  "2016-05-18": {
+    "score": 1,
+    "note": "Tassi fermi ma linguaggio ammorbidito sui rischi globali ('closely monitor' invece di 'pose risks'), apre a rialzo a giugno"
+  },
+  "2016-07-06": {
+    "score": -1,
+    "note": "Tassi fermi, rinviato rialzo per jobs report debole di maggio e incertezza pre-Brexit; toni piu' cauti rispetto ad aprile"
+  },
+  "2016-08-17": {
+    "score": 1,
+    "note": "Tassi fermi ma rischi a breve ridotti dopo Brexit, forte rimbalzo occupazione giugno, dissenso hawkish (George) per rialzo"
+  },
+  "2016-10-12": {
+    "score": 1,
+    "note": "Tassi fermi ma nuova frase 'caso per rialzo si e' rafforzato', tre dissensi hawkish (George, Mester, Rosengren) su nove voti"
+  },
+  "2016-11-23": {
+    "score": 0,
+    "note": "Tassi fermi, linguaggio quasi identico a settembre ('continua a rafforzarsi'), dissensi scesi da tre a due, nessun cambio sostanziale"
+  },
+  "2017-01-04": {
+    "score": 2,
+    "note": "Rialzo tassi a 0.50-0.75%, voto unanime, dot plot piu' aggressivo su attese stimolo fiscale post-elezioni, rischio di accelerare i rialzi"
+  },
+  "2017-02-22": {
+    "score": 0,
+    "note": "Tassi fermi, voto unanime, linguaggio e valutazioni praticamente invariati rispetto a dicembre, nessuna nuova indicazione"
+  },
+  "2017-04-05": {
+    "score": 1,
+    "note": "Rialzo tassi a 0.75-1%, un dissenso dovish (Kashkari), avviata discussione concreta su riduzione bilancio (QT) piu' avanti nel 2017"
+  },
+  "2017-05-24": {
+    "score": 1,
+    "note": "Tassi fermi (inflazione piu' debole del previsto) ma proposta concreta di 'caps' per QT e conferma di avvio entro l'anno"
+  },
+  "2017-07-05": {
+    "score": 2,
+    "note": "Rialzo tassi a 1-1.25%, un dissenso dovish (Kashkari), adottato addendum formale con cifre precise di QT e avvio previsto 'quest'anno'"
+  },
+  "2017-08-16": {
+    "score": 0,
+    "note": "Tassi fermi, voto unanime, linguaggio QT aggiornato a 'relativamente presto' ma crescente preoccupazione dovish su inflazione persistente"
+  },
+  "2017-10-11": {
+    "score": 1,
+    "note": "Tassi fermi ma annunciata data precisa di avvio QT (ottobre), bilanciato da forti dubbi su inflazione persistentemente sotto obiettivo"
+  },
+  "2017-11-22": {
+    "score": 0,
+    "note": "Tassi invariati, QT avviata senza sorprese, linguaggio 'graduale' confermato identico al precedente; corrisponde all'esempio di calibrazione."
+  },
+  "2018-01-03": {
+    "score": 1,
+    "note": "Rialzo atteso a 1.25-1.5%, ritmo 'graduale' invariato, due dissensi dovish (Evans, Kashkari); nessuna svolta di tono."
+  },
+  "2018-02-21": {
+    "score": 1,
+    "note": "Tassi invariati (ultimo FOMC Yellen) ma guidance rafforzata a 'further gradual increases', outlook crescita rivisto al rialzo, fiducia su inflazione in aumento."
+  },
+  "2018-04-11": {
+    "score": 1,
+    "note": "Primo rialzo con Powell chair, atteso, a 1.5-1.75%; dot plot leggermente piu' ripido, 'outlook rafforzato', QT prosegue come da programma."
+  },
+  "2018-05-23": {
+    "score": 1,
+    "note": "Tassi invariati ma inflazione descritta ora vicina all'obiettivo simmetrico 2%; discussione di rimuovere presto linguaggio 'accommodative' e tecnico su IOER prima del rialzo di giugno."
+  },
+  "2018-07-05": {
+    "score": 2,
+    "note": "Rialzo a 1.75-2%; rimossa la forward guidance chiave su tassi 'sotto il livello di lungo periodo', discusso il superamento del tasso neutrale: svolta hawkish netta."
+  },
+  "2018-08-22": {
+    "score": 1,
+    "note": "Tassi invariati, economia forte, inflazione vicina al target; confermata intenzione di rimuovere presto 'accommodative', fed funds visto avvicinarsi al neutrale."
+  },
+  "2018-10-17": {
+    "score": 2,
+    "note": "Rialzo a 2-2.25%, rimosso del tutto 'accommodative' dallo statement; alcuni partecipanti parlano esplicitamente di policy 'modestamente restrittiva': punto di massimo hawkishness del ciclo."
+  },
+  "2018-11-29": {
+    "score": -1,
+    "note": "Tassi invariati come atteso, ma emergono i primi dubbi (tasso vicino al neutrale, rischio di stringere troppo) e si discute di abbandonare presto 'further gradual increases'."
+  },
+  "2019-01-09": {
+    "score": -1,
+    "note": "Rialzo a 2.25-2.5% ma guidance indebolita ('judges'/'some' al posto di 'expects'), aggiunta clausola di monitoraggio globale, dot plot tagliato a 2 rialzi: primo segnale di ripensamento nonostante il rialzo."
+  },
+  "2019-02-20": {
+    "score": -2,
+    "note": "Svolta 'patience': rimossa ogni guidance su ulteriori rialzi, eliminato il giudizio di rischi bilanciati, e comitato pronto a modificare/fermare il QT: pivot dovish netto post-crollo mercati fine 2018."
+  },
+  "2019-04-10": {
+    "score": -1,
+    "note": "Tassi invariati; piano concreto fine QT entro settembre 2019, rallentamento riacquisti da maggio: prosegue pivot dovish di gennaio"
+  },
+  "2019-05-22": {
+    "score": 0,
+    "note": "Tassi invariati, linguaggio 'patient' confermato identico a marzo: nessun cambio di stance rispetto alla riunione precedente"
+  },
+  "2019-07-10": {
+    "score": -1,
+    "note": "Rimosso linguaggio 'patient', apertura esplicita a tagli prossimi, un dissenso per taglio subito: svolta dovish"
+  },
+  "2019-08-21": {
+    "score": -1,
+    "note": "Primo taglio 25bp ('mid-cycle adjustment'), fine anticipata del QT; due dissensi hawkish contro il taglio"
+  },
+  "2019-10-09": {
+    "score": -1,
+    "note": "Secondo taglio consecutivo 25bp a 1.75-2%; tre dissensi (due hawkish, uno per taglio da 50bp)"
+  },
+  "2019-11-20": {
+    "score": -1,
+    "note": "Terzo taglio 25bp a 1.50-1.75%, ma rimosso 'act as appropriate': segnale di pausa nei tagli"
+  },
+  "2020-01-03": {
+    "score": 0,
+    "note": "Tassi invariati all'unanimità, linguaggio 'stance appropriata' conferma la pausa avviata a ottobre"
+  },
+  "2020-02-19": {
+    "score": 0,
+    "note": "Tassi invariati, pre-COVID; primi accenni al coronavirus come rischio ma nessun cambio di stance"
+  },
+  "2020-10-07": {
+    "score": -1,
+    "note": "Introdotta forward guidance esplicita basata su risultati (AIT): tassi a zero finché max occupazione e inflazione oltre 2%"
+  },
+  "2020-11-25": {
+    "score": 0,
+    "note": "Tassi invariati, comunicato identico a settembre; discusso rafforzare guidance QE ma nessuna decisione presa"
+  },
+  "2021-01-06": {
+    "score": -1,
+    "note": "Adottata guidance QE basata su risultati: acquisti proseguono finché 'progressi sostanziali' verso gli obiettivi"
+  },
+  "2021-04-07": {
+    "score": -1,
+    "note": "Verbale marzo 2021: QE invariato ($80B+$40B/mese) nonostante ripresa più forte riconosciuta, nessun cambio di guidance, tono pienamente accomodante."
+  },
+  "2021-07-07": {
+    "score": 1,
+    "note": "Verbale giugno 2021: dot plot anticipa rialzi tassi prima del previsto, rialzo tecnico IOER/ON RRP, discussione taper si intensifica."
+  },
+  "2021-08-18": {
+    "score": 0,
+    "note": "Verbale luglio 2021: nessuna decisione, si discute il tapering ma senza azioni concrete; tono in linea con lo statement (inizio riflessione, non ancora svolta)."
+  },
+  "2021-10-13": {
+    "score": 1,
+    "note": "Verbale settembre 2021: statement aggiunge 'moderazione può presto essere giustificata', percorso illustrativo di tapering dettagliato, alcuni vogliono ritmo più rapido."
+  },
+  "2021-11-24": {
+    "score": 1,
+    "note": "Verbale novembre 2021: avvio effettivo del tapering (-15B$/mese), alcuni partecipanti preferivano ritmo più veloce, ma mossa già ampiamente anticipata."
+  },
+  "2022-01-05": {
+    "score": 2,
+    "note": "Verbale dicembre 2021: raddoppio ritmo taper, rimosso 'transitory', dot plot segnala 3 rialzi 2022, avviata discussione su riduzione bilancio (QT)."
+  },
+  "2022-02-16": {
+    "score": 2,
+    "note": "Verbale gennaio 2022: annuncio esplicito che un rialzo tassi sarà 'presto appropriato', principi di QT adottati formalmente, rimosso linguaggio da emergenza."
+  },
+  "2022-04-06": {
+    "score": 2,
+    "note": "Verbale marzo 2022: primo rialzo tassi (25pb, fine ZIRP), piano QT dettagliato con tetti mensili, un membro dissenziente per 50pb, molti avrebbero preferito 50pb."
+  },
+  "2022-05-25": {
+    "score": 2,
+    "note": "Verbale maggio 2022: rialzo 50pb (il più alto dal 2000), avvio effettivo QT dal 1 giugno, la maggioranza vede 50pb come probabili nei prossimi meeting."
+  },
+  "2022-07-06": {
+    "score": 2,
+    "note": "Verbale giugno 2022: rialzo 75pb (primo dal 1994), rimossa guidance su 'mercato del lavoro forte', un dissenso per 50pb, tono di 'stance restrittiva necessaria'."
+  },
+  "2022-08-17": {
+    "score": 2,
+    "note": "Verbale luglio 2022: secondo rialzo consecutivo da 75pb, stavolta unanime, ribadito rischio di inflazione radicata e 'higher for longer', nessuna vera svolta dovish."
+  },
+  "2022-10-12": {
+    "score": 2,
+    "note": "Rialzo 75bp, linguaggio fortemente restrittivo, impegno a mantenere tassi alti a lungo, rischi inflazione al rialzo."
+  },
+  "2023-01-04": {
+    "score": 1,
+    "note": "Rialzo rallentato a 50bp ma dot plot alza il tasso terminale oltre le attese, nessun taglio previsto nel 2023."
+  },
+  "2023-02-22": {
+    "score": 0,
+    "note": "Rialzo di 25bp come atteso, linguaggio forward guidance identico al precedente, prosecuzione del rallentamento già annunciato."
+  },
+  "2023-04-12": {
+    "score": -1,
+    "note": "Rialzo di 25bp nonostante crisi bancaria SVB, ma guidance ammorbidita da 'rialzi continui' a 'alcuni ulteriori possibili'."
+  },
+  "2023-05-24": {
+    "score": -1,
+    "note": "Rialzo 25bp ma rimossa l'anticipazione esplicita di ulteriori strette, guidance ora pienamente condizionata ai dati in arrivo."
+  },
+  "2023-07-05": {
+    "score": 1,
+    "note": "Pausa nei rialzi ma dot plot segnala altri due rialzi nel 2023, sorpresa hawkish rispetto alle attese di mercato."
+  },
+  "2023-08-16": {
+    "score": 0,
+    "note": "Rialzo 25bp pienamente atteso, in linea col dot plot di giugno, rischi descritti ora come più bilanciati."
+  },
+  "2023-10-11": {
+    "score": 1,
+    "note": "Pausa ma dot plot riduce i tagli 2024 da 4 a 2, linguaggio su crescita passa da 'moderata' a 'solida'."
+  },
+  "2023-11-21": {
+    "score": -1,
+    "note": "Pausa, condizioni finanziarie già molto ristrette fanno parte del lavoro della Fed, tono meno hawkish di settembre."
+  },
+  "2024-01-03": {
+    "score": -2,
+    "note": "Pivot dovish: aggiunta parola 'any', quasi tutti i partecipanti vedono tagli nel 2024, mercati reagiscono con forte rally."
+  },
+  "2024-02-21": {
+    "score": 1,
+    "note": "Pausa, ma Fed respinge esplicitamente un taglio a marzo, serve 'maggiore fiducia' prima di tagliare, pushback hawkish."
+  },
+  "2024-04-10": {
+    "score": -1,
+    "note": "Tassi invariati; concordato di dimezzare il ritmo di QT (dovish tecnico), ma inflazione Q1 piu forte del previsto raffredda fiducia sui tagli."
+  },
+  "2024-05-22": {
+    "score": 1,
+    "note": "Statement aggiunge 'lack of further progress' sull'inflazione; alcuni aperti a rialzi ulteriori; QT taper formalizzato ma gia atteso."
+  },
+  "2024-07-03": {
+    "score": -1,
+    "note": "Linguaggio migliora a 'modest further progress'; dati inflazione piu incoraggianti, ma restano caveat su possibili rialzi se necessario."
+  },
+  "2024-08-21": {
+    "score": -2,
+    "note": "Segnale quasi esplicito di taglio a settembre; statement passa a rischio simmetrico dual-mandate; alcuni avrebbero gia tagliato ora."
+  },
+  "2024-10-09": {
+    "score": -2,
+    "note": "Taglio 50bp, primo del ciclo; forte ricalibrazione, fiducia su disinflazione sostenibile, rischi visti bilanciati dopo forte easing."
+  },
+  "2024-11-26": {
+    "score": -1,
+    "note": "Taglio 25bp come atteso, prosecuzione graduale dell'easing; nessun cambio sostanziale di guidance rispetto a settembre."
+  },
+  "2025-01-08": {
+    "score": 1,
+    "note": "Taglio 25bp ma 'hawkish cut': dissenso, dot plot 2025 ridotto, linguaggio su 'careful approach' e rischi inflazione al rialzo."
+  },
+  "2025-02-19": {
+    "score": 1,
+    "note": "Tassi fermi (pausa); statement toglie riferimento a progressi sull'inflazione, si vuole vedere piu progresso prima di tagliare ancora."
+  }
+}
