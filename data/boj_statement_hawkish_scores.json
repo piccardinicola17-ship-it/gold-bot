@@ -1,0 +1,398 @@
+{
+  "2008-10-31": {
+    "score": -2,
+    "note": "Taglio tasso di 20pb a 0,3%, nuova Complementary Deposit Facility per liquidità di fine anno durante crisi finanziaria globale."
+  },
+  "2009-12-01": {
+    "score": -1,
+    "note": "Riunione straordinaria, nuovo strumento di funding a 3 mesi per abbassare tassi a lungo termine, tasso invariato a 0,1%."
+  },
+  "2010-03-17": {
+    "score": -1,
+    "note": "Tasso invariato; ampliato in modo sostanziale l'importo dell'operazione a tasso fisso introdotta a dicembre, due dissensi per più easing."
+  },
+  "2010-08-30": {
+    "score": -1,
+    "note": "Riunione straordinaria: nuovo termine 6 mesi nell'operazione a tasso fisso, più fondi per instabilità mercati e rischi USA."
+  },
+  "2010-10-05": {
+    "score": -2,
+    "note": "Lancio Comprehensive Monetary Easing: tasso a 0-0,1%, forward guidance su stabilità prezzi, primo programma acquisti asset incluso ETF e J-REIT."
+  },
+  "2010-10-28": {
+    "score": -1,
+    "note": "Definiti dettagli operativi e importi massimi per asset del programma acquisti; anticipata la riunione per accelerare gli acquisti ETF/J-REIT."
+  },
+  "2010-11-05": {
+    "score": -1,
+    "note": "Finalizzate specifiche per acquisti ETF/J-REIT (prime nella storia BOJ), acquisti avviati dalla settimana successiva nell'ambito del programma da 35 trilioni."
+  },
+  "2010-12-21": {
+    "score": 0,
+    "note": "Tasso invariato, nessuna nuova misura; il programma acquisti è ora operativo su tutte le categorie di asset, ripresa in pausa."
+  },
+  "2011-01-25": {
+    "score": 0,
+    "note": "Statement di Outlook trimestrale, tasso e programma invariati, previsioni di crescita leggermente riviste al rialzo per il 2010."
+  },
+  "2011-02-15": {
+    "score": 0,
+    "note": "Tasso e programma invariati, valutazione economica migliorata (\"emerge dalla fase di decelerazione\"), nessuna nuova misura di easing."
+  },
+  "2011-03-14": {
+    "score": -2,
+    "note": "Risposta emergenziale al terremoto/tsunami: programma acquisti aumentato di 5mila miliardi (35→40tln) soprattutto su asset di rischio."
+  },
+  "2011-04-07": {
+    "score": -1,
+    "note": "Nuova operazione di funding preliminare per istituti finanziari nelle aree colpite dal terremoto, collaterale ammissibile ampliato, tasso invariato."
+  },
+  "2011-04-28": {
+    "score": 0,
+    "note": "Tasso invariato; proposta di Nishimura di aumentare il programma di 5mila miliardi respinta 8 a 1, nessun nuovo easing."
+  },
+  "2011-05-20": {
+    "score": 0,
+    "note": "Tasso e programma invariati, economia sotto forte pressione post-terremoto ma ripresa attesa nel secondo semestre 2011."
+  },
+  "2011-06-14": {
+    "score": -1,
+    "note": "Tasso e programma invariati; nuova linea di credito minore (500 miliardi) per investimenti equity-like e ABL, easing marginale."
+  },
+  "2011-07-12": {
+    "score": 0,
+    "note": "Tasso e programma invariati, economia in ripresa dopo il terremoto grazie all'allentamento dei vincoli di offerta, nessuna nuova misura."
+  },
+  "2011-08-04": {
+    "score": -2,
+    "note": "\"Enhancement of Monetary Easing\": programma acquisti aumentato di 10mila miliardi (40→50tln) per rischi da debito USA/Europa."
+  },
+  "2011-09-07": {
+    "score": 0,
+    "note": "Tasso e programma invariati, implementazione dell'aumento di agosto in corso, economia in ripresa costante post-terremoto."
+  },
+  "2011-10-07": {
+    "score": 0,
+    "note": "Tasso e programma invariati, solo estensione tecnica di 6 mesi per facility di finanziamento delle aree disastrate."
+  },
+  "2011-10-27": {
+    "score": -1,
+    "note": "\"Enhancement of Monetary Easing\": programma aumentato di altri 5mila miliardi (50→55tln) per JGB, un dissenso voleva aumento maggiore."
+  },
+  "2011-11-16": {
+    "score": 0,
+    "note": "Nessuna azione, tassi invariati, valutazione economica sostanzialmente stabile rispetto al mese precedente."
+  },
+  "2011-12-21": {
+    "score": -1,
+    "note": "Nessuna azione ma valutazione economica peggiorata: la ripresa 'si e fermata', tono piu cauto sui rischi."
+  },
+  "2012-01-24": {
+    "score": 0,
+    "note": "Nessuna azione, quadro economico confermato 'piatto', previsioni FY2012-13 invariate nonostante taglio FY2011."
+  },
+  "2012-02-14": {
+    "score": -2,
+    "note": "Forte allentamento: APP +10 trilioni yen (55->65T) e primo goal esplicito di inflazione all'1%."
+  },
+  "2012-03-13": {
+    "score": -1,
+    "note": "Allentamento moderato: Growth-Supporting Facility ampliata di 2 trilioni yen; proposta di aumento APP respinta."
+  },
+  "2012-04-10": {
+    "score": 0,
+    "note": "Nessuna nuova misura, solo regole operative del programma dollari gia annunciato a marzo; tono lievemente migliore."
+  },
+  "2012-04-27": {
+    "score": -1,
+    "note": "Nuovo allentamento: APP +5 trilioni yen (65->70T) ed estensione duration JGB/corporate acquistabili."
+  },
+  "2012-05-23": {
+    "score": 0,
+    "note": "Nessuna azione, valutazione economica sostanzialmente invariata rispetto ad aprile, ancora fase di 'pick-up' incipiente."
+  },
+  "2012-06-15": {
+    "score": 0,
+    "note": "Nessuna azione ma valutazione economica migliorata: da 'shifting toward pick-up' a 'started picking up moderately'."
+  },
+  "2012-07-12": {
+    "score": -1,
+    "note": "Allentamento tecnico: -5T yen su operazione a tasso fisso, +5T su T-bills, rimosso rendimento minimo di offerta."
+  },
+  "2012-08-09": {
+    "score": 0,
+    "note": "Nessuna azione; valutazione lievemente peggiorata (pick-up export 'moderato', produzione debole)."
+  },
+  "2012-09-19": {
+    "score": -1,
+    "note": "Enhancement of Monetary Easing: APP +10 trilioni yen (70->80T), rimosso rendimento minimo per JGB e corporate bond."
+  },
+  "2012-10-05": {
+    "score": 0,
+    "note": "Nessuna azione ma economia descritta come 'leveling off', linguaggio piu debole in vista di misure successive."
+  },
+  "2012-10-30": {
+    "score": -2,
+    "note": "Allentamento aggressivo: APP +11T yen, nuova facility di prestito illimitata, dichiarazione congiunta Governo-BOJ sulla deflazione."
+  },
+  "2012-11-20": {
+    "score": 0,
+    "note": "Nessuna azione ma economia 'weakening somewhat', valutazione ulteriormente peggiorata in vista di nuovo intervento."
+  },
+  "2012-12-20": {
+    "score": -1,
+    "note": "Ulteriore allentamento: APP +10T yen (91->101T), dettagli operativi lending facility, annuncio revisione price stability goal."
+  },
+  "2013-01-22": {
+    "score": -2,
+    "note": "Svolta storica: adottato target di inflazione al 2% e metodo di acquisto asset open-ended senza scadenza."
+  },
+  "2013-02-14": {
+    "score": 0,
+    "note": "Nessuna azione, prima conferma post-target 2%; economia 'appears to stop weakening', proposta Miyao di piu easing respinta."
+  },
+  "2013-03-07": {
+    "score": 0,
+    "note": "Nessuna azione; economia 'has stopped weakening' (miglioramento linguistico), due proposte di ulteriore easing respinte."
+  },
+  "2013-04-04": {
+    "score": -2,
+    "note": "QQE 'bazooka' di Kuroda: raddoppio base monetaria e JGB in due anni, target operativo cambiato, APP terminato."
+  },
+  "2013-04-26": {
+    "score": 0,
+    "note": "Statement brevissimo, solo riconferma della guideline QQE lanciata a inizio aprile; nessuna valutazione economica, nessun cambiamento."
+  },
+  "2013-05-22": {
+    "score": 0,
+    "note": "QQE confermato invariato; valutazione economica migliora leggermente (economia 'inizia a riprendersi'), nessun cambio di stance."
+  },
+  "2013-06-11": {
+    "score": 0,
+    "note": "Nessun cambiamento di policy; linguaggio lievemente più positivo su produzione industriale e consumi privati."
+  },
+  "2013-07-11": {
+    "score": 0,
+    "note": "QQE invariato; CPI a 0%, previsioni confermate in linea con l'outlook di aprile, nessun cambio di stance."
+  },
+  "2013-08-08": {
+    "score": 0,
+    "note": "CPI headline torna positivo per la prima volta, ma nessuna modifica ad acquisti o guidance; solo conferma dati."
+  },
+  "2013-09-05": {
+    "score": 0,
+    "note": "CPI in area 0.5-1.0%; miglioramento su occupazione e reddito, ma programma QQE resta identico e invariato."
+  },
+  "2013-10-04": {
+    "score": 0,
+    "note": "Valutazione ancora più ottimista (sentiment imprese in miglioramento), nessuna variazione della policy monetaria."
+  },
+  "2013-10-31": {
+    "score": 0,
+    "note": "Comunicato minimo, solo riconferma della guideline sulla base monetaria; nessuna sezione di valutazione economica."
+  },
+  "2013-11-21": {
+    "score": 0,
+    "note": "Linguaggio quasi identico al mese precedente; ripresa moderata confermata, QQE invariato."
+  },
+  "2013-12-20": {
+    "score": 0,
+    "note": "CPI attorno a 1%; sentiment imprese diffuso e migliorato, ma policy invariata; menzionata volatilità pre/post rialzo IVA."
+  },
+  "2014-01-22": {
+    "score": 0,
+    "note": "QQE confermato; CPI ~1.25%; dissenso di Shirai su paragrafo rischi ma nessun cambio di maggioranza sulla policy."
+  },
+  "2014-02-18": {
+    "score": -1,
+    "note": "Raddoppiate le due facility di finanziamento straordinario (prestiti bancari e crescita), estese di un anno: easing aggiuntivo."
+  },
+  "2014-03-11": {
+    "score": 0,
+    "note": "Toni più positivi su investimenti e produzione industriale (accelerata), ma il QQE resta invariato."
+  },
+  "2014-04-08": {
+    "score": 0,
+    "note": "Primo statement dopo il rialzo IVA; la BOJ non aggiunge stimolo nonostante le fluttuazioni attese, policy invariata."
+  },
+  "2014-04-30": {
+    "score": 0,
+    "note": "Comunicato minimo, solo riconferma della guideline sulla base monetaria; nessun cambiamento di rilievo."
+  },
+  "2014-05-21": {
+    "score": 1,
+    "note": "Nuova frase 'QQE has been exerting its intended effects': linguaggio più fiducioso, primo segnale di soddisfazione sui risultati."
+  },
+  "2014-06-13": {
+    "score": 0,
+    "note": "Ripetuta la formula di maggio su QQE efficace; nessun cambiamento di policy o di tono aggiuntivo."
+  },
+  "2014-07-15": {
+    "score": 0,
+    "note": "Previsioni confermate in linea con aprile 2014; linguaggio sostanzialmente invariato rispetto a giugno."
+  },
+  "2014-08-08": {
+    "score": 0,
+    "note": "Compaiono accenni di debolezza (export, produzione industriale), ma conclusione dell'outlook e policy restano invariate."
+  },
+  "2014-09-04": {
+    "score": 0,
+    "note": "Debolezza si accumula (produzione, edilizia residenziale post-IVA), ma la BOJ non cambia stance; tono lievemente più cauto."
+  },
+  "2014-10-07": {
+    "score": 0,
+    "note": "Nessuna modifica: QQE a ritmo 60-70 trilioni confermato, voto 8-1 (Kiuchi contrario). Precede il 'surprise' del 31 ottobre."
+  },
+  "2014-10-31": {
+    "score": -2,
+    "note": "Espansione QQE a sorpresa, voto spaccato 5-4: base monetaria 60-70→80 trilioni, JGB e ETF/REIT triplicati. Fortemente dovish."
+  },
+  "2014-11-19": {
+    "score": 0,
+    "note": "Conferma invariata l'espansione QQE del 31/10 (80 trilioni); voto ora 8-1 con solo Kiuchi contrario, nessun ulteriore allentamento."
+  },
+  "2014-12-19": {
+    "score": 0,
+    "note": "Nessuna modifica alla guideline (80 trilioni); linguaggio economico lievemente migliorato (export ed edilizia in ripresa)."
+  },
+  "2015-01-21": {
+    "score": -1,
+    "note": "QQE core invariato ma ampliata la Growth-Supporting Funding Facility (max per banca 1→2 trilioni); outlook prezzi rivisto al ribasso."
+  },
+  "2015-02-18": {
+    "score": 0,
+    "note": "Nessuna modifica di policy; valutazione economica stabile/lievemente migliorata, export in ripresa."
+  },
+  "2015-03-17": {
+    "score": 0,
+    "note": "Nessuna modifica; CPI vicino a zero per calo energia, linguaggio sostanzialmente invariato rispetto a febbraio."
+  },
+  "2015-04-08": {
+    "score": 0,
+    "note": "Nessuna modifica; Kiuchi propone esplicitamente riduzione a 45 trilioni, respinta. Nuovo membro Harada, stance confermata."
+  },
+  "2015-04-30": {
+    "score": 0,
+    "note": "Statement breve senza modifiche di policy, stesso voto 8-1 contro Kiuchi; nessuna valutazione economica allegata."
+  },
+  "2015-05-22": {
+    "score": 0,
+    "note": "Nessuna modifica; miglioramento moderato del linguaggio su consumi ed edilizia, stance QQE invariata."
+  },
+  "2015-06-19": {
+    "score": 0,
+    "note": "Nessuna modifica di policy; economia in ripresa moderata, linguaggio pressoché identico al mese precedente."
+  },
+  "2015-07-15": {
+    "score": 0,
+    "note": "Nessuna modifica; outlook trimestrale rivede leggermente al ribasso la crescita 2015 ma CPI in linea, QQE confermato."
+  },
+  "2015-08-07": {
+    "score": 0,
+    "note": "Nessuna modifica; linguaggio economico stabile, primi accenni a rallentamento export/produzione non ancora enfatizzati."
+  },
+  "2015-09-15": {
+    "score": 0,
+    "note": "Nessuna modifica di policy nonostante turbolenza mercati emergenti/Cina; linguaggio riconosce rallentamento export ma nessuna azione."
+  },
+  "2015-10-07": {
+    "score": 0,
+    "note": "Nessuna modifica; economia ancora frenata da rallentamento emergenti, sentiment imprese leggermente più cauto ma stance invariata."
+  },
+  "2015-10-30": {
+    "score": 0,
+    "note": "Statement breve senza modifiche di policy; stesso voto 8-1, nessuna valutazione economica dettagliata allegata."
+  },
+  "2015-11-19": {
+    "score": 0,
+    "note": "Nessuna modifica; aspettative di inflazione descritte come indebolite in alcuni indicatori, ma nessuna azione di policy."
+  },
+  "2015-12-18": {
+    "score": -1,
+    "note": "Misure supplementari QQE: nuovo programma ETF (300 mld/anno), durata media JGB estesa a 7-12 anni; voto diviso 6-3, easing incrementale."
+  },
+  "2017-12-21": {
+    "score": 0,
+    "note": "Framework YCC (tasso -0.1%, target JGB 10y ~0%) confermato invariato; economia in espansione, unico dissenso (Kataoka) per PIÙ easing."
+  },
+  "2018-06-15": {
+    "score": 0,
+    "note": "YCC invariato rispetto a dicembre 2017; linguaggio lievemente più solido su economia globale, dissenso Kataoka ancora per più easing."
+  },
+  "2018-09-19": {
+    "score": 0,
+    "note": "Prima release del batch: conferma QQE+YCC e tassi negativi con voto 7-2, nessun segnale di cambio stance."
+  },
+  "2018-12-20": {
+    "score": 0,
+    "note": "Testo quasi identico a settembre, CPI lievemente più alto, nessun cambiamento di policy o forward guidance."
+  },
+  "2019-03-15": {
+    "score": -1,
+    "note": "Valutazione economica declassata per la prima volta per rallentamento estero (export/produzione), YCC invariato, nessuna azione."
+  },
+  "2019-06-20": {
+    "score": -1,
+    "note": "Nuova forward guidance a calendario ('almeno fino a primavera 2020') sostituisce linguaggio generico; debolezza export confermata."
+  },
+  "2019-09-19": {
+    "score": -2,
+    "note": "Bias accomodante rafforzato esplicitamente ('non esiterà ad agire') e annuncio di riesame al meeting successivo: segnale dovish forte."
+  },
+  "2019-12-19": {
+    "score": -1,
+    "note": "Guidance sui tassi rivista da 'livelli attuali per periodo esteso' a 'livelli attuali o inferiori': porta aperta a nuovi tagli."
+  },
+  "2020-01-21": {
+    "score": 0,
+    "note": "Testo minimo, guidance identica a dicembre 2019 ('livelli attuali o inferiori'), nessun cambiamento rilevato."
+  },
+  "2020-04-27": {
+    "score": -2,
+    "note": "Risposta COVID aggressiva: acquisti CP/corporate bond raddoppiati, JGB senza limite esplicito, tetti ETF/REIT quasi raddoppiati."
+  },
+  "2020-05-22": {
+    "score": -1,
+    "note": "Nuovo programma di finanziamento PMI (~30 trilioni yen) attua misura annunciata ad aprile, portando il programma totale a 75 trilioni."
+  },
+  "2020-06-16": {
+    "score": 0,
+    "note": "Conferma le misure straordinarie COVID di aprile, YCC e acquisti invariati, nessuna nuova azione di easing."
+  },
+  "2020-09-17": {
+    "score": 0,
+    "note": "Economia 'inizia a riprendersi' ma policy identica a giugno, nessuna variazione di YCC o forward guidance."
+  },
+  "2020-12-18": {
+    "score": -1,
+    "note": "Estende lo Special Program COVID di 6 mesi e rimuove il tetto per singola controparte: ulteriore allentamento marginale."
+  },
+  "2022-06-17": {
+    "score": 0,
+    "note": "Formalizza operazioni di acquisto a tasso fisso giornaliere per difendere il tetto YCC 0.25%; nessun cambio di stance dichiarato (salto 2020-2022)."
+  },
+  "2022-09-22": {
+    "score": 1,
+    "note": "Inizia a smantellare le misure di sostegno COVID mentre l'inflazione sale a 2.5-3.0%: primo timido segnale di normalizzazione."
+  },
+  "2022-12-20": {
+    "score": 2,
+    "note": "Sorpresa tecnica: banda YCC raddoppiata da ±0.25 a ±0.5 punti, letta dal mercato come primo passo hawkish nonostante la negazione BOJ."
+  },
+  "2023-03-10": {
+    "score": 0,
+    "note": "Ultimo meeting di Kuroda: mantiene la banda ±0.5% fissata a dicembre, inflazione ~4%, nessuna ulteriore modifica YCC."
+  },
+  "2023-06-16": {
+    "score": -1,
+    "note": "Primo meeting di Ueda: introduce linguaggio 'pazientemente' e condiziona la normalizzazione a salari sostenibili, tono più cauto."
+  },
+  "2023-09-22": {
+    "score": 1,
+    "note": "YCC reso più flessibile: banda trattata come 'riferimento non rigido', tasso di offerta delle operazioni salito da 0.5% a 1.0%."
+  },
+  "2023-12-19": {
+    "score": 1,
+    "note": "Mantiene il framework di settembre ma proietta inflazione sopra 2% fino a fine FY2024 e rende discrezionale il meccanismo d'offerta."
+  }
+}

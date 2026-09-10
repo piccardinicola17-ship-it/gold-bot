@@ -247,6 +247,41 @@ def save_presconf_scores(db_path: str = HIST_DB_PATH) -> int:
     return saved
 
 
+def save_text_scores(event_name: str, scores_path: str, db_path: str = HIST_DB_PATH,
+                      currency: str | None = None) -> int:
+    """Versione generica di save_fomc_scores/save_minutes_scores/
+    save_presconf_scores — usata da historical_cb_text.py (BCE/BOJ) per
+    non duplicare la stessa logica di INSERT (l'errore da evitare è
+    proprio quello descritto in [[feedback-dual-mechanism-drift-pattern]]:
+    due copie della stessa cosa che divergono nel tempo). currency
+    disambigua quando event_name da solo è ambiguo tra banche centrali
+    (es. 'Monetary Policy Statement' esiste sia per EUR sia per JPY)."""
+    init_fomc_scores_table(db_path)
+    if not os.path.exists(scores_path):
+        return 0
+    with open(scores_path, encoding="utf-8") as f:
+        scores = json.load(f)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    saved = 0
+    with _connect(db_path) as conn:
+        for date_utc, info in scores.items():
+            query = "SELECT event_uid FROM macro_events WHERE event_name=? AND date_utc=?"
+            params = [event_name, date_utc]
+            if currency is not None:
+                query += " AND currency=?"
+                params.append(currency)
+            row = conn.execute(query, params).fetchone()
+            if row is None:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO fomc_hawkish_scores (event_uid, date_utc, score, note, scored_at) "
+                "VALUES (?,?,?,?,?)",
+                (row["event_uid"], date_utc, info["score"], info["note"], now_iso),
+            )
+            saved += 1
+    return saved
+
+
 _PRICE_HORIZONS = {
     "reaction_1m": "price_t+1m", "reaction_5m": "price_t+5m", "reaction_15m": "price_t+15m",
     "reaction_30m": "price_t+30m", "reaction_60m": "price_t+60m",
@@ -286,7 +321,8 @@ def _evaluate_score_split(df, horizon: str, train_fraction: float) -> dict | Non
     }
 
 
-def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = None) -> dict:
+def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = None,
+                          currency: str | None = None) -> dict:
     """Confronta punteggio hawkish/dovish vs reazione di prezzo reale —
     STESSO standard Theil-Sen + split cronologico multiplo + soglia n>=100
     usato ovunque nel progetto (historical_model.py,
@@ -297,19 +333,29 @@ def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = N
     historical_combined_events.py, n=35). Ritorna {"available": False,
     ...} se le reazioni di prezzo non sono ancora state calcolate.
 
-    event_name: None = tutti i punteggi salvati (Statement + Minutes
-    insieme), oppure 'FOMC Statement' / 'FOMC Meeting Minutes' per
-    validare le due fonti separatamente (hanno dinamiche di mercato
-    diverse: lo Statement è "prima notizia", i Minutes confermano/
-    dettagliano una decisione già nota da 3 settimane)."""
+    Nonostante il nome (storico, era solo FOMC), generica: usata anche da
+    historical_cb_text.py per BCE/BOJ — vedi 'currency' sotto.
+
+    event_name: None = tutti i punteggi salvati per quel filtro, oppure un
+    nome preciso ('FOMC Statement', 'FOMC Meeting Minutes',
+    'FOMC Press Conference', 'ECB Press Conference', 'Monetary Policy
+    Statement', ...) per validare le fonti separatamente (hanno dinamiche
+    di mercato diverse: uno Statement è "prima notizia", i Minutes
+    confermano/dettagliano una decisione già nota da settimane).
+    currency: necessario quando event_name da solo è ambiguo tra banche
+    centrali diverse (es. "Monetary Policy Statement" esiste sia per EUR
+    sia per JPY, stesso nome, valuta diversa)."""
     import pandas as pd
     from historical_model import TRAIN_FRACTIONS
 
     filter_sql = ""
-    params: tuple = ()
+    params: list = []
     if event_name is not None:
-        filter_sql = "AND m.event_name = ?"
-        params = (event_name,)
+        filter_sql += " AND m.event_name = ?"
+        params.append(event_name)
+    if currency is not None:
+        filter_sql += " AND m.currency = ?"
+        params.append(currency)
 
     price_cols = ", ".join(f'r."{col}" AS {name}_price' for name, col in _PRICE_HORIZONS.items())
     with _connect(db_path) as conn:
@@ -363,7 +409,8 @@ def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = N
     return {
         "available": True,
         "n": n,
-        "event_name": event_name or "Statement+Minutes",
+        "event_name": event_name or "(tutti)",
+        "currency": currency,
         "verdict": verdict,
         "details": results,
     }

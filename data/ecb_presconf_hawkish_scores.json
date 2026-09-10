@@ -1,0 +1,366 @@
+{
+  "2007-01-11": {
+    "score": 1,
+    "note": "Tassi fermi ma retorica da rialzo confermata ('firm and timely'), M3 record, rischi inflazione al rialzo, nessun cambio di tono."
+  },
+  "2007-08-02": {
+    "score": 1,
+    "note": "Press briefing straordinario per turbolenza subprime, ma tassi fermi e 'strong vigilance' confermata: segnale di rialzo a settembre ancora valido."
+  },
+  "2008-02-07": {
+    "score": 0,
+    "note": "Tassi invariati, unanime, nessuna richiesta di rialzo/taglio; rischi crescita ora al ribasso ma vigilanza su inflazione sostanzialmente invariata."
+  },
+  "2008-05-08": {
+    "score": 0,
+    "note": "Tassi fermi, Trichet 'stesso umore' della riunione precedente; inflazione protratta ma stance sostanzialmente identica a febbraio-marzo."
+  },
+  "2008-07-03": {
+    "score": 2,
+    "note": "Rialzo di 25pb a 4,25% per prevenire effetti di secondo round sui salari; decisione unanime, chiaramente hawkish nonostante crescita in frenata."
+  },
+  "2008-09-04": {
+    "score": 0,
+    "note": "Tassi fermi, 'esattamente stesso umore' di luglio nonostante PIL in contrazione (-0,2%); nessun bias, focus ancora su rischi inflazione."
+  },
+  "2008-10-02": {
+    "score": -1,
+    "note": "Tassi fermi ma Trichet rivela che l'opzione taglio è stata discussa; rischi al rialzo diminuiti, pivot dovish una settimana prima del taglio coordinato dell'8 ottobre."
+  },
+  "2009-04-02": {
+    "score": -2,
+    "note": "Taglio di 25pb a 1,25% (minimo storico); Trichet dice non è il limite minimo e annuncia misure non convenzionali al prossimo meeting."
+  },
+  "2009-05-07": {
+    "score": -2,
+    "note": "Taglio a 1,00% più primo programma di acquisto covered bond (60 mld) e LTRO a 12 mesi a tasso fisso: pivot fortemente accomodante."
+  },
+  "2009-07-02": {
+    "score": 0,
+    "note": "Tassi fermi all'1,00%, si avvia solo l'acquisto covered bond già annunciato; nessuna nuova misura, stance invariata rispetto a maggio."
+  },
+  "2009-09-03": {
+    "score": 0,
+    "note": "Tassi fermi all'1%, nessun pre-commitment; Trichet ribadisce prudenza, non è ancora il momento dell'exit strategy."
+  },
+  "2009-10-08": {
+    "score": 0,
+    "note": "Tassi invariati, toni leggermente più fiduciosi su stabilizzazione ma nessun segnale di cambio di rotta o uscita anticipata."
+  },
+  "2009-12-03": {
+    "score": 1,
+    "note": "Primo passo di normalizzazione: fine dell'ultima LTRO a 12 mesi e tasso indicizzato, pur dichiarato 'neutrale' sui tassi."
+  },
+  "2010-01-14": {
+    "score": 0,
+    "note": "Tassi fermi, valutazione economica invariata; cresce l'attenzione sul debito greco ma nessun impatto sulla stance di policy."
+  },
+  "2010-04-08": {
+    "score": 0,
+    "note": "Tassi invariati; crisi greca al centro del Q&A, collateral framework ammorbidito su BBB- oltre il 2010 a sostegno della periferia."
+  },
+  "2010-09-02": {
+    "score": -1,
+    "note": "Tassi fermi; PIL rivisto al rialzo ma rischi ribassisti (nuovi) e full allotment esteso oltre le attese, più accomodante del previsto."
+  },
+  "2010-11-04": {
+    "score": 0,
+    "note": "Nessun cambiamento: momentum positivo confermato, bilancio dei rischi come a ottobre; critiche alla riforma di governance UE giudicata insufficiente."
+  },
+  "2010-12-02": {
+    "score": -1,
+    "note": "Rischi di crescita passano a 'tilted to downside' (da 'slightly'), rischi inflazione da rialzisti a bilanciati; salvataggio Irlanda accolto."
+  },
+  "2011-02-03": {
+    "score": 1,
+    "note": "Tassi fermi ma linguaggio si inasprisce: 'very close monitoring', pressioni inflazionistiche di breve termine, rischi verso l'alto."
+  },
+  "2011-03-03": {
+    "score": 2,
+    "note": "Svolta hawkish: 'strong vigilance', Trichet dichiara possibile un rialzo dei tassi al prossimo meeting; rischi inflazione 'on the upside'."
+  },
+  "2011-08-04": {
+    "score": -1,
+    "note": "Tassi invariati dopo il rialzo di luglio, ma nuova LTRO a 6 mesi per tensioni di mercato e SMP riattivato su Italia/Spagna in tempo reale durante la conferenza."
+  },
+  "2011-11-03": {
+    "score": -2,
+    "note": "Primo Draghi: taglio tassi di 25pb, inversione netta rispetto a Trichet, rischi al ribasso intensificati e revisione al ribasso della crescita 2012 attesa."
+  },
+  "2012-04-04": {
+    "score": 0,
+    "note": "Tassi invariati, nessun cambio di stance: uscita anticipata dalle misure non convenzionali definita 'prematura', valutazione economica sostanzialmente invariata."
+  },
+  "2012-05-03": {
+    "score": 0,
+    "note": "Tassi invariati, stance accomodante confermata senza nuove misure; nessuna discussione su tagli, linguaggio quasi identico al mese precedente."
+  },
+  "2012-06-06": {
+    "score": -1,
+    "note": "Tassi invariati ma rischi al ribasso accresciuti esplicitamente, alcuni membri del Consiglio favorevoli a un taglio (non unanime): tono più dovish del mese precedente."
+  },
+  "2012-07-05": {
+    "score": -2,
+    "note": "Taglio tassi di 25pb e tasso sui depositi portato a 0% (storico), rischi al ribasso materializzati, crescita debole: azione accomodante decisa."
+  },
+  "2012-08-02": {
+    "score": -2,
+    "note": "Tassi invariati ma annuncio del quadro OMT ('whatever it takes'): acquisti di titoli potenzialmente illimitati per contrastare i premi di rischio, segnale fortemente accomodante."
+  },
+  "2012-09-06": {
+    "score": -2,
+    "note": "Varate le modalita' definitive delle OMT (acquisti illimitati sotto condizionalita'), operativizzando la promessa di luglio: intervento straordinario di allentamento."
+  },
+  "2012-10-04": {
+    "score": 0,
+    "note": "Tassi invariati all'unanimita', nessuna discussione su tagli; OMT confermate ma nessuna nuova misura rispetto al mese precedente, stance stabile."
+  },
+  "2013-04-04": {
+    "score": -1,
+    "note": "Tassi invariati ma discussione estesa su un taglio, crescita debole estesa al 2013, stance 'accomodante finche' necessario': tono piu' dovish del mese precedente."
+  },
+  "2013-06-06": {
+    "score": 0,
+    "note": "Tassi invariati, conferma stance post-taglio maggio; strumenti (ABS, tasso deposito negativo) 'sullo scaffale' ma nessuna azione, nessun cambio di rotta."
+  },
+  "2013-07-04": {
+    "score": -1,
+    "note": "Tassi invariati ma introdotta per la prima volta forward guidance esplicita: tassi 'presenti o più bassi' per periodo prolungato, passo definito 'senza precedenti'."
+  },
+  "2013-08-01": {
+    "score": 0,
+    "note": "Tassi invariati, forward guidance di luglio confermata senza modifiche; discussione su taglio ma nessuna azione, nessun cambio di stance."
+  },
+  "2013-09-05": {
+    "score": 0,
+    "note": "Tassi invariati, forward guidance riconfermata; PIL torna positivo dopo 6 trimestri ma nessuna variazione di policy, recovery definita 'ancora troppo verde'."
+  },
+  "2013-10-02": {
+    "score": 0,
+    "note": "Tassi invariati, forward guidance riconfermata; discussione su taglio tassi ma nessuna azione, inflazione in calo all'1,1% ma nessun cambio di policy."
+  },
+  "2013-11-07": {
+    "score": -2,
+    "note": "Taglio a sorpresa refi rate di 25pb (0,25%), estensione full allotment fino a metà 2015 ed estensione LTRO; mercati colti impreparati, mossa definita 'bazooka'."
+  },
+  "2014-10-02": {
+    "score": -1,
+    "note": "Avvio operativo acquisti ABS e covered bond (Q4 2014) attuando le decisioni di settembre; impegno unanime a strumenti non convenzionali aggiuntivi se necessario."
+  },
+  "2014-12-04": {
+    "score": -2,
+    "note": "Proiezioni crescita/inflazione riviste bruscamente al ribasso; linguaggio passa da 'aspettativa' a 'intenzione' su espansione bilancio, ampia discussione QE sovrano preannunciata per inizio 2015."
+  },
+  "2015-01-22": {
+    "score": -2,
+    "note": "Lancio del QE su larga scala: acquisti pubblici e privati per 60 mld/mese fino a settembre 2016, prima volta acquisto titoli di stato; mossa storica fortemente espansiva."
+  },
+  "2015-03-05": {
+    "score": 0,
+    "note": "Avvio operativo del PSPP già annunciato a gennaio, nessuna nuova misura; proiezioni di crescita riviste al rialzo, tono più fiducioso sugli effetti già visibili."
+  },
+  "2015-12-03": {
+    "score": -1,
+    "note": "Taglio deposit rate (-10pb) ed estensione APP a marzo 2017 con reinvestimenti, ma pacchetto sotto le attese di mercato ('disappointment'), reazione euro forte."
+  },
+  "2016-01-21": {
+    "score": -2,
+    "note": "Tassi invariati ma segnale fortissimo di nuovo easing a marzo, rischi al ribasso aumentati, 'nessun limite' agli strumenti disponibili."
+  },
+  "2016-04-21": {
+    "score": 0,
+    "note": "Solo implementazione del maxi-pacchetto di marzo (APP a 80mld, CSPP, TLTRO II); Draghi esclude nuove misure e scarsità di titoli, nessun cambio di stance."
+  },
+  "2016-06-02": {
+    "score": 0,
+    "note": "Tassi e APP invariati, focus su implementazione TLTRO/CSPP; proiezioni PIL/inflazione riviste leggermente al rialzo, bilancio rischi appena migliorato ma stance confermata."
+  },
+  "2016-10-20": {
+    "score": -1,
+    "note": "Nessuna decisione su tapering o estensione QE, ma Draghi respinge con forza le voci di mercato su riduzione anticipata, riafferma accomodamento 'molto sostanziale'."
+  },
+  "2017-04-27": {
+    "score": 1,
+    "note": "Prima revisione al rialzo del linguaggio sui rischi di crescita ('verso una configurazione più bilanciata'), pur mantenendo forward guidance e easing bias invariati."
+  },
+  "2017-07-20": {
+    "score": 0,
+    "note": "Rischi di crescita ora 'ampiamente bilanciati' ma Draghi ridimensiona le attese hawkish nate dal discorso di Sintra, rinvia discussione tapering all'autunno."
+  },
+  "2017-10-26": {
+    "score": 1,
+    "note": "Dimezzamento annunciato del QE mensile (80->30mld da gennaio 2018), ma comunicazione dovish: programma open-ended, reinvestimenti estesi, rifiuto del termine 'tapering'."
+  },
+  "2018-04-26": {
+    "score": -1,
+    "note": "Riconosciuta moderazione della crescita e rischi da protezionismo più prominenti; Draghi rinvia ogni discussione su roadmap di normalizzazione, tono cauto e prudente."
+  },
+  "2018-07-26": {
+    "score": 1,
+    "note": "Confermato il piano di fine QE entro dicembre 2018 (riduzione a 15mld poi stop), inflazione headline al 2% target raggiunto, fiducia nella convergenza rafforzata."
+  },
+  "2018-10-25": {
+    "score": 0,
+    "note": "Tassi invariati, fine APP a dicembre confermata come da piano precedente, bilancio dei rischi ancora giudicato equilibrato."
+  },
+  "2019-01-24": {
+    "score": -1,
+    "note": "Tassi invariati ma rischi crescita declassati a ribasso all'unanimita, riconosciuta debolezza momentum, tono piu accomodante nel Q&A."
+  },
+  "2019-04-10": {
+    "score": 0,
+    "note": "Nessuna nuova decisione, rischi ancora a ribasso come a gennaio, si valutano solo in via preliminare tiering e TLTRO-III."
+  },
+  "2019-07-25": {
+    "score": -2,
+    "note": "Guidance corretta con 'or lower', nuovo linguaggio di simmetria, comitati incaricati di preparare pacchetto di easing per settembre."
+  },
+  "2019-10-24": {
+    "score": 0,
+    "note": "Ultima conferenza di Draghi: implementa il pacchetto di settembre gia annunciato (APP a 20mld), nessun nuovo cambio di stance."
+  },
+  "2019-12-12": {
+    "score": 0,
+    "note": "Prima conferenza di Lagarde, nessuna nuova misura, rischi a ribasso ma leggermente meno pronunciati, avvio review strategica."
+  },
+  "2020-01-23": {
+    "score": 0,
+    "note": "Tassi e APP invariati, rischi ancora a ribasso ma un po' meno pronunciati, lancio formale della strategic review."
+  },
+  "2020-03-12": {
+    "score": -1,
+    "note": "Nuovo APP +120mld e TLTRO piu favorevoli (dovish) ma nessun taglio tassi e frase infelice 'not here to close spreads' che ha scatenato sell-off sui BTP."
+  },
+  "2020-09-10": {
+    "score": 0,
+    "note": "Nessuna nuova misura, PEPP e APP confermati invariati, preoccupazione per euro forte discussa ma senza azione."
+  },
+  "2020-10-29": {
+    "score": -2,
+    "note": "Nessuna azione oggi ma impegno unanime esplicito a ricalibrare tutti gli strumenti a dicembre per la seconda ondata COVID."
+  },
+  "2020-12-10": {
+    "score": -1,
+    "note": "PEPP ampliato di 500mld ed esteso a marzo 2022, tassi invariati; espansione accomodante ma ampiamente anticipata dal mercato."
+  },
+  "2021-03-11": {
+    "score": -1,
+    "note": "Ritmo acquisti PEPP accelerato 'significativamente' per contrastare rialzo rendimenti; mossa dovish esplicita, tassi invariati."
+  },
+  "2021-06-10": {
+    "score": 0,
+    "note": "'Steady hand': confermato ritmo PEPP e stance di marzo, nessun cambiamento; proiezioni riviste al rialzo ma senza azione nuova."
+  },
+  "2021-07-22": {
+    "score": -1,
+    "note": "Nuova forward guidance post-strategy review: pazienza su rialzi, accetta overshoot moderato inflazione; mercato la legge come dovish."
+  },
+  "2021-09-09": {
+    "score": 1,
+    "note": "Prima riduzione (moderata) del ritmo PEPP, pur negando sia 'tapering'; primo passo hawkish dopo mesi di accomodamento crescente."
+  },
+  "2021-10-28": {
+    "score": 0,
+    "note": "Confermato lo stesso ritmo PEPP moderatamente ridotto di settembre; forte rigetto nel Q&A delle aspettative di rialzo tassi anticipato dal mercato, nessun cambio di stance."
+  },
+  "2022-02-03": {
+    "score": 2,
+    "note": "Svolta hawkish netta: Lagarde non ripete 'rialzo altamente improbabile', rimuove 'in entrambe le direzioni', preoccupazione unanime su inflazione."
+  },
+  "2022-03-10": {
+    "score": 1,
+    "note": "Nonostante la guerra, accelerato il calendario di riduzione APP (40/30/20mld), rimossa la propensione al ribasso su tassi ('shortly before'->'some time after')."
+  },
+  "2022-06-09": {
+    "score": 2,
+    "note": "Fine acquisti netti APP dal 1 luglio, annunciato rialzo di 25pb a luglio e altro (forse maggiore) a settembre: svolta hawkish concreta."
+  },
+  "2022-07-21": {
+    "score": 2,
+    "note": "Primo rialzo tassi in 11 anni, di 50pb (più del 25pb segnalato), 'frontloading' uscita da tassi negativi; introdotto anche il TPI."
+  },
+  "2022-09-08": {
+    "score": 2,
+    "note": "Rialzo storico di 75pb, frontloading deciso e unanime; Lagarde esclude pause, promette altri rialzi nei prossimi meeting."
+  },
+  "2022-10-27": {
+    "score": 1,
+    "note": "Terzo rialzo di 75pb ma toni piu attendisti: 'progressi sostanziali' fa presagire rallentamento futuro del ritmo dei rialzi."
+  },
+  "2022-12-15": {
+    "score": 2,
+    "note": "Rialzo di 50pb ma guidance piu dura: 'significativamente', 'ritmo costante', rifiuto esplicito del 'pivot', avvio QT da marzo."
+  },
+  "2023-02-02": {
+    "score": 1,
+    "note": "Rialzo di 50pb con impegno esplicito per altri 50pb a marzo; rischi definiti 'piu bilanciati', primo lieve ammorbidimento."
+  },
+  "2023-03-16": {
+    "score": 1,
+    "note": "Rialzo di 50pb nonostante la crisi bancaria SVB/Credit Suisse; sparisce pero la forward guidance esplicita sui rialzi futuri."
+  },
+  "2023-05-04": {
+    "score": 1,
+    "note": "Rallentamento a 25pb, ma 'non ci fermiamo' e fine reinvestimenti APP da luglio confermano intento restrittivo persistente."
+  },
+  "2023-06-15": {
+    "score": 1,
+    "note": "Rialzo di 25pb con guidance esplicita: 'molto probabile' altro rialzo a luglio; confermata fine reinvestimenti APP."
+  },
+  "2023-07-27": {
+    "score": 0,
+    "note": "Nono rialzo di 25pb ma guidance capovolta: 'potremmo alzare o fermarci', fine dell'impegno esplicito sui prossimi rialzi."
+  },
+  "2023-09-14": {
+    "score": 0,
+    "note": "Decimo e ultimo rialzo del ciclo (25pb), ma linguaggio segnala tassi 'a livelli sufficienti': mercati leggono come hike dovish."
+  },
+  "2023-10-26": {
+    "score": -1,
+    "note": "Prima pausa dopo 10 rialzi consecutivi, decisione unanime; Lagarde non esclude nuovi rialzi ma il ciclo restrittivo si ferma."
+  },
+  "2023-12-14": {
+    "score": 1,
+    "note": "Tassi fermi, Lagarde respinge attese di taglio ('prematuro'), accelera il tapering PEPP: segnale leggermente hawkish contro il pricing di mercato."
+  },
+  "2024-01-25": {
+    "score": 0,
+    "note": "Tassi invariati, ribadito che discutere tagli e' 'prematuro', nessun cambiamento di tono rispetto a dicembre."
+  },
+  "2024-03-07": {
+    "score": -1,
+    "note": "Tassi fermi ma proiezioni inflazione riviste al ribasso, Lagarde 'piu' fiduciosa': primo segnale dovish verso giugno."
+  },
+  "2024-04-11": {
+    "score": -1,
+    "note": "Tassi fermi, ma nuova guidance esplicita: taglio 'appropriato' se cresce la fiducia, apre la porta al taglio di giugno."
+  },
+  "2024-06-06": {
+    "score": -1,
+    "note": "Primo taglio (25pb) dopo 9 mesi di pausa, ma proiezioni inflazione riviste al rialzo e nessun impegno sul percorso futuro."
+  },
+  "2024-07-18": {
+    "score": 0,
+    "note": "Pausa dopo il taglio di giugno, nessuna nuova indicazione su settembre, approccio 'meeting by meeting' invariato."
+  },
+  "2024-09-12": {
+    "score": -1,
+    "note": "Secondo taglio (25pb), disinflazione confermata per la quinta proiezione consecutiva, prosegue il ciclo di allentamento avviato a giugno."
+  },
+  "2024-10-17": {
+    "score": -1,
+    "note": "Terzo taglio, stavolta consecutivo dopo settembre; Lagarde ammette sorpresa per il calo rapido dell'inflazione e la debolezza della crescita."
+  },
+  "2024-12-12": {
+    "score": -2,
+    "note": "Quarto taglio; rimossa la formula 'restrittivi quanto necessario', rischi ora definiti 'bilaterali', crescita rivista al ribasso: svolta dovish esplicita nella guidance."
+  },
+  "2025-01-30": {
+    "score": 0,
+    "note": "Quinto taglio (25pb) allo stesso ritmo, esclusi sia 50pb sia una pausa, linguaggio invariato rispetto a dicembre."
+  },
+  "2025-03-06": {
+    "score": 1,
+    "note": "Taglio 25pb come atteso, ma guidance vira da 'restrittiva finche necessario' a 'meno restrittiva'; niente pre-commitment, Lagarde apre a pausa ad aprile, un dissenso hawkish (Holzmann)."
+  }
+}
