@@ -407,10 +407,35 @@ def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = N
     beats_all_by_horizon = res_df.groupby("horizon")["beats_naive"].agg(lambda s: s.all())
     n_horizons_ok = int(beats_all_by_horizon.sum())
 
+    # "beats_naive" da solo non basta: un R² test appena sopra un R² naive
+    # altrettanto vicino a zero (entrambi minuscoli) tecnicamente "vince" il
+    # confronto senza avere nessuna vera capacità direzionale — scoperto il
+    # 2026-09-11 su FOMC Meeting Minutes (reaction_15m "EDGE VALIDATO" su
+    # tutti e 4 gli split, ma direction_accuracy 46-51%, sostanzialmente un
+    # lancio di moneta). Le 6 serie realmente deployate mostrano tutte
+    # direction_accuracy 56.7%-66.5%: 0.55 è una soglia conservativa
+    # chiaramente sopra il rumore ma sotto quel range, per distinguere un
+    # edge statisticamente "vincente sulla carta" da uno genuinamente
+    # sfruttabile prima di costruirci sopra qualunque automazione live.
+    DIRECTION_ACCURACY_FLOOR = 0.55
+    mean_dir_acc_by_horizon = res_df.groupby("horizon")["direction_accuracy"].mean()
+    genuine_horizons = [
+        h for h in beats_all_by_horizon.index
+        if beats_all_by_horizon[h] and mean_dir_acc_by_horizon[h] >= DIRECTION_ACCURACY_FLOOR
+    ]
+    n_genuine = len(genuine_horizons)
+
     if n < 100:
         verdict = f"DATI INSUFFICIENTI PER UN VERDETTO AFFIDABILE (n={n}, serve n>=100)"
+    elif n_genuine > 0:
+        verdict = f"EDGE VALIDATO E GENUINO su {n_genuine}/{len(_PRICE_HORIZONS)} orizzonti (n={n})"
     elif n_horizons_ok > 0:
-        verdict = f"EDGE VALIDATO su {n_horizons_ok}/{len(_PRICE_HORIZONS)} orizzonti (n={n})"
+        verdict = (
+            f"EDGE STATISTICO SU {n_horizons_ok}/{len(_PRICE_HORIZONS)} ORIZZONTI MA NON GENUINO "
+            f"(n={n}) — batte il naive sulla carta ma direction_accuracy media sotto "
+            f"{DIRECTION_ACCURACY_FLOOR:.0%} su tutti gli orizzonti: R² positivo marginale, "
+            f"nessuna vera capacità predittiva della direzione. NON deployare."
+        )
     else:
         verdict = f"NESSUN EDGE — risultato pulito (n={n})"
 
@@ -420,6 +445,9 @@ def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = N
         "event_name": event_name or "(tutti)",
         "currency": currency,
         "verdict": verdict,
+        "n_horizons_beats_naive": n_horizons_ok,
+        "n_horizons_genuine": n_genuine,
+        "genuine_horizons": genuine_horizons,
         "details": results,
     }
 
