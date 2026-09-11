@@ -23,6 +23,8 @@ from pathlib import Path
 import pytz
 import requests
 
+import analyzer
+
 logger = logging.getLogger(__name__)
 TIMEZONE = pytz.timezone("Europe/Rome")
 XAUUSD_PIP_SIZE = float(os.environ.get("XAUUSD_PIP_SIZE", "0.10"))
@@ -85,31 +87,19 @@ def is_decisive_win(trade: dict) -> bool:
 _write_lock = threading.RLock()
 _price_cache = {"price": 0.0, "ts": 0.0, "futures": False}
 
-# Come in analyzer.py: se Twelve Data segnala quota esaurita, smettiamo di
-# richiamarla fino a mezzanotte UTC invece di continuare a provarci a ogni
-# ciclo di monitoraggio (ogni 10s). Qui il rischio è basso — gold-api.com è
-# 2° in cascata e molto affidabile — ma protegge comunque il monitoraggio
-# SL/TP/BE nel caso raro in cui anche Yahoo e gold-api falliscano insieme.
-_twelvedata_price_blocked_until = 0.0
-
-
-def _twelvedata_quota_exceeded(exc: Exception) -> bool:
-    return "api credits" in str(exc).lower()
-
-
+# Il flag di quota esaurita Twelve Data è condiviso con analyzer.py
+# (analyzer._twelvedata_blocked_until) invece di avere una copia propria qui:
+# trovato il 2026-09-10 che le due cascate (segnali vs monitor SL/TP/BE)
+# avevano ciascuna il proprio flag, mai sincronizzati — se una bloccava
+# Twelve Data l'altra continuava comunque a chiamarlo. Vedi
+# feedback_dual_mechanism_drift_pattern in memoria.
 def is_twelvedata_price_blocked() -> bool:
     """True se Twelve Data ha segnalato quota esaurita e siamo ancora nella
-    finestra di sospensione (vedi _fetch_price_with_scale_sync). Usato da
+    finestra di sospensione (condivisa con analyzer.py). Usato da
     gold_bot._check_single_timeframe prima di tentare il controllo
     incrociato del basis GC=F-spot, per non sprecare una chiamata già
     sappiamo destinata a fallire."""
-    return time.time() < _twelvedata_price_blocked_until
-
-
-def _seconds_until_utc_midnight() -> float:
-    now = datetime.now(timezone.utc)
-    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return (tomorrow - now).total_seconds()
+    return not analyzer._twelvedata_available()
 
 
 class DuplicateSetupError(RuntimeError):
@@ -1383,7 +1373,6 @@ def _fetch_price_with_scale_sync() -> tuple:
     caduto su gold-api.com (spot) dopo un rate-limit di Yahoo e ha comunque
     sottratto il basis come se il prezzo fosse ancora futures.
     """
-    global _twelvedata_price_blocked_until
     now = time.time()
 
     if now - _price_cache["ts"] < _PRICE_CACHE_TTL and _price_cache["price"] > 0:
@@ -1393,7 +1382,7 @@ def _fetch_price_with_scale_sync() -> tuple:
         ("Yahoo Finance", _fetch_price_yahoo),
         ("gold-api.com",  _fetch_price_goldapi),
     ]
-    if now >= _twelvedata_price_blocked_until:
+    if analyzer._twelvedata_available():
         sources.append(("Twelve Data", _fetch_price_twelvedata))
     sources += [
         ("Stooq",         _fetch_price_stooq),
@@ -1414,12 +1403,8 @@ def _fetch_price_with_scale_sync() -> tuple:
             else:
                 logger.debug(f"{name}: HTTP error {e}")
         except Exception as e:
-            if name == "Twelve Data" and _twelvedata_quota_exceeded(e):
-                _twelvedata_price_blocked_until = now + _seconds_until_utc_midnight()
-                logger.warning(
-                    f"Twelve Data (prezzo): quota esaurita, sospesa per "
-                    f"{(_twelvedata_price_blocked_until - now) / 3600:.1f}h"
-                )
+            if name == "Twelve Data" and analyzer._twelvedata_quota_exceeded(e):
+                analyzer._mark_twelvedata_blocked()
             logger.debug(f"{name}: {e}")
 
     # Tutte le fonti live fallite — usa cache stale
