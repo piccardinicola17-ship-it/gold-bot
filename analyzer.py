@@ -282,16 +282,80 @@ def _fetch_binance_paxg(interval: str, outputsize: int) -> pd.DataFrame:
     return df
 
 
+_KRAKEN_INTERVAL_MAP = {
+    "1min": 1, "5min": 5, "15min": 15,
+    "1h": 60, "4h": 240, "1day": 1440,
+}
+
+
+def _fetch_kraken_paxg(interval: str, outputsize: int) -> pd.DataFrame:
+    """
+    Kraken — PAXG/USD (stesso token PAX Gold di _fetch_binance_paxg, exchange
+    diverso). Aggiunta 2026-09-10 come QUARTO anello indipendente dopo
+    l'incidente Stooq+Twelve Data+rate-limit yfinance in produzione: due
+    fonti crypto (Binance, Kraken) invece di una sola perché un singolo
+    exchange può bloccarsi/avere manutenzione/rate-limitarci a sua volta —
+    vedi il caso reale Binance api.binance.com (451 da IP US, risolto con
+    data-api.binance.vision) come esempio di quanto anche una fonte
+    "buona" possa avere un problema specifico e imprevisto.
+
+    Kraken è una scelta deliberata per la ridondanza GEOGRAFICA: è un
+    exchange regolamentato USA (sede San Francisco), quindi non ha il
+    tipo di blocco per-regione che ha colpito il dominio principale di
+    Binance da IP US — le due fonti falliscono per motivi strutturalmente
+    diversi, non la stessa causa sotto due nomi.
+
+    API pubblica, nessuna chiave, nessuna registrazione. Intervalli
+    nativi in minuti (1/5/15/60/240/1440) — coprono esattamente i nostri,
+    nessun ricampionamento necessario.
+    """
+    kraken_interval = _KRAKEN_INTERVAL_MAP.get(interval)
+    if kraken_interval is None:
+        raise ValueError(f"Kraken: intervallo non supportato {interval}")
+
+    r = requests.get(
+        "https://api.kraken.com/0/public/OHLC",
+        params={"pair": "PAXGUSD", "interval": kraken_interval},
+        timeout=10,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("error"):
+        raise ValueError(f"Kraken: {data['error']}")
+    result = data.get("result", {})
+    # La chiave del risultato non è garantita identica al parametro "pair"
+    # inviato (Kraken a volte normalizza il nome, es. "XPAXGZUSD") — prendo
+    # l'unica chiave lista-di-liste presente, ignorando "last" (metadato
+    # di paginazione, non una serie di candele).
+    raw = next((v for k, v in result.items() if k != "last" and isinstance(v, list)), None)
+    if not raw:
+        raise ValueError(f"Kraken: nessun dato per {interval}")
+
+    df = pd.DataFrame(raw, columns=[
+        "time", "Open", "High", "Low", "Close", "vwap", "Volume", "count",
+    ])
+    df.index = pd.to_datetime(df["time"], unit="s")
+    df = df[["Open", "High", "Low", "Close", "Volume"]].astype(float)
+    df.sort_index(inplace=True)
+    df.dropna(inplace=True)
+    if len(df) > outputsize:
+        df = df.iloc[-outputsize:]
+    return df
+
+
 def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFrame:
     """
-    Scarica candele XAU/USD con 3 fonti in cascata.
+    Scarica candele XAU/USD con 4 fonti in cascata.
     1. yfinance — GC=F futures (gratuito, ma Yahoo rate-limita a volte
        l'IP condiviso di Railway — non prevedibile, non risolvibile lato
        nostro)
     2. Binance PAXG/USDT (gratuito, nessuna chiave, rate limit
        generosissimo — sostituisce Stooq dal 2026-09-10, bloccato da una
        verifica anti-bot JS globale e irreversibile, vedi _fetch_stooq)
-    3. Twelve Data (quota gratuita molto scarsa, fallback finale — se
+    3. Kraken PAXG/USD (gratuito, nessuna chiave — secondo exchange
+       indipendente, vedi _fetch_kraken_paxg per il perché due invece di
+       una sola fonte crypto)
+    4. Twelve Data (quota gratuita molto scarsa, fallback finale — se
        esaurita resta bloccata fino a mezzanotte UTC)
 
     Se TUTTE le fonti falliscono nello stesso giro (es. rate limit
@@ -323,6 +387,7 @@ def get_data(interval="5min", outputsize=500, bypass_cache=False) -> pd.DataFram
     sources = [
         ("yfinance",     lambda: _fetch_yfinance(interval, outputsize)),
         ("Binance PAXG", lambda: _fetch_binance_paxg(interval, outputsize)),
+        ("Kraken PAXG",  lambda: _fetch_kraken_paxg(interval, outputsize)),
     ]
     if _twelvedata_available():
         sources.append(("Twelve Data", lambda: _fetch_twelvedata(interval, outputsize)))
@@ -398,10 +463,33 @@ def _binance_paxg_price() -> float:
         return 0.0
 
 
+def _kraken_paxg_price() -> float:
+    """Prezzo spot PAXG/USD via Kraken — vedi _fetch_kraken_paxg per il
+    perché è un secondo exchange indipendente da Binance, non solo un
+    duplicato. Endpoint Ticker (un singolo numero)."""
+    try:
+        r = requests.get(
+            "https://api.kraken.com/0/public/Ticker",
+            params={"pair": "PAXGUSD"},
+            timeout=5,
+        )
+        data = r.json()
+        if data.get("error"):
+            return 0.0
+        result = data.get("result", {})
+        ticker = next((v for k, v in result.items() if isinstance(v, dict)), None)
+        if not ticker:
+            return 0.0
+        # "c" = [prezzo ultimo trade, volume del trade]
+        return float(ticker["c"][0])
+    except Exception:
+        return 0.0
+
+
 def get_current_price() -> float:
-    """Prezzo live XAU/USD. yfinance primario, Binance PAXG e Twelve Data
-    fallback (in quest'ordine — vedi get_data() per il perché di questa
-    cascata)."""
+    """Prezzo live XAU/USD. yfinance primario, Binance PAXG / Kraken PAXG
+    / Twelve Data fallback (in quest'ordine — vedi get_data() per il
+    perché di questa cascata)."""
     now = time.time()
     if now - _price_cache["timestamp"] < 90 and _price_cache["price"] > 100:
         return _price_cache["price"]
@@ -417,6 +505,12 @@ def get_current_price() -> float:
         pass
 
     price = _binance_paxg_price()
+    if price > 0:
+        _price_cache["price"] = price
+        _price_cache["timestamp"] = now
+        return price
+
+    price = _kraken_paxg_price()
     if price > 0:
         _price_cache["price"] = price
         _price_cache["timestamp"] = now
