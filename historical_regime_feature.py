@@ -120,7 +120,10 @@ def _evaluate_regime_split(df: pd.DataFrame, horizon: str, regime: str, train_fr
         "regime": regime, "train_fraction": train_fraction,
         "n_train": len(train), "n_test": len(test),
         "r2_test": round(r2_test, 3), "r2_naive_test": round(r2_naive, 3),
-        "beats_naive": bool(r2_test > r2_naive),
+        # "and r2_test > 0" — criterio originale di historical_model.py,
+        # perso in questa copia (trovato 2026-09-11, vedi lo stesso fix in
+        # historical_fomc_text.py per i dettagli).
+        "beats_naive": bool(r2_test > r2_naive and r2_test > 0),
         "direction_accuracy": round(float(direction_correct.mean()), 3),
     }
 

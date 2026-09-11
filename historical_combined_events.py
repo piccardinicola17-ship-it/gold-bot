@@ -102,7 +102,12 @@ def _evaluate_split(df: pd.DataFrame, horizon: str, train_fraction: float) -> di
     return {
         "train_fraction": train_fraction, "n_train": len(train), "n_test": len(test),
         "r2_test": round(r2_test, 3), "r2_naive_test": round(r2_naive, 3),
-        "beats_naive": bool(r2_test > r2_naive),
+        # "and r2_test > 0" — criterio originale di historical_model.py,
+        # perso in questa copia (trovato 2026-09-11, vedi lo stesso fix in
+        # historical_fomc_text.py per i dettagli): senza, "batte il naive"
+        # passa anche con R² negativo su entrambi (nessuna vera capacità
+        # predittiva).
+        "beats_naive": bool(r2_test > r2_naive and r2_test > 0),
         "direction_accuracy": round(direction_acc, 3),
     }
 

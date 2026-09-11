@@ -316,7 +316,15 @@ def _evaluate_score_split(df, horizon: str, train_fraction: float) -> dict | Non
     return {
         "train_fraction": train_fraction, "n_train": len(train), "n_test": len(test),
         "r2_test": round(r2_test, 3), "r2_naive_test": round(r2_naive, 3),
-        "beats_naive": bool(r2_test > r2_naive),
+        # "and r2_test > 0" — criterio originale di historical_model.py,
+        # perso in questa copia (trovato 2026-09-11): senza questo pezzo,
+        # "batte il naive" passa anche quando ENTRAMBI i modelli hanno R²
+        # negativo (nessuna vera capacità predittiva, solo "meno peggio"
+        # di un baseline altrettanto scarso) — ha prodotto un falso "EDGE
+        # VALIDATO su FOMC Meeting Minutes" (n=126, direction_accuracy
+        # media 50.6%, sostanzialmente un lancio di moneta) prima di
+        # essere scoperto confrontando i numeri con le serie deployate.
+        "beats_naive": bool(r2_test > r2_naive and r2_test > 0),
         "direction_accuracy": round(direction_acc, 3),
     }
 
