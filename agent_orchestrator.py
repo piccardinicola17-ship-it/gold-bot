@@ -767,6 +767,16 @@ async def run_pipeline(timeframe: str = "5min") -> TradingState:
     return state
 
 
+def _order_label(order_type: str, signal: str) -> str:
+    """"MARKET" se l'ordine coincide col segnale, altrimenti solo "LIMIT"/
+    "STOP" (senza ripetere BUY/SELL). Prima duplicata con due varianti
+    leggermente diverse nel ramo cecchino e in quello normale qui sotto —
+    unica versione, usata da entrambi."""
+    if order_type.upper() == signal.upper():
+        return "MARKET"
+    return order_type.split()[-1] if order_type.strip() else order_type
+
+
 def format_pipeline_report(state: TradingState) -> str:
     """
     Formatta il report segnale per Telegram — compatto e leggibile.
@@ -786,8 +796,7 @@ def format_pipeline_report(state: TradingState) -> str:
         # SNIPER_FIXED_PROB in analyzer.py) — mostra invece il win rate
         # storico vero misurato sul backtest, non la calibrazione generica
         # dell'aggregato (calibrata su una popolazione di segnali diversa).
-        raw_order = state.order_type
-        order_label = "MARKET" if raw_order == state.signal else raw_order.split()[-1]
+        order_label = _order_label(state.order_type, state.signal)
         return (
             f"🎯 *CECCHINO — {sniper_cfg['label'].upper()}*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -808,13 +817,7 @@ def format_pipeline_report(state: TradingState) -> str:
     }.get(state.timeframe, state.timeframe.upper())
 
     # Tipo ordine pulito (senza ripetere il signal)
-    raw_order = state.order_type
-    if raw_order == state.signal:
-        order_label = "MARKET"
-    elif raw_order.upper() in ("BUY LIMIT", "SELL LIMIT", "BUY STOP", "SELL STOP"):
-        order_label = raw_order.split()[-1]  # solo "LIMIT" o "STOP"
-    else:
-        order_label = raw_order
+    order_label = _order_label(state.order_type, state.signal)
 
     return (
         f"🤖 *MULTI-AGENT REPORT — {tf_label}*\n"

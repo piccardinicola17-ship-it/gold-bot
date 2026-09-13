@@ -784,10 +784,6 @@ def open_trade(data: dict) -> str:
     return trade_id
 
 
-def _today() -> str:
-    return datetime.now(TIMEZONE).strftime("%Y-%m-%d")
-
-
 def calculate_trade_pips(signal: str, entry: float, exit_price: float) -> float:
     """
     Calcola i pips virtuali XAU/USD.
@@ -1271,25 +1267,6 @@ def _fetch_price_twelvedata() -> float:
     return float(data["price"])
 
 
-def _fetch_price_stooq() -> float:
-    """
-    Stooq.com — fonte gratuita, nessuna API key, funziona da server.
-    Simbolo XAU/USD su Stooq: XAUUSD
-    """
-    response = requests.get(
-        "https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&h&e=csv",
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=8,
-    )
-    response.raise_for_status()
-    lines = response.text.strip().split("\n")
-    if len(lines) < 2:
-        raise ValueError("Stooq: risposta vuota")
-    # CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
-    parts = lines[1].split(",")
-    return float(parts[6])  # Close
-
-
 def _fetch_price_metals_api() -> float:
     """
     metals.live API — gratuita, nessun rate limit noto.
@@ -1336,8 +1313,8 @@ def _fetch_price_sync() -> float:
     """
     Prezzo XAU/USD con cache 45s e 5 fonti in cascata.
 
-    Ordine: Yahoo Finance (GC=F) → gold-api.com → Twelve Data → Stooq →
-    metals.live → cache stale.
+    Ordine: Yahoo Finance (GC=F) → gold-api.com → Twelve Data → metals.live
+    → cache stale.
 
     IMPORTANTE — coerenza di scala: entry/SL/TP di ogni trade sono calcolati
     da analyzer.get_data(), che usa GC=F (futures oro COMEX) come fonte
@@ -1351,9 +1328,13 @@ def _fetch_price_sync() -> float:
     Yahoo/GC=F torna quindi primario (stessa scala dei livelli); gold-api.com
     e Twelve Data restano come fallback per quando Yahoo è irraggiungibile —
     meglio un prezzo con basis diverso che nessun prezzo, ma è un compromesso
-    consapevole, non la norma. Stooq (quote live) e metals.live rispondono
-    404 su tutti gli endpoint (servizi dismessi) — restano in fondo alla
-    cascata come tentativo extra a costo quasi nullo.
+    consapevole, non la norma. Stooq è stata rimossa dalla cascata (non solo
+    da questa, anche da quella candele di analyzer.get_data()): dal 2026-09
+    risponde con una verifica anti-bot proof-of-work JavaScript su ogni
+    endpoint, non un 404 economico come si credeva qui — un tentativo in più
+    che aggiungeva fino a 8s di stallo sul path più caldo (il monitor gira
+    ogni 10s) proprio nel momento in cui 3 fonti sono già fallite, per un
+    fallimento garantito. Vedi analyzer._fetch_stooq per la diagnosi completa.
     Se tutte le fonti live falliscono usa il prezzo più recente in cache.
     Il monitor NON si ferma mai per mancanza di prezzo — usa il dato più vecchio.
     """
@@ -1384,10 +1365,7 @@ def _fetch_price_with_scale_sync() -> tuple:
     ]
     if analyzer._twelvedata_available():
         sources.append(("Twelve Data", _fetch_price_twelvedata))
-    sources += [
-        ("Stooq",         _fetch_price_stooq),
-        ("metals.live",   _fetch_price_metals_api),
-    ]
+    sources.append(("metals.live", _fetch_price_metals_api))
 
     for name, fetch_fn in sources:
         try:
@@ -1504,11 +1482,19 @@ def set_bot_paused(paused: bool) -> None:
         )
 
 
-def load_breaking_news_seen() -> tuple[set, bool]:
+def load_breaking_news_seen() -> tuple[dict, bool]:
     """
     Ritorna (seen_ids, is_first_run). is_first_run=True se non è mai stato
     salvato nulla prima — usato da gold_bot.py per non spammare tutto lo
     storico dei comunicati Fed al primo avvio.
+
+    seen_ids è un dict usato come "set ordinato" (chiavi = id visti, valore
+    ignorato): un `set` vero non preserva l'ordine di inserimento, quindi il
+    tetto di sicurezza "tieni solo gli ultimi N" in breaking_news.py
+    scartava un elemento arbitrario invece del più vecchio — un id visto
+    minuti fa poteva sparire mentre uno vecchio di mesi restava, causando
+    breaking news duplicate. Un dict Python (ordinato dalla 3.7) risolve
+    senza cambiare la semantica di `in`/iterazione per chi lo consuma.
     """
     try:
         with _connect() as conn:
@@ -1516,13 +1502,13 @@ def load_breaking_news_seen() -> tuple[set, bool]:
                 "SELECT value FROM bot_state WHERE key='breaking_news_seen'"
             ).fetchone()
         if not row:
-            return set(), True
-        return set(json.loads(row["value"])), False
+            return {}, True
+        return dict.fromkeys(json.loads(row["value"])), False
     except Exception:
-        return set(), True
+        return {}, True
 
 
-def save_breaking_news_seen(seen_ids: set) -> None:
+def save_breaking_news_seen(seen_ids) -> None:
     with _write_lock, _connect() as conn:
         conn.execute(
             "INSERT INTO bot_state(key, value) VALUES('breaking_news_seen', ?) "
@@ -1546,22 +1532,25 @@ def load_macro_alert_state() -> dict:
                 "SELECT value FROM bot_state WHERE key='macro_alert_state'"
             ).fetchone()
         if not row:
-            return {"sent_event_alerts": set(), "sent_post_event_alerts": set(),
-                     "pre_event_bias": {}, "sent_stat_prediction": set()}
+            return {"sent_event_alerts": {}, "sent_post_event_alerts": {},
+                     "pre_event_bias": {}, "sent_stat_prediction": {}}
         data = json.loads(row["value"])
+        # dict come "set ordinato", non un vero set — vedi load_breaking_news_seen
+        # per il perché (il tetto "tieni solo gli ultimi N" altrove deve poter
+        # contare sull'ordine di inserimento, un set non lo garantisce).
         return {
-            "sent_event_alerts": set(data.get("sent_event_alerts", [])),
-            "sent_post_event_alerts": set(data.get("sent_post_event_alerts", [])),
+            "sent_event_alerts": dict.fromkeys(data.get("sent_event_alerts", [])),
+            "sent_post_event_alerts": dict.fromkeys(data.get("sent_post_event_alerts", [])),
             "pre_event_bias": data.get("pre_event_bias", {}),
-            "sent_stat_prediction": set(data.get("sent_stat_prediction", [])),
+            "sent_stat_prediction": dict.fromkeys(data.get("sent_stat_prediction", [])),
         }
     except Exception:
-        return {"sent_event_alerts": set(), "sent_post_event_alerts": set(),
-                 "pre_event_bias": {}, "sent_stat_prediction": set()}
+        return {"sent_event_alerts": {}, "sent_post_event_alerts": {},
+                 "pre_event_bias": {}, "sent_stat_prediction": {}}
 
 
-def save_macro_alert_state(sent_event_alerts: set, sent_post_event_alerts: set,
-                            pre_event_bias: dict, sent_stat_prediction: set = frozenset()) -> None:
+def save_macro_alert_state(sent_event_alerts, sent_post_event_alerts,
+                            pre_event_bias: dict, sent_stat_prediction=()) -> None:
     with _write_lock, _connect() as conn:
         conn.execute(
             "INSERT INTO bot_state(key, value) VALUES('macro_alert_state', ?) "

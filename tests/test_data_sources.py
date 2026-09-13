@@ -6,7 +6,9 @@ metà mattinata perché ogni fetch falliva su tutte e tre le fonti e
 ricascava su Twelve Data ad ogni chiamata.
 
 Due fix distinti coperti qui:
-1. get_current_price()/get_dxy_price()/get_us10y_price() avevano una copia
+1. get_dxy_price()/get_us10y_price() (e l'allora get_current_price(),
+   rimossa il 2026-09-14 perché codice morto — gold_bot.py usa da sempre
+   trade_manager.get_current_price/_async, mai questa) avevano una copia
    propria del fallback Twelve Data che NON rispettava
    _twelvedata_blocked_until (impostato da get_data() quando la quota è
    esaurita) — continuavano a chiamare Twelve Data anche a quota già
@@ -205,41 +207,6 @@ class TestKrakenPaxgSource(unittest.TestCase):
         with patch("analyzer.requests.get", return_value=mock_resp):
             price = analyzer._kraken_paxg_price()
         self.assertEqual(price, 4408.31)
-
-
-class TestGetCurrentPriceRespectsBlock(_TwelveDataStateResetMixin, unittest.TestCase):
-    def test_does_not_call_twelvedata_when_all_free_sources_fail_and_quota_blocked(self):
-        analyzer._mark_twelvedata_blocked()
-        with patch("yfinance.Ticker", side_effect=Exception("rate limited")), \
-             patch("analyzer._binance_paxg_price", return_value=0.0), \
-             patch("analyzer._kraken_paxg_price", return_value=0.0), \
-             patch("analyzer.requests.get") as mock_get:
-            price = analyzer.get_current_price()
-        mock_get.assert_not_called()
-        self.assertEqual(price, 0.0)
-
-    def test_falls_back_to_binance_when_yfinance_fails(self):
-        with patch("yfinance.Ticker", side_effect=Exception("rate limited")), \
-             patch("analyzer._binance_paxg_price", return_value=4401.2):
-            price = analyzer.get_current_price()
-        self.assertEqual(price, 4401.2)
-
-    def test_falls_back_to_kraken_when_yfinance_and_binance_fail(self):
-        with patch("yfinance.Ticker", side_effect=Exception("rate limited")), \
-             patch("analyzer._binance_paxg_price", return_value=0.0), \
-             patch("analyzer._kraken_paxg_price", return_value=4402.7):
-            price = analyzer.get_current_price()
-        self.assertEqual(price, 4402.7)
-
-    def test_falls_back_to_twelvedata_when_all_free_sources_fail_and_not_blocked(self):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"price": "4401.2"}
-        with patch("yfinance.Ticker", side_effect=Exception("rate limited")), \
-             patch("analyzer._binance_paxg_price", return_value=0.0), \
-             patch("analyzer._kraken_paxg_price", return_value=0.0), \
-             patch("analyzer.requests.get", return_value=mock_resp):
-            price = analyzer.get_current_price()
-        self.assertEqual(price, 4401.2)
 
 
 class TestGetDataSkipsTwelveDataWhenBlocked(_TwelveDataStateResetMixin, unittest.TestCase):

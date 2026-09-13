@@ -153,14 +153,22 @@ def get_open_trades(*, activated_only: bool = False) -> list[dict]:
 
 
 def get_consecutive_losses() -> int:
-    """Conta le loss consecutive della sessione odierna."""
+    """Conta le loss consecutive della sessione odierna.
+
+    FIX: la query escludeva WIN_BE (e CLOSED_EARLY) dal risultato invece di
+    lasciarli nel set perché il loop sotto ci si fermasse sopra — un trade
+    chiuso in pareggio (esposizione reale, nessuna perdita) tra due sconfitte
+    spariva del tutto dalla sequenza vista dal loop, facendo apparire
+    consecutive due loss separate da un BE. Solo CANCELLED (mai eseguito
+    davvero, vedi RESULT_PNL) va escluso: non è un esito di trading reale.
+    """
     today = _today()
     with _connect() as conn:
         rows = conn.execute(
             """
             SELECT result FROM trades
             WHERE status='CLOSED'
-              AND result IN ('LOSS','WIN_TP1','WIN_TP2','WIN_TP3')
+              AND result IN ('LOSS','WIN_TP1','WIN_TP2','WIN_TP3','WIN_BE','CLOSED_EARLY')
               AND closed_at LIKE ?
             ORDER BY COALESCE(closed_at,timestamp) DESC, id DESC
             LIMIT 20

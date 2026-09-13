@@ -68,6 +68,28 @@ CONFIRM_THRESHOLD_USD = 2.0
 # ─────────────────────────────────────────────
 
 
+def _confirm_bias(bias: str, change: float) -> tuple:
+    """Esito CONFERMATO/NON CONFERMATO/NEUTRO + segno per un confronto
+    bias-previsto vs prezzo-reale — stessa logica ripetuta 3 volte identica
+    (post-breaking-news, bias evento, bias post-evento) prima di questa
+    funzione, con un solo dettaglio a fare la differenza: il ramo NEUTRO
+    esisteva solo per i due macro-alert (dove l'AI può davvero rispondere
+    NEUTRO) e non per il post-breaking-news, dove non serve perché quella
+    chiamata scarta già a monte le risposte non direzionali (vedi
+    check_breaking_news_job) — qui resta comunque gestito per sicurezza,
+    così le 3 chiamate condividono la stessa unica implementazione."""
+    if abs(change) < CONFIRM_THRESHOLD_USD:
+        esito = "➖ *Movimento non significativo* — prezzo praticamente invariato"
+    elif bias == "BUY":
+        esito = "✅ *CONFERMATO*" if change > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+    elif bias == "SELL":
+        esito = "✅ *CONFERMATO*" if change < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+    else:
+        esito = "➖ Bias pre-evento era NEUTRO — nessuna previsione da verificare"
+    segno = "+" if change >= 0 else ""
+    return esito, segno
+
+
 def _live_min_prob_for_tf(interval: str) -> int:
     """Stessa soglia usata dalla pipeline live — delega a
     risk_manager.min_prob_for_timeframe() (unica fonte di verità, vedi
@@ -207,10 +229,14 @@ def is_market_open() -> bool:
 
 
 def market_status_text() -> str:
-    now = datetime.now(TIMEZONE)
-    if now.weekday() >= 5: return "🔴 Mercato chiuso (weekend)"
-    if now.hour < 8 or now.hour >= 20: return "🔴 Mercato chiuso (fuori orario 08:00–20:00)"
-    return "🟢 Mercato aperto (08:00–20:00)"
+    """Stesso confine di is_market_open() (chiamata qui, non ricalcolata):
+    prima ripeteva le stesse due condizioni in una copia indipendente, col
+    rischio che un domani cambiasse una sola delle due copie."""
+    if is_market_open():
+        return "🟢 Mercato aperto (08:00–20:00)"
+    if datetime.now(TIMEZONE).weekday() >= 5:
+        return "🔴 Mercato chiuso (weekend)"
+    return "🔴 Mercato chiuso (fuori orario 08:00–20:00)"
 
 
 def _ny_open_time_it() -> str:
@@ -1331,9 +1357,14 @@ async def cmd_weekend(update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Errore: {e}")
 
 
-# Traccia alert macro già inviati
-_sent_event_alerts      = set()
-_sent_post_event_alerts = set()
+# Traccia alert macro già inviati. Sono dict usati come "set ordinato"
+# (chiave = alert già inviato, valore ignorato), non veri set: un set non
+# preserva l'ordine di inserimento, quindi il tetto di sicurezza "tieni solo
+# gli ultimi 30" più sotto scartava un elemento arbitrario invece del più
+# vecchio, rischiando di far sparire una chiave appena aggiunta e reinviare
+# lo stesso alert — vedi anche trade_manager.load_breaking_news_seen.
+_sent_event_alerts      = {}
+_sent_post_event_alerts = {}
 # Bias e prezzo al momento dell'alert pre-evento, per verificare nel
 # post-evento se la previsione si è avverata (confronto oggettivo sul
 # prezzo reale, non un'altra opinione dell'AI).
@@ -1341,7 +1372,7 @@ _pre_event_bias = {}
 # Previsioni statistiche Fase 5 (macro_predictor) già inviate — dedup
 # separato da _sent_post_event_alerts perché la finestra di retry (3 ore)
 # è indipendente da quella del resoconto post-evento (7 minuti).
-_sent_stat_prediction = set()
+_sent_stat_prediction = {}
 
 
 async def check_breaking_news_job(bot):
@@ -1458,16 +1489,10 @@ async def check_breaking_news_job(bot):
 
             change = price_now - info["price"]
             bias = info["bias"]
-            if abs(change) < CONFIRM_THRESHOLD_USD:
-                esito = "➖ *Movimento non significativo* — prezzo praticamente invariato"
-            elif bias == "BUY":
-                esito = "✅ *CONFERMATO*" if change > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
-            else:  # SELL
-                esito = "✅ *CONFERMATO*" if change < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
-            segno = "+" if change >= 0 else ""
+            esito, segno = _confirm_bias(bias, change)
 
             msg_post = (
-                f"📊 *POST-BREAKING NEWS — {info['title']}*\n"
+                f"📊 *POST-BREAKING NEWS — {_escape_md(info['title'])}*\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"💰 XAU/USD: *${_fmt(price_now)}*\n"
                 f"🎯 Bias previsto: *{bias}* (era ${_fmt(info['price'])})\n"
@@ -1658,7 +1683,7 @@ async def check_macro_alerts(bot):
                 )
                 if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
-                _sent_event_alerts.add(group_key)
+                _sent_event_alerts[group_key] = True
 
             # SNAPSHOT IMMEDIATA (per verificare "bias evento" nel post-evento)
             # Finestra -7/-1 (1-7 minuti dopo il rilascio) invece di "1-2
@@ -1701,15 +1726,7 @@ async def check_macro_alerts(bot):
                         )
                     else:
                         change_evento = price_immediate - pre["price"]
-                        if abs(change_evento) < CONFIRM_THRESHOLD_USD:
-                            esito_evento = "➖ *Movimento non significativo* — prezzo praticamente invariato"
-                        elif pre_bias == "BUY":
-                            esito_evento = "✅ *CONFERMATO*" if change_evento > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
-                        elif pre_bias == "SELL":
-                            esito_evento = "✅ *CONFERMATO*" if change_evento < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
-                        else:
-                            esito_evento = "➖ Bias pre-evento era NEUTRO — nessuna previsione da verificare"
-                        segno_ev = "+" if change_evento >= 0 else ""
+                        esito_evento, segno_ev = _confirm_bias(pre_bias, change_evento)
                         blocco_evento = (
                             f"⚡ Bias evento: *{pre_bias}* (era ${pre['price']})\n"
                             f"{esito_evento}\n"
@@ -1717,15 +1734,7 @@ async def check_macro_alerts(bot):
                         )
 
                     change_post = price - pre["price"]
-                    if abs(change_post) < CONFIRM_THRESHOLD_USD:
-                        esito_post = "➖ *Movimento non significativo* — prezzo praticamente invariato"
-                    elif pre_bias == "BUY":
-                        esito_post = "✅ *CONFERMATO*" if change_post > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
-                    elif pre_bias == "SELL":
-                        esito_post = "✅ *CONFERMATO*" if change_post < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
-                    else:
-                        esito_post = "➖ Bias pre-evento era NEUTRO — nessuna previsione da verificare"
-                    segno_post = "+" if change_post >= 0 else ""
+                    esito_post, segno_post = _confirm_bias(pre_bias, change_post)
                     blocco_post = (
                         f"🕒 Bias post-evento: *{pre_bias}* (era ${pre['price']})\n"
                         f"{esito_post}\n"
@@ -1750,7 +1759,7 @@ async def check_macro_alerts(bot):
                 )
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
-                _sent_post_event_alerts.add(post_key)
+                _sent_post_event_alerts[post_key] = True
                 _pre_event_bias.pop(group_key, None)
                 post_event_fired = True
 
@@ -1786,7 +1795,7 @@ async def check_macro_alerts(bot):
                             await bot.send_message(
                                 chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
                             )
-                            _sent_stat_prediction.add(stat_key)
+                            _sent_stat_prediction[stat_key] = True
 
                             # Chiusura protettiva basata sulla previsione statistica
                             # (2026-09-09, richiesta esplicita dell'utente — "solo
@@ -1866,11 +1875,11 @@ async def check_macro_alerts(bot):
 
         # Pulizia memory leak
         if len(_sent_event_alerts) > 50:
-            _sent_event_alerts = set(list(_sent_event_alerts)[-30:])
+            _sent_event_alerts = dict(list(_sent_event_alerts.items())[-30:])
         if len(_sent_post_event_alerts) > 50:
-            _sent_post_event_alerts = set(list(_sent_post_event_alerts)[-30:])
+            _sent_post_event_alerts = dict(list(_sent_post_event_alerts.items())[-30:])
         if len(_sent_stat_prediction) > 50:
-            _sent_stat_prediction = set(list(_sent_stat_prediction)[-30:])
+            _sent_stat_prediction = dict(list(_sent_stat_prediction.items())[-30:])
         if len(_pre_event_bias) > 50:
             for k in list(_pre_event_bias.keys())[:-30]:
                 _pre_event_bias.pop(k, None)

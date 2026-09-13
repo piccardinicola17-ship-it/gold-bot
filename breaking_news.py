@@ -48,6 +48,8 @@ from xml.etree import ElementTree
 
 import requests
 
+from news_analyst import _escape_md
+
 logger = logging.getLogger(__name__)
 
 FED_PRESS_RSS = "https://www.federalreserve.gov/feeds/press_all.xml"
@@ -169,15 +171,23 @@ def _item_id(source: str, item: dict) -> str:
 # Entry point — chiamato dallo scheduler
 # ─────────────────────────────────────────────────────────────
 
-def check_breaking_news(seen_ids: set) -> tuple[list[dict], set]:
+def check_breaking_news(seen_ids: dict) -> tuple[list[dict], dict]:
     """
     Controlla le fonti Fed (press releases + discorsi), filtra ciò che è già
     stato notificato (seen_ids), classifica ogni item nuovo. Ritorna
     (alert_da_mandare, seen_ids_aggiornato). Il chiamante è responsabile di
     persistere seen_ids (vedi gold_bot.py).
+
+    seen_ids è un dict usato come "set ordinato" (chiave = id già visto,
+    valore ignorato) — vedi trade_manager.load_breaking_news_seen per il
+    perché: un set vero non preserva l'ordine di inserimento, e il tetto di
+    sicurezza qui sotto ("tieni solo gli ultimi 300") deve poter contare
+    sull'ordine per scartare davvero i più vecchi, non un sottoinsieme
+    arbitrario (che potrebbe far sparire un id appena visto e reinviare la
+    stessa breaking news).
     """
     alerts: list[dict] = []
-    new_seen = set(seen_ids)
+    new_seen = dict.fromkeys(seen_ids)  # accetta anche un set (es. nei test)
 
     sources = [
         ("fed_press", FED_PRESS_RSS, _fetch_rss, classify_fed_text),
@@ -195,7 +205,7 @@ def check_breaking_news(seen_ids: set) -> tuple[list[dict], set]:
             item_id = _item_id(name, item)
             if item_id in seen_ids:
                 continue
-            new_seen.add(item_id)
+            new_seen[item_id] = True
 
             text = f"{item.get('title','')} {item.get('summary','')}"
             classification = classify_fn(text)
@@ -222,7 +232,7 @@ def check_breaking_news(seen_ids: set) -> tuple[list[dict], set]:
 
     # Tetto di sicurezza: non lasciare crescere seen_ids all'infinito.
     if len(new_seen) > 500:
-        new_seen = set(list(new_seen)[-300:])
+        new_seen = dict(list(new_seen.items())[-300:])
 
     return alerts, new_seen
 
@@ -234,7 +244,11 @@ def format_breaking_alert(alert: dict, current_price: float = 0, ai_analysis: st
         "treasury": "💵 TREASURY — Comunicato",
     }.get(alert["source"], alert["source"])
 
-    lines = [f"🔴 *BREAKING — {source_label}*", f"_{alert['title']}_"]
+    # Titolo grezzo da feed RSS esterno: va escapato come ogni altro titolo
+    # in questo bot (vedi news_analyst._escape_md) — senza, un titolo con
+    # _ * ` [ ] fa fallire il parsing Markdown di Telegram e il messaggio
+    # (già inviato una volta sola, deduplicato per item_id) sparisce.
+    lines = [f"🔴 *BREAKING — {source_label}*", f"_{_escape_md(alert['title'])}_"]
 
     price_txt = f"${current_price:,.2f}" if current_price > 0 else "N/D"
     lines.append(f"XAU/USD: *{price_txt}*")

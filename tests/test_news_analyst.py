@@ -57,16 +57,17 @@ class TestFindMacroDbInfo(unittest.TestCase):
 
 class TestFormatNewsMessageHeadlineSanitization(unittest.TestCase):
     """FIX: la sanificazione manuale delle headline in format_news_message
-    rimuoveva solo * _ ` ma non [ ] — a differenza di _escape_md (usata
-    altrove nello stesso file) che gestisce tutti e 5 i caratteri. Un
-    titolo con parentesi quadre poteva rompere il parsing Markdown di
-    Telegram. current_price=4400 (>100) per non innescare la chiamata di
-    rete a fxratesapi dentro format_news_message."""
+    rimuoveva solo * _ ` (cancellandoli, non escapandoli — perdendo pezzi
+    reali del titolo) e ignorava del tutto [ ]. Ora usa _escape_md() come
+    ovunque altrove nello stesso file: tutti e 5 i caratteri diventano
+    sicuri per il parsing Markdown di Telegram MA restano nel testo (con
+    backslash davanti), invece di sparire. current_price=4400 (>100) per
+    non innescare la chiamata di rete a fxratesapi dentro
+    format_news_message."""
 
-    def test_square_brackets_removed_from_headline(self):
+    def test_square_brackets_escaped_not_removed_from_headline(self):
         result = na.format_news_message(["Fed [Update]: rates unchanged"], current_price=4400)
-        self.assertNotIn("[", result)
-        self.assertNotIn("]", result)
+        self.assertIn("Fed \\[Update\\]: rates unchanged", result)
 
 
 class TestFormatNewsMessageMultilineEntries(unittest.TestCase):

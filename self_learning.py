@@ -14,11 +14,17 @@ from typing import Optional
 import pytz
 import requests
 
+from trade_manager import DB_PATH, BOT_DIR, is_decisive_win
+
 logger   = logging.getLogger(__name__)
 TIMEZONE = pytz.timezone("Europe/Rome")
 
-DB_PATH         = os.environ.get("DB_PATH", os.path.join(os.environ.get("BOT_DIR", "/tmp"), "goldbot.db"))
-LEARNED_WEIGHTS = os.path.join(os.environ.get("BOT_DIR", "/tmp"), "learned_weights.json")
+# DB_PATH importato da trade_manager (unica fonte di verità): prima veniva
+# ricalcolato qui con un fallback diverso ("/tmp" invece di "<progetto>/data"),
+# quindi senza BOT_DIR/DB_PATH impostati esplicitamente (es. uno script/test
+# lanciato senza passare da start_bot.sh) self_learning finiva su un DB vuoto
+# diverso da quello vero, senza errori — solo "nessun trade" per sempre.
+LEARNED_WEIGHTS = os.path.join(str(BOT_DIR), "learned_weights.json")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
@@ -81,9 +87,16 @@ def _get_closed_trades(days: Optional[int] = None) -> list:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         if days:
+            # Filtra su closed_at (fallback a timestamp per righe legacy senza
+            # closed_at), non su timestamp di apertura: un trade H4/D1 aperto
+            # 10gg fa e chiuso ieri deve contare nella review "ultimi 7 giorni"
+            # (che mostra all'utente/LLM proprio un periodo di CHIUSURA, non
+            # di apertura) — prima veniva escluso senza errore, sottostimando
+            # silenziosamente le performance sui timeframe più lenti.
             since = (datetime.now(TIMEZONE) - timedelta(days=days)).isoformat()
             rows  = conn.execute(
-                "SELECT * FROM trades WHERE status='CLOSED' AND result IS NOT NULL AND timestamp >= ? ORDER BY id ASC",
+                "SELECT * FROM trades WHERE status='CLOSED' AND result IS NOT NULL "
+                "AND COALESCE(closed_at, timestamp) >= ? ORDER BY id ASC",
                 (since,)
             ).fetchall()
         else:
@@ -95,15 +108,6 @@ def _get_closed_trades(days: Optional[int] = None) -> list:
     except Exception as e:
         logger.error(f"Errore lettura trade: {e}")
         return []
-
-
-def _is_win(t: dict) -> bool:
-    """Stesso criterio di dashboard.py compute_stats: un WIN_BE con TP1 già
-    raggiunto conta come vittoria (profitto parziale incassato), non viene
-    escluso dal win rate come i BE "puri" (mai arrivati a TP1)."""
-    return t.get("result") != "LOSS" and (
-        bool(t.get("tp1_hit")) or t.get("result") in ("WIN_TP1", "WIN_TP2", "WIN_TP3")
-    )
 
 
 def _call_groq(system: str, user: str, max_tokens: int = 500) -> str:
@@ -161,8 +165,8 @@ def analyze_last_trade(trade_id: str = "") -> str:
     prob    = trade.get("prob", 0)
     timestamp = (trade.get("timestamp") or "")[:16]
 
-    all_trades = _get_closed_trades()
-    wins_all_l = [t for t in all_trades if _is_win(t)]
+    all_trades = trades
+    wins_all_l = [t for t in all_trades if is_decisive_win(t)]
     losses_all = [t for t in all_trades if t.get("result") == "LOSS"]
     n          = len(wins_all_l) + len(losses_all)
     wins_all   = len(wins_all_l)
@@ -251,7 +255,7 @@ def weekly_review() -> str:
     if not trades:
         return "Nessun trade nell'ultima settimana."
 
-    wins     = [t for t in trades if _is_win(t)]
+    wins     = [t for t in trades if is_decisive_win(t)]
     losses   = [t for t in trades if t.get("result") == "LOSS"]
     be_list  = [t for t in trades if t.get("result") == "WIN_BE"]
     decisivi = wins + losses
@@ -272,7 +276,7 @@ def weekly_review() -> str:
         r = t.get("regime", "?")
         regime_stats.setdefault(r, {"wins":0,"total":0})
         regime_stats[r]["total"] += 1
-        if _is_win(t): regime_stats[r]["wins"] += 1
+        if is_decisive_win(t): regime_stats[r]["wins"] += 1
     regime_txt = _breakdown_txt(regime_stats)
 
     tf_stats = {}
@@ -280,7 +284,7 @@ def weekly_review() -> str:
         tf = t.get("timeframe","?")
         tf_stats.setdefault(tf, {"wins":0,"total":0})
         tf_stats[tf]["total"] += 1
-        if _is_win(t): tf_stats[tf]["wins"] += 1
+        if is_decisive_win(t): tf_stats[tf]["wins"] += 1
     tf_txt = _breakdown_txt(tf_stats)
 
     dir_stats = {}
@@ -288,7 +292,7 @@ def weekly_review() -> str:
         sig = t.get("signal","?")
         dir_stats.setdefault(sig, {"wins":0,"total":0})
         dir_stats[sig]["total"] += 1
-        if _is_win(t): dir_stats[sig]["wins"] += 1
+        if is_decisive_win(t): dir_stats[sig]["wins"] += 1
     dir_txt = _breakdown_txt(dir_stats)
 
     period_end   = datetime.now(TIMEZONE)
@@ -333,7 +337,7 @@ Fornisci:
 
 def optimize_strategy_weights() -> dict:
     trades   = _get_closed_trades()
-    wins_l   = [t for t in trades if _is_win(t)]
+    wins_l   = [t for t in trades if is_decisive_win(t)]
     losses_l = [t for t in trades if t.get("result") == "LOSS"]
     decisivi = wins_l + losses_l
 
@@ -345,7 +349,7 @@ def optimize_strategy_weights() -> dict:
         r = t.get("regime","UNKNOWN")
         regime_wr.setdefault(r, {"wins":0,"total":0})
         regime_wr[r]["total"] += 1
-        if _is_win(t): regime_wr[r]["wins"] += 1
+        if is_decisive_win(t): regime_wr[r]["wins"] += 1
     regime_performance = {r: round(d["wins"]/d["total"]*100,1) for r,d in regime_wr.items() if d["total"] >= MIN_TRADES_PER_STRATEGY}
 
     tf_wr = {}
@@ -353,7 +357,7 @@ def optimize_strategy_weights() -> dict:
         tf = t.get("timeframe","?")
         tf_wr.setdefault(tf, {"wins":0,"total":0})
         tf_wr[tf]["total"] += 1
-        if _is_win(t): tf_wr[tf]["wins"] += 1
+        if is_decisive_win(t): tf_wr[tf]["wins"] += 1
     tf_performance = {tf: round(d["wins"]/d["total"]*100,1) for tf,d in tf_wr.items() if d["total"] >= MIN_TRADES_PER_STRATEGY}
 
     dir_wr = {}
@@ -361,7 +365,7 @@ def optimize_strategy_weights() -> dict:
         sig = t.get("signal","?")
         dir_wr.setdefault(sig, {"wins":0,"total":0})
         dir_wr[sig]["total"] += 1
-        if _is_win(t): dir_wr[sig]["wins"] += 1
+        if is_decisive_win(t): dir_wr[sig]["wins"] += 1
     dir_performance = {sig: round(d["wins"]/d["total"]*100,1) for sig,d in dir_wr.items() if d["total"] >= MIN_TRADES_PER_STRATEGY}
 
     regime_r_values = {}

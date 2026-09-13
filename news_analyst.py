@@ -104,12 +104,12 @@ def format_news_message(news: list, current_price: float = 0) -> str:
         max_tokens=60,
     )
 
-    # Max 4 titoli, plain text, escape caratteri Markdown.
-    # FIX: mancavano "[" "]" — _escape_md() (usata altrove in questo file,
-    # es. get_macro_briefing) li gestisce insieme a * _ `, ma questa
-    # sanificazione manuale ne copriva solo 3 su 5. Un titolo con parentesi
-    # quadre (es. "Fed [Update]") avrebbe potuto rompere il parsing
-    # Markdown di Telegram ("can't parse entities").
+    # Max 4 titoli. FIX: la sanificazione manuale (.replace ripetuti)
+    # copriva solo 3 caratteri su 5 e CANCELLAVA quelli speciali invece di
+    # escaparli (perdendo pezzi reali del titolo, es. "Fed [Update]" ->
+    # "Fed Update"). Usa _escape_md() come ovunque altrove in questo file —
+    # stessi 5 caratteri gestiti, e il titolo resta fedele (Telegram mostra
+    # il carattere escapato, non lo nasconde).
     #
     # FIX 2026-09-13: get_extended_news() produce ogni voce su DUE righe
     # ("fonte (data)\ntitolo") — prendere raw.split("\n")[0] mostrava SOLO
@@ -121,9 +121,8 @@ def format_news_message(news: list, current_price: float = 0) -> str:
     # presente) — compatibile anche con un'eventuale voce a riga singola.
     headlines = []
     for n in news[:4]:
-        raw = str(n).replace("*","").replace("_"," ").replace("`","").replace("[","").replace("]","")
-        lines = [l.strip() for l in raw.split("\n") if l.strip()]
-        text = lines[-1][:90] if lines else ""
+        lines = [l.strip() for l in str(n).split("\n") if l.strip()]
+        text = _escape_md(lines[-1])[:90] if lines else ""
         headlines.append(f"• {text}")
 
     msg = (

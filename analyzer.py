@@ -486,45 +486,6 @@ def _kraken_paxg_price() -> float:
         return 0.0
 
 
-def get_current_price() -> float:
-    """Prezzo live XAU/USD. yfinance primario, Binance PAXG / Kraken PAXG
-    / Twelve Data fallback (in quest'ordine — vedi get_data() per il
-    perché di questa cascata)."""
-    now = time.time()
-    if now - _price_cache["timestamp"] < 90 and _price_cache["price"] > 100:
-        return _price_cache["price"]
-
-    try:
-        import yfinance as yf
-        price = float(yf.Ticker("GC=F").fast_info.last_price or 0)
-        if price > 0:
-            _price_cache["price"] = price
-            _price_cache["timestamp"] = now
-            return price
-    except Exception:
-        pass
-
-    price = _binance_paxg_price()
-    if price > 0:
-        _price_cache["price"] = price
-        _price_cache["timestamp"] = now
-        return price
-
-    price = _kraken_paxg_price()
-    if price > 0:
-        _price_cache["price"] = price
-        _price_cache["timestamp"] = now
-        return price
-
-    price = _twelvedata_price("XAU/USD")
-    if price > 0:
-        _price_cache["price"] = price
-        _price_cache["timestamp"] = now
-        return price
-
-    return _price_cache["price"]
-
-
 def get_dxy_price() -> float:
     """DXY via yfinance (DX-Y.NYB)."""
     try:
@@ -1294,12 +1255,24 @@ def get_tlt_history(outputsize: int = 30) -> pd.DataFrame:
 
 
 def get_data_generic(symbol: str, interval: str = "1day", outputsize: int = 30) -> pd.DataFrame:
-    """Scarica dati generici per un simbolo qualsiasi (per correlazioni)."""
+    """Scarica dati generici per un simbolo qualsiasi (per correlazioni).
+
+    FIX: chiamava Twelve Data senza rispettare il blocco quota condiviso
+    (_twelvedata_available/_mark_twelvedata_blocked) — durante un blackout
+    quota, statistical_arbitrage_strategy() la richiama comunque a ogni giro
+    di full_analyze() (ogni ~5 min per timeframe), continuando a bruciare
+    crediti già esauriti invece di rispettare lo stesso blocco che get_data()
+    e _twelvedata_price() già rispettano. Stesso pattern di bug già corretto
+    altrove in questo file (vedi _twelvedata_price)."""
+    if not _twelvedata_available():
+        return pd.DataFrame()
     url = "https://api.twelvedata.com/time_series"
     params = {"symbol": symbol, "interval": interval, "outputsize": outputsize, "apikey": TWELVE_API_KEY}
     r    = requests.get(url, params=params, timeout=10)
     data = r.json()
     if "values" not in data:
+        if _twelvedata_quota_exceeded(str(data.get("message", ""))):
+            _mark_twelvedata_blocked()
         return pd.DataFrame()
     df = pd.DataFrame(data["values"])
     df.index = pd.to_datetime(df["datetime"])

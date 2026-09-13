@@ -51,10 +51,10 @@ class GoldBotTestCase(unittest.TestCase):
         self.tmp_active_file = tempfile.mktemp(suffix=".json")
         tm.ACTIVE_FILE = self.tmp_active_file
         tm.init_db()
-        gb._sent_event_alerts = set()
-        gb._sent_post_event_alerts = set()
+        gb._sent_event_alerts = {}
+        gb._sent_post_event_alerts = {}
         gb._pre_event_bias = {}
-        gb._sent_stat_prediction = set()
+        gb._sent_stat_prediction = {}
 
     def tearDown(self):
         for suffix in ("", "-wal", "-shm"):
