@@ -314,3 +314,68 @@ def get_macro_briefing(events: list, current_price: float = 0) -> str:
         header += f"\u2022 {safe_title} \u2014 {ev.get('time','?')} IT [{impatto}]\n  Prev: {ev.get('forecast','N/A')} | Prec: {ev.get('previous','N/A')}\n"
     result = header + f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\nAnalisi AI:\n{briefing}"
     return result[:4000] if len(result) > 4000 else result
+
+
+def get_weekly_smc_narrative(ctx: dict, current_price: float) -> str:
+    """
+    Spiegazione discorsiva di cosa potrebbe fare il prezzo (rimbalzo su una
+    zona, liquidazione di un livello, imbalance da colmare, possibile swing
+    e in che direzione) per l'analisi weekend.
+
+    Stesso principio di analyze_macro_event: all'LLM vengono dati SOLO fatti
+    gi\u00e0 calcolati da analyzer.py (struttura BOS/CHoCH, order block, fair
+    value gap, liquidit\u00e0 EQH/EQL, zona premium/discount, regime) \u2014 il suo
+    compito \u00e8 interpretarli in prosa, MAI inventare nuovi prezzi o livelli
+    che non gli sono stati passati nel contesto. `ctx` \u00e8 il dict prodotto da
+    weekly_chart.compute_smc_context(), calcolato sulla stessa serie 4h
+    usata per il grafico e le "zone chiave" nel testo, quindi non pu\u00f2 mai
+    raccontare una storia diversa dai numeri gi\u00e0 mostrati.
+    """
+    structure  = ctx["structure"]
+    ob         = ctx["order_blocks"]
+    fvg        = ctx["fvg"]
+    liq        = ctx["liquidity"]
+    mitigation = ctx["mitigation"]
+
+    lines = [
+        f"Prezzo attuale: {current_price:,.2f}",
+        f"Struttura di mercato (4H): {structure.get('structure', 'NEUTRAL')}"
+        + (f" | BOS: {structure['bos']}" if structure.get("bos") else "")
+        + (f" | CHoCH: {structure['choch']}" if structure.get("choch") else ""),
+        f"Ultimo swing high: {structure.get('last_high', 'N/D')} (precedente: {structure.get('prev_high', 'N/D')})",
+        f"Ultimo swing low: {structure.get('last_low', 'N/D')} (precedente: {structure.get('prev_low', 'N/D')})",
+        f"Zona Premium/Discount: {ctx['premium_discount']}",
+        f"Regime: {ctx['regime']} (ADX {ctx['adx']})",
+    ]
+    if ob.get("bullish_ob"):
+        tag = "gi\u00e0 mitigato" if mitigation.get("bullish_mit") else "non ancora mitigato"
+        lines.append(f"Order Block rialzista ({tag}): {ob['bullish_ob']['low']}-{ob['bullish_ob']['high']}")
+    if ob.get("bearish_ob"):
+        tag = "gi\u00e0 mitigato" if mitigation.get("bearish_mit") else "non ancora mitigato"
+        lines.append(f"Order Block ribassista ({tag}): {ob['bearish_ob']['low']}-{ob['bearish_ob']['high']}")
+    if fvg.get("bullish_fvg"):
+        lines.append(f"Fair Value Gap rialzista da colmare: {fvg['bullish_fvg']['bottom']}-{fvg['bullish_fvg']['top']}")
+    if fvg.get("bearish_fvg"):
+        lines.append(f"Fair Value Gap ribassista da colmare: {fvg['bearish_fvg']['bottom']}-{fvg['bearish_fvg']['top']}")
+    if liq.get("eqh"):
+        lines.append(f"Liquidit\u00e0 sopra il prezzo (Equal Highs): {liq['eqh']}")
+    if liq.get("eql"):
+        lines.append(f"Liquidit\u00e0 sotto il prezzo (Equal Lows): {liq['eql']}")
+
+    return _call_groq(
+        system=(
+            "Sei un analista tecnico Smart Money Concepts su XAU/USD. Ricevi SOLO fatti gi\u00e0 "
+            "calcolati (struttura BOS/CHoCH, order block, fair value gap, liquidit\u00e0 EQH/EQL, zona "
+            "premium/discount, regime/ADX) \u2014 il tuo compito \u00e8 SOLO spiegarli in un paragrafo "
+            "discorsivo e chiaro per un trader retail: cosa potrebbe fare il prezzo (rimbalzare su "
+            "una zona, andare a liquidare un livello, colmare un imbalance/gap, partire in un "
+            "movimento pi\u00f9 ampio e in quale direzione), citando SEMPRE e SOLO i livelli che ti "
+            "vengono dati nel contesto. VIETATO inventare prezzi, pip, percentuali, probabilit\u00e0 o "
+            "livelli non presenti nel contesto. Se un elemento non \u00e8 nel contesto (es. nessun FVG "
+            "rilevato) non parlarne affatto, non inventarlo. Rispondi in italiano, un paragrafo "
+            "unico discorsivo di massimo 130 parole, senza elenchi puntati, tono diretto e concreto "
+            "come se stessi spiegando la situazione a voce a un trader."
+        ),
+        user="\n".join(lines),
+        max_tokens=260,
+    )

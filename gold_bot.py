@@ -1258,6 +1258,17 @@ async def _build_weekend_outlook() -> tuple:
     except Exception as e:
         logger.error(f"Errore generazione grafico weekend: {e}")
 
+    narrative_txt = ""
+    if chart_path:
+        try:
+            from weekly_chart import compute_smc_context
+            from news_analyst import get_weekly_smc_narrative
+            smc_ctx = await asyncio.to_thread(compute_smc_context, df_4h)
+            narrative = await asyncio.to_thread(get_weekly_smc_narrative, smc_ctx, zones["current_price"])
+            narrative_txt = f"\n\n🧠 *Lettura tecnica (4H):*\n{_escape_md(narrative)}"
+        except Exception as e:
+            logger.error(f"Errore narrativa SMC weekend: {e}")
+
     msg = (
         f"🔮 *ANALISI WEEKEND — XAU/USD*\n"
         f"_In vista della riapertura di lunedì_\n"
@@ -1266,6 +1277,7 @@ async def _build_weekend_outlook() -> tuple:
         f"━━━━━━━━━━━━━━━━━━━━\n"
         + "\n\n".join(lines)
         + zone_txt
+        + narrative_txt
         + events_txt
     )
     return msg, chart_path

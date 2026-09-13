@@ -33,6 +33,37 @@ def compute_weekly_zones(df: pd.DataFrame) -> dict:
     }
 
 
+def compute_smc_context(df: pd.DataFrame) -> dict:
+    """
+    Fatti tecnici Smart Money Concepts (struttura BOS/CHoCH, order block,
+    fair value gap, liquidità EQH/EQL, zona premium/discount, regime) sulle
+    stesse candele 4h usate per il grafico e le zone chiave — nessun nuovo
+    calcolo indipendente, solo le funzioni SMC già validate in analyzer.py
+    (le stesse che decidono gli order type dei segnali live).
+
+    Passato a news_analyst.get_weekly_smc_narrative() perché lo trasformi
+    in una spiegazione discorsiva senza inventare numeri: qui ci sono SOLO
+    i fatti calcolati, mai un'interpretazione.
+    """
+    d = analyzer.compute_indicators(df.copy())
+    d = analyzer.detect_swing_points(d)
+    structure = analyzer.detect_bos_choch(d)
+    ob        = analyzer.detect_order_blocks(d)
+    fvg       = analyzer.detect_fvg(d)
+    liq       = analyzer.detect_liquidity(d)
+    regime    = analyzer.detect_market_regime(d)
+    return {
+        "structure":        structure,
+        "order_blocks":     ob,
+        "fvg":              fvg,
+        "liquidity":        liq,
+        "premium_discount": analyzer.detect_premium_discount(d, structure),
+        "mitigation":       analyzer.detect_mitigation(d, ob),
+        "regime":           regime["regime"],
+        "adx":              regime["adx"],
+    }
+
+
 def render_weekly_outlook_chart(df: pd.DataFrame, zones: dict, bias: str) -> str:
     """
     Disegna le candele 4h delle ultime ~2 settimane con le zone di
