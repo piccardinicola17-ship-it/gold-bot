@@ -211,14 +211,17 @@ class TestCheckMacroAlertsResilience(GoldBotTestCase):
         with mock.patch("gold_bot.is_bot_paused", return_value=False), \
              mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
              mock.patch("gold_bot.get_current_price_async", return_value=4400.0), \
-             mock.patch("gold_bot.analyze_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
              mock.patch("gold_bot.save_macro_alert_state", return_value=None):
             await gb.check_macro_alerts(bot)
         return bot
 
     async def _scenario_send_fails_then_succeeds(self, title):
         event = self._make_event(30, title)
-        ev_key = f"{event['date']}_{event['time']}_{event['title']}"
+        # group_key raggruppa per data+ora (senza titolo): eventi con lo
+        # stesso orario condividono un solo alert combinato — vedi
+        # check_macro_alerts (fix 2026-09-13, bias combinato).
+        ev_key = f"{event['date']}_{event['time']}"
 
         # Primo giro: il send fallisce (es. Markdown non valido) -> il
         # dedup NON deve essere marcato, deve poter ritentare.
@@ -267,7 +270,7 @@ class TestStatPredictionRetriesIndependently(GoldBotTestCase):
         with mock.patch("gold_bot.is_bot_paused", return_value=False), \
              mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
              mock.patch("gold_bot.get_current_price_async", return_value=4400.0), \
-             mock.patch("gold_bot.analyze_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
              mock.patch("macro_predictor.predict_reaction", return_value=prediction_return), \
              mock.patch("macro_predictor.format_prediction", return_value="previsione"), \
              mock.patch("gold_bot.save_macro_alert_state", return_value=None):
@@ -360,19 +363,27 @@ class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):
             if c.kwargs.get("text") == "digest notizie"
         ]
         self.assertEqual(len(digest_calls), 1)
-        # Ma il resoconto POST-EVENTO va comunque mandato per ciascuno dei 3.
+        # FIX 2026-09-13: i 3 eventi condividono data+ora, quindi vengono
+        # raggruppati in UN SOLO alert POST-EVENTO combinato (non più 3
+        # resoconti separati e potenzialmente discordi — bug reale
+        # segnalato dall'utente su un caso di 4 CPI simultanei con bias
+        # diversi tra loro).
         post_evento_calls = [
             c for c in bot.send_message.call_args_list
             if "POST-EVENTO" in c.kwargs.get("text", "")
         ]
-        self.assertEqual(len(post_evento_calls), 3)
+        self.assertEqual(len(post_evento_calls), 1)
+        combined_text = post_evento_calls[0].kwargs["text"]
+        self.assertIn("Non-Farm Employment Change", combined_text)
+        self.assertIn("Average Hourly Earnings m/m", combined_text)
+        self.assertIn("Unemployment Rate", combined_text)
 
     def test_no_post_event_no_news_digest_sent(self):
         """Solo eventi pre-evento (30 min prima): nessun digest, il flag
         post_event_fired resta False."""
         import asyncio
         event = self._make_event(30, "Fed Chair Speech")
-        with mock.patch("gold_bot.analyze_macro_event", return_value="Bias: NEUTRO\nMotivo: test"):
+        with mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: NEUTRO\nMotivo: test"):
             bot = asyncio.run(self._run([event]))
         digest_calls = [
             c for c in bot.send_message.call_args_list
@@ -405,7 +416,7 @@ class TestProtectiveCloseAgainstEventBias(GoldBotTestCase):
         with mock.patch("gold_bot.is_bot_paused", return_value=False), \
              mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
              mock.patch("gold_bot.get_current_price_async", return_value=4315.0), \
-             mock.patch("gold_bot.analyze_macro_event", return_value=f"Bias: {bias}\nMotivo: test"), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value=f"Bias: {bias}\nMotivo: test"), \
              mock.patch("gold_bot.save_macro_alert_state", return_value=None):
             await gb.check_macro_alerts(bot)
         return bot
@@ -518,7 +529,7 @@ class TestProtectiveCloseAgainstStatisticalPrediction(GoldBotTestCase):
         with mock.patch("gold_bot.is_bot_paused", return_value=False), \
              mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
              mock.patch("gold_bot.get_current_price_async", return_value=4315.0), \
-             mock.patch("gold_bot.analyze_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: NEUTRO\nMotivo: test"), \
              mock.patch("gold_bot.save_macro_alert_state", return_value=None), \
              mock.patch("macro_predictor.predict_reaction", return_value=prediction), \
              mock.patch("macro_predictor.format_prediction", return_value="previsione statistica di test"):
@@ -602,6 +613,160 @@ class TestProtectiveCloseAgainstStatisticalPrediction(GoldBotTestCase):
             if "PREVISIONE STATISTICA" in c.kwargs.get("text", "")
         ]
         self.assertEqual(len(protective_calls), 1)
+
+
+class TestGroupedSimultaneousMacroEvents(GoldBotTestCase):
+    """FIX 2026-09-13: più indicatori con stesso giorno+ora (es. CPI m/m +
+    CPI y/y + Core CPI m/m + Core CPI y/y, tutti alle 14:30) generavano un
+    ALERT MACRO separato per ciascuno, ognuno con un bias LLM indipendente
+    e potenzialmente discorde — bug reale in produzione, screenshot utente
+    2026-09-11 con bias NEUTRO/BUY/SELL/SELL tutti per lo stesso orario.
+    Ora vengono raggruppati per (data, ora) in un solo alert con un solo
+    bias combinato (analyze_combined_macro_event)."""
+
+    def _make_event(self, minutes_away: int, title: str, forecast="N/A", previous="N/A") -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": forecast,
+            "previous": previous,
+        }
+
+    async def _run(self, events):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=events), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4400.0), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: BUY\nMotivo: combinato") as mocked, \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            await gb.check_macro_alerts(bot)
+        return bot, mocked
+
+    def test_four_simultaneous_cpi_releases_send_one_alert_not_four(self):
+        import asyncio
+        events = [
+            self._make_event(30, "CPI m/m", "0.4%", "0.1%"),
+            self._make_event(30, "CPI y/y", "3.4%", "3.4%"),
+            self._make_event(30, "Core CPI m/m", "0.2%", "0.2%"),
+            self._make_event(30, "Core CPI y/y", "2.4%", "2.5%"),
+        ]
+        bot, mocked = asyncio.run(self._run(events))
+
+        alert_calls = [
+            c for c in bot.send_message.call_args_list
+            if "ALERT MACRO" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(alert_calls), 1)
+        # Una sola chiamata all'analisi combinata, con tutti e 4 gli eventi
+        # passati insieme (non 4 chiamate indipendenti che potrebbero
+        # produrre bias diversi).
+        mocked.assert_called_once()
+        self.assertEqual(len(mocked.call_args.args[0]), 4)
+
+        text = alert_calls[0].kwargs["text"]
+        for title in ("CPI m/m", "CPI y/y", "Core CPI m/m", "Core CPI y/y"):
+            self.assertIn(title, text)
+        # Un solo bias mostrato (BUY), non uno diverso per indicatore.
+        self.assertEqual(text.count("Bias evento"), 1)
+        self.assertEqual(text.count("Bias post-evento"), 1)
+
+    def test_single_event_still_gets_its_own_alert(self):
+        import asyncio
+        events = [self._make_event(30, "Fed Chair Speech")]
+        bot, mocked = asyncio.run(self._run(events))
+        alert_calls = [
+            c for c in bot.send_message.call_args_list
+            if "ALERT MACRO" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(alert_calls), 1)
+        mocked.assert_called_once()
+        self.assertEqual(len(mocked.call_args.args[0]), 1)
+
+
+class TestBiasEventoVsPostEvento(GoldBotTestCase):
+    """FIX 2026-09-13 (richiesta esplicita dell'utente 2026-09-10, caso
+    reale Core PPI m/m): il messaggio pre-evento ora mostra "bias evento"
+    (reazione immediata) e "bias post-evento" (assestamento ~10-15 min)
+    separatamente, e il messaggio POST-EVENTO li verifica in modo
+    indipendente con due prezzi di riferimento diversi — una snapshot
+    immediata (1-7 min dopo) e il prezzo a 8-15 min, invece di un unico
+    verdetto che confondeva le due fasi."""
+
+    def _make_event(self, minutes_away: int, title: str = "Core PPI m/m") -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "0.3%",
+            "previous": "0.2%",
+        }
+
+    async def _run(self, event, price):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=price), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: BUY\nMotivo: test"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_immediate_snapshot_captured_in_its_own_window(self):
+        """Uno stato pre-evento già esistente (come dopo un vero alert a
+        -30 min) con price_immediate ancora None: una chiamata con
+        mins_away nella finestra -7/-1 deve popolarlo, senza mandare
+        alcun messaggio (silenzioso, solo aggiornamento di stato)."""
+        import asyncio
+        event = self._make_event(-3)  # 3 minuti dopo il rilascio: dentro -7/-1
+        group_key = f"{event['date']}_{event['time']}"
+        gb._pre_event_bias[group_key] = {"bias": "BUY", "price": 4378.90, "price_immediate": None}
+
+        bot = asyncio.run(self._run(event, 4388.60))
+
+        self.assertEqual(gb._pre_event_bias[group_key]["price_immediate"], 4388.60)
+        # Nessun messaggio mandato per la sola cattura della snapshot.
+        immediate_related = [
+            c for c in bot.send_message.call_args_list
+            if "Bias evento" in c.kwargs.get("text", "") or "ALERT MACRO" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(immediate_related), 0)
+
+    def test_post_event_message_shows_both_bias_blocks_independently(self):
+        """Caso reale che ha motivato la feature (Core PPI m/m 2026-09-10):
+        reazione immediata CORRETTA (+9.70$, bias BUY confermato), ma
+        l'assestamento a 10-15 min si inverte (-49.70$ netto) — il vecchio
+        messaggio unico diceva "NON CONFERMATO" senza distinguere le due
+        fasi. Ora deve mostrare ENTRAMBI i verdetti separatamente."""
+        import asyncio
+        post_event = self._make_event(-10)
+        group_key = f"{post_event['date']}_{post_event['time']}"
+        # Stato pre-evento + snapshot immediata già catturati in cicli
+        # precedenti dello scheduler (esattamente come accadrebbe in
+        # produzione: -30min alert, poi -3min snapshot, poi -10min post).
+        gb._pre_event_bias[group_key] = {
+            "bias": "BUY", "price": 4378.90, "price_immediate": 4388.60,
+        }
+
+        bot = asyncio.run(self._run(post_event, 4329.20))
+
+        post_calls = [
+            c for c in bot.send_message.call_args_list
+            if "POST-EVENTO" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(post_calls), 1)
+        text = post_calls[0].kwargs["text"]
+
+        self.assertIn("⚡ Bias evento", text)
+        self.assertIn("🕒 Bias post-evento", text)
+        self.assertIn("✅ *CONFERMATO*", text)          # blocco evento: +9.70$, BUY confermato
+        self.assertIn("❌ *NON CONFERMATO*", text)       # blocco post-evento: -49.70$, BUY smentito
+        self.assertIn("+9.70$", text)
+        self.assertIn("-49.70$", text)
 
 
 if __name__ == "__main__":

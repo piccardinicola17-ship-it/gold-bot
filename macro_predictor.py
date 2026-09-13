@@ -61,6 +61,7 @@ import requests
 
 from breaking_news import _fetch_rss
 from historical_events import _parse_number
+from news_analyst import _escape_md
 from trade_manager import (
     load_fred_last_seen, save_fred_last_seen,
     load_rss_macro_last_seen, save_rss_macro_last_seen,
@@ -394,6 +395,15 @@ def predict_reaction(event_name: str, forecast_raw: str) -> dict | None:
     }
 
 
+# Sotto questa soglia la sorpresa è talmente vicina a zero che "reazione
+# attesa" nel messaggio è quasi solo l'intercetta del modello (rumore di
+# fondo), non un vero segnale legato a QUESTO rilascio — l'utente ha
+# segnalato confusione l'11/09/2026 vedendo "z=+0.0" insieme a una reazione
+# attesa diversa da zero, senza capire perché. Solo per chiarezza del
+# messaggio, non cambia il modello/training.
+SURPRISE_INSIGNIFICANT_Z = 0.3
+
+
 def format_prediction(pred: dict) -> str:
     direction = "ribassista per l'oro" if pred["predicted_reaction_usd"] < 0 else "rialzista per l'oro"
     horizon_label = pred["horizon"].replace("reaction_", "").replace("m", " min")
@@ -437,11 +447,27 @@ def format_prediction(pred: dict) -> str:
             "±0.1pp in rari casi di revisione dell'indice — verificato empiricamente, ~20% dei mesi._"
         )
 
+    # FIX 2026-09-13: mancava il nome dell'evento — con più rilasci CPI
+    # simultanei (CPI m/m, CPI y/y, Core CPI m/m, Core CPI y/y, tutti alle
+    # 14:30) l'utente non aveva modo di capire a quale dei quattro si
+    # riferisse questo messaggio (oggi solo Core CPI m/m ha un modello
+    # deployato, ma il messaggio non lo diceva). "Prev" rinominato
+    # esplicitamente "Forecast" per non confondersi con "Prec." (precedente)
+    # usato nell'alert pre-evento — stessa parola, significati diversi.
+    warning = ""
+    if abs(pred["surprise_zscore"]) < SURPRISE_INSIGNIFICANT_Z:
+        warning = (
+            "\n⚠️ _Sorpresa quasi nulla (actual in linea con le attese) — la reazione attesa qui sopra "
+            "riflette soprattutto il rumore di fondo del modello, non un segnale legato a questo dato._"
+        )
+
     return (
-        f"📐 *Previsione statistica* (n={pred['n_historical']} storici, {horizon_label})\n"
-        f"Actual {actual_fmt} vs Prev {forecast_fmt} "
+        f"📐 *Previsione statistica — {_escape_md(pred.get('event_name', 'evento'))}* "
+        f"(n={pred['n_historical']} storici, {horizon_label})\n"
+        f"Actual {actual_fmt} vs Forecast {forecast_fmt} "
         f"(sorpresa z={pred['surprise_zscore']:+.1f})\n"
-        f"Reazione attesa: *{pred['predicted_reaction_usd']:+.2f}$* — {direction}\n"
+        f"Reazione attesa: *{pred['predicted_reaction_usd']:+.2f}$* — {direction}"
+        f"{warning}\n"
         f"_Stima statistica su dati storici, non una garanzia — margine d'errore reale, vedi Fase 4._\n"
         f"{note_source}"
     )

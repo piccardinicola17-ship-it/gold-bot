@@ -69,6 +69,23 @@ class TestFormatNewsMessageHeadlineSanitization(unittest.TestCase):
         self.assertNotIn("]", result)
 
 
+class TestFormatNewsMessageMultilineEntries(unittest.TestCase):
+    """FIX (2026-09-13): get_extended_news() produce ogni voce su due righe
+    ("fonte (data)\\ntitolo") — format_news_message prendeva solo la prima
+    riga (raw.split("\\n")[0]), mostrando in produzione bullet come
+    "Yahoo Entertainment (2026-09-10)" senza alcun titolo reale, scoperto
+    da uno screenshot del bot live. Ora prende l'ultima riga non vuota."""
+
+    def test_headline_shows_title_not_just_source_line(self):
+        news = ["📰 *Yahoo Entertainment* (2026-09-10)\n_ECB raises rates, dollar strengthens_"]
+        result = na.format_news_message(news, current_price=4400)
+        self.assertIn("ECB raises rates, dollar strengthens", result)
+
+    def test_single_line_entry_still_works(self):
+        result = na.format_news_message(["Fed holds rates steady"], current_price=4400)
+        self.assertIn("Fed holds rates steady", result)
+
+
 class TestEmptyInputEarlyReturns(unittest.TestCase):
     def test_format_news_message_no_news(self):
         self.assertEqual(na.format_news_message([]), "Nessuna notizia disponibile al momento.")

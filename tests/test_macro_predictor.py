@@ -119,6 +119,7 @@ class TestPredictReactionMomPctSeriesUnaffected(unittest.TestCase):
 class TestFormatPrediction(unittest.TestCase):
     def test_level_type_formats_as_raw_count_not_percent(self):
         pred = {
+            "event_name": "Non-Farm Employment Change",
             "value_type": "level", "actual_value": 219000.0, "forecast_value": 214000.0,
             "surprise_zscore": 0.5, "predicted_reaction_usd": -1.2,
             "horizon": "reaction_1m", "n_historical": 130,
@@ -130,6 +131,7 @@ class TestFormatPrediction(unittest.TestCase):
 
     def test_mom_pct_type_formats_as_percent(self):
         pred = {
+            "event_name": "Core CPI m/m",
             "value_type": "mom_pct", "actual_value": 0.3, "forecast_value": 0.2,
             "surprise_zscore": 0.8, "predicted_reaction_usd": -0.9,
             "horizon": "reaction_30m", "n_historical": 83,
@@ -303,6 +305,7 @@ class TestPredictReactionRssSeries(unittest.TestCase):
 class TestFormatPredictionNewTypes(unittest.TestCase):
     def test_mom_diff_type_formats_with_sign_and_thousands_separator(self):
         pred = {
+            "event_name": "ADP Non-Farm Employment Change",
             "value_type": "mom_diff", "source_tier": "fred",
             "actual_value": 153000.0, "forecast_value": 118000.0,
             "surprise_zscore": 0.4, "predicted_reaction_usd": 1.1,
@@ -314,6 +317,7 @@ class TestFormatPredictionNewTypes(unittest.TestCase):
 
     def test_index_type_formats_with_one_decimal_no_percent(self):
         pred = {
+            "event_name": "ISM Manufacturing PMI",
             "value_type": "index", "source_tier": "rss",
             "actual_value": 54.6, "forecast_value": 55.2,
             "surprise_zscore": -0.4, "predicted_reaction_usd": 0.6,
@@ -326,6 +330,7 @@ class TestFormatPredictionNewTypes(unittest.TestCase):
 
     def test_rss_source_tier_gets_the_less_reliable_disclaimer(self):
         pred = {
+            "event_name": "ISM Manufacturing PMI",
             "value_type": "index", "source_tier": "rss",
             "actual_value": 54.6, "forecast_value": 55.2,
             "surprise_zscore": -0.4, "predicted_reaction_usd": 0.6,
@@ -336,6 +341,7 @@ class TestFormatPredictionNewTypes(unittest.TestCase):
 
     def test_fred_source_tier_does_not_get_the_rss_disclaimer(self):
         pred = {
+            "event_name": "Non-Farm Employment Change",
             "value_type": "level", "source_tier": "fred",
             "actual_value": 219000.0, "forecast_value": 214000.0,
             "surprise_zscore": 0.5, "predicted_reaction_usd": -1.2,

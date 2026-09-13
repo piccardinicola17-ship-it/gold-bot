@@ -27,7 +27,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_data_success, SNIPER_CONFIGS
 from agent_orchestrator import run_pipeline, format_pipeline_report
-from news_analyst import format_news_message, analyze_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
+from news_analyst import format_news_message, analyze_macro_event, analyze_combined_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
 # ORB rimosso — gestito manualmente dall'utente
 from self_learning import analyze_last_trade, weekly_review, optimize_strategy_weights, format_learning_report
 from risk_manager import format_risk_report, calculate_lot_size, resume_session_manual, min_prob_for_timeframe
@@ -1448,8 +1448,22 @@ async def check_macro_alerts(bot):
         events = await asyncio.to_thread(get_upcoming_events, 1, 3.5)
         post_event_fired = False
 
+        # Raggruppa gli eventi con stesso giorno+ora (es. CPI m/m + CPI y/y +
+        # Core CPI m/m + Core CPI y/y, tutti alle 14:30 — stesso rilascio,
+        # quattro angolazioni dello stesso dato): un solo alert con un bias
+        # combinato invece di N alert scollegati e a volte contraddittori
+        # (bug segnalato dall'utente l'11/09/2026: 4 messaggi consecutivi con
+        # bias NEUTRO/BUY/SELL/SELL tutti per le 14:30, screenshot Telegram).
+        # get_upcoming_events() ordina già per date+time, il raggruppamento
+        # preserva l'ordine.
+        groups: dict = {}
         for ev in events:
-            ev_key = f"{ev['date']}_{ev['time']}_{ev['title']}"
+            gk = f"{ev['date']}_{ev['time']}"
+            groups.setdefault(gk, []).append(ev)
+
+        for group_key, group_events in groups.items():
+            ev = group_events[0]  # rappresentante del gruppo per data/ora/titolo singolo
+            combined_title = " + ".join(e["title"] for e in group_events)
             try:
                 ev_dt     = TIMEZONE.localize(
                     datetime.strptime(f"{ev['date']} {ev['time']}", "%Y-%m-%d %H:%M")
@@ -1459,25 +1473,38 @@ async def check_macro_alerts(bot):
                 continue
 
             # PRE-EVENTO (30 min prima)
-            if 25 <= mins_away <= 35 and ev_key not in _sent_event_alerts:
+            if 25 <= mins_away <= 35 and group_key not in _sent_event_alerts:
                 price = await get_current_price_async()
                 analysis = await asyncio.to_thread(
-                    analyze_macro_event,
-                    ev["title"], ev.get("forecast","N/A"),
-                    ev.get("previous","N/A"), "N/A", price
+                    analyze_combined_macro_event, group_events, price
                 )
-                # analyze_macro_event ora ritorna solo "Bias: X\nMotivo: Y"
-                # (niente più pip/livelli/TP/SL inventati — vedi news_analyst.py).
+                # analyze_combined_macro_event ora ritorna solo "Bias: X\nMotivo: Y"
+                # (niente più pip/livelli/TP/SL inventati — vedi news_analyst.py),
+                # UN SOLO bias anche quando il gruppo ha più indicatori.
                 bias, motivo = "NEUTRO", ""
                 for line in analysis.splitlines():
                     if line.lower().startswith("bias:"):
                         bias = line.split(":", 1)[1].strip().upper()
                     elif line.lower().startswith("motivo:"):
                         motivo = line.split(":", 1)[1].strip()
-                bias_line = f"📈 XAU/USD bias: *{bias}*"
+
+                # Bias evento (reazione immediata) vs bias post-evento
+                # (assestamento ~10-15 min) — richiesta esplicita dell'utente
+                # 2026-09-10 da un caso reale (Core PPI m/m): il bot aveva UN
+                # solo bias e un solo controllo, e ha detto "NON CONFERMATO"
+                # anche quando la reazione immediata era stata corretta (+100
+                # pip nella direzione giusta) e solo l'assestamento successivo
+                # si era invertito. Stesso valore di bias per ora (nessun
+                # modello statistico valida oggi una vera inversione — vedi
+                # feedback_conservative_validation_standard) ma verificati
+                # SEPARATAMENTE nel messaggio POST-evento con due finestre di
+                # misurazione indipendenti (vedi snapshot immediata sotto).
+                bias_line = f"⚡ Bias evento (reazione immediata): *{bias}*"
                 if motivo:
                     bias_line += f"\n_{_escape_md(motivo)}_"
-                _pre_event_bias[ev_key] = {"bias": bias, "price": price}
+                bias_line += f"\n🕒 Bias post-evento (assestamento ~10-15 min): *{bias}*"
+
+                _pre_event_bias[group_key] = {"bias": bias, "price": price, "price_immediate": None}
 
                 # Chiusura protettiva dei trade aperti in direzione opposta
                 # al bias dell'evento in arrivo. Trovato in diretta il
@@ -1501,11 +1528,11 @@ async def check_macro_alerts(bot):
                             continue
                         trade_id = open_trade.get("trade_id")
                         tf_label = TF_LABEL.get(open_trade.get("timeframe", ""), "?")
-                        title_safe = _escape_md(ev["title"])
+                        title_safe = _escape_md(combined_title)
                         if open_trade.get("activated"):
                             if not close_trade(
                                 trade_id, "CLOSED_EARLY", price,
-                                f"Chiuso in anticipo: controtrend rispetto al bias pre-evento ({ev['title']})",
+                                f"Chiuso in anticipo: controtrend rispetto al bias pre-evento ({combined_title})",
                             ):
                                 continue
                             pips = calculate_trade_pips(trade_signal, open_trade.get("entry"), price)
@@ -1522,7 +1549,7 @@ async def check_macro_alerts(bot):
                         else:
                             if not close_trade(
                                 trade_id, "CANCELLED", price,
-                                f"Pending cancellato: controtrend rispetto al bias pre-evento ({ev['title']})",
+                                f"Pending cancellato: controtrend rispetto al bias pre-evento ({combined_title})",
                             ):
                                 continue
                             protect_msg = (
@@ -1544,12 +1571,23 @@ async def check_macro_alerts(bot):
                 # un fallimento (es. proprio per questo) perdeva l'alert
                 # (incluso il blackout trading) per sempre, senza retry al
                 # giro successivo. Ora si marca solo dopo un send riuscito.
+                #
+                # Con più indicatori nello stesso gruppo, ciascuno mostra la
+                # propria previsione/precedente (il dato grezzo per
+                # indicatore resta utile), ma sotto c'è un solo bias combinato.
+                if len(group_events) == 1:
+                    dettagli = f"📊 Prev: `{ev.get('forecast','N/A')}` | Prec: `{ev.get('previous','N/A')}`\n"
+                else:
+                    dettagli = "".join(
+                        f"📊 *{_escape_md(e['title'])}*: Prev `{e.get('forecast','N/A')}` | Prec `{e.get('previous','N/A')}`\n"
+                        for e in group_events
+                    )
                 msg = (
                     f"⚠️ *ALERT MACRO — TRA 30 MINUTI*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📅 *{_escape_md(ev['title'])}*\n"
+                    f"📅 *{_escape_md(combined_title)}*\n"
                     f"🕐 Orario: *{ev['time']} IT*\n"
-                    f"📊 Prev: `{ev.get('forecast','N/A')}` | Prec: `{ev.get('previous','N/A')}`\n"
+                    f"{dettagli}"
                     f"💰 XAU/USD: *${_fmt(price)}*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"🚫 *BLACKOUT TRADING ATTIVO*\n"
@@ -1558,39 +1596,81 @@ async def check_macro_alerts(bot):
                 )
                 if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
-                _sent_event_alerts.add(ev_key)
+                _sent_event_alerts.add(group_key)
 
-            # POST-EVENTO (10 min dopo)
-            post_key = f"POST_{ev_key}"
+            # SNAPSHOT IMMEDIATA (per verificare "bias evento" nel post-evento)
+            # Finestra -7/-1 (1-7 minuti dopo il rilascio) invece di "1-2
+            # minuti" come discusso inizialmente: check_macro_alerts gira
+            # ogni 5 minuti (vedi scheduler in main()), una finestra più
+            # stretta di 5 minuti rischierebbe di cadere per intero tra due
+            # cicli consecutivi e non catturare mai nulla. -7/-1 resta
+            # comunque nettamente prima della finestra di assestamento
+            # (-15/-8), distinguendo davvero le due fasi. Silenziosa (nessun
+            # messaggio), aggiorna solo lo stato in memoria.
+            pre_for_snapshot = _pre_event_bias.get(group_key)
+            if (pre_for_snapshot is not None and pre_for_snapshot.get("price_immediate") is None
+                    and -7 <= mins_away <= -1):
+                pre_for_snapshot["price_immediate"] = await get_current_price_async()
+
+            # POST-EVENTO (8-15 min dopo)
+            post_key = f"POST_{group_key}"
             if -15 <= mins_away <= -8 and post_key not in _sent_post_event_alerts:
                 price = await get_current_price_async()
                 # Resoconto oggettivo: bias previsto pre-evento vs movimento
                 # di prezzo reale — confronto aritmetico sui prezzi, non una
-                # seconda opinione dell'AI (che tra l'altro non avrebbe
-                # comunque l'actual numerico reale a disposizione qui).
-                # .get() e non .pop(): con il dedup ora marcato solo dopo un
-                # send riuscito (vedi sopra), un fallimento fa ritentare
-                # questo blocco al giro successivo — un .pop() qui l'avrebbe
-                # già consumato al primo tentativo fallito, perdendo il bias
-                # pre-evento anche se poi disponibile per il retry.
-                pre = _pre_event_bias.get(ev_key)
+                # seconda opinione dell'AI. Due blocchi separati (bias
+                # evento / bias post-evento), ciascuno con la propria
+                # finestra di misurazione, invece di un singolo verdetto che
+                # confondeva le due fasi (vedi commento sopra).
+                # .get() e non .pop(): con il dedup marcato solo dopo un
+                # send riuscito, un fallimento fa ritentare questo blocco al
+                # giro successivo — un .pop() qui l'avrebbe già consumato al
+                # primo tentativo fallito, perdendo il bias pre-evento anche
+                # se poi disponibile per il retry.
+                pre = _pre_event_bias.get(group_key)
                 if pre:
-                    change = price - pre["price"]
-                    pre_bias = pre["bias"]
-                    if abs(change) < CONFIRM_THRESHOLD_USD:
-                        esito = "➖ *Movimento non significativo* — prezzo praticamente invariato"
-                    elif pre_bias == "BUY":
-                        esito = "✅ *CONFERMATO*" if change > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
-                    elif pre_bias == "SELL":
-                        esito = "✅ *CONFERMATO*" if change < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+                    pre_bias        = pre["bias"]
+                    price_immediate = pre.get("price_immediate")
+
+                    if price_immediate is None:
+                        blocco_evento = (
+                            f"⚡ Bias evento: *{pre_bias}* (era ${pre['price']})\n"
+                            f"_Snapshot immediata non disponibile (bot riavviato nel frattempo)._"
+                        )
                     else:
-                        esito = "➖ Bias pre-evento era NEUTRO — nessuna previsione da verificare"
-                    segno = "+" if change >= 0 else ""
-                    resoconto = (
-                        f"🎯 Bias previsto: *{pre_bias}* (era ${pre['price']})\n"
-                        f"{esito}\n"
-                        f"📐 Variazione: *{segno}{change:.2f}$*"
+                        change_evento = price_immediate - pre["price"]
+                        if abs(change_evento) < CONFIRM_THRESHOLD_USD:
+                            esito_evento = "➖ *Movimento non significativo* — prezzo praticamente invariato"
+                        elif pre_bias == "BUY":
+                            esito_evento = "✅ *CONFERMATO*" if change_evento > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+                        elif pre_bias == "SELL":
+                            esito_evento = "✅ *CONFERMATO*" if change_evento < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+                        else:
+                            esito_evento = "➖ Bias pre-evento era NEUTRO — nessuna previsione da verificare"
+                        segno_ev = "+" if change_evento >= 0 else ""
+                        blocco_evento = (
+                            f"⚡ Bias evento: *{pre_bias}* (era ${pre['price']})\n"
+                            f"{esito_evento}\n"
+                            f"📐 Variazione (1-7 min): *{segno_ev}{change_evento:.2f}$*"
+                        )
+
+                    change_post = price - pre["price"]
+                    if abs(change_post) < CONFIRM_THRESHOLD_USD:
+                        esito_post = "➖ *Movimento non significativo* — prezzo praticamente invariato"
+                    elif pre_bias == "BUY":
+                        esito_post = "✅ *CONFERMATO*" if change_post > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+                    elif pre_bias == "SELL":
+                        esito_post = "✅ *CONFERMATO*" if change_post < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+                    else:
+                        esito_post = "➖ Bias pre-evento era NEUTRO — nessuna previsione da verificare"
+                    segno_post = "+" if change_post >= 0 else ""
+                    blocco_post = (
+                        f"🕒 Bias post-evento: *{pre_bias}* (era ${pre['price']})\n"
+                        f"{esito_post}\n"
+                        f"📐 Variazione a 10-15 min: *{segno_post}{change_post:.2f}$*"
                     )
+
+                    resoconto = f"{blocco_evento}\n\n{blocco_post}"
                 else:
                     resoconto = "_Bias pre-evento non disponibile (bot riavviato nel frattempo)._"
 
@@ -1599,7 +1679,7 @@ async def check_macro_alerts(bot):
                 # successivi — previsione statistica e news — sono già
                 # protetti da try/except propri e non condizionano post_key).
                 msg_post = (
-                    f"📊 *POST-EVENTO — {_escape_md(ev['title'])}*\n"
+                    f"📊 *POST-EVENTO — {_escape_md(combined_title)}*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"💰 XAU/USD: *${_fmt(price)}*\n"
                     f"🚦 *Blackout terminato — trading riaperto*\n"
@@ -1609,13 +1689,16 @@ async def check_macro_alerts(bot):
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
                 _sent_post_event_alerts.add(post_key)
-                _pre_event_bias.pop(ev_key, None)
+                _pre_event_bias.pop(group_key, None)
                 post_event_fired = True
 
             # Fase 5 progetto dati storici: previsione statistica reale, solo
             # per le serie validate in Fase 4 (oggi: Core CPI m/m). Silenziosa
             # se non applicabile (evento diverso, forecast non numerico) —
-            # mai forzata.
+            # mai forzata. Resta PER-SINGOLO-EVENTO (non per gruppo): il
+            # modello è specifico a un singolo event_name — es. solo Core CPI
+            # m/m ha un modello deployato anche quando esce insieme ad altri
+            # 3 indicatori CPI nello stesso gruppo.
             #
             # FIX (2026-09-06): prima questo controllo viveva DENTRO il blocco
             # post-evento sopra, con la stessa finestra stretta di 7 minuti
@@ -1629,74 +1712,75 @@ async def check_macro_alerts(bot):
             # FRED a ogni giro dello scheduler (5 min) finché non trova il
             # dato o la finestra scade — mai bloccata dall'invio (o mancato
             # invio) del resoconto principale.
-            stat_key = f"STAT_{ev_key}"
-            if -180 <= mins_away <= 0 and stat_key not in _sent_stat_prediction:
-                try:
-                    from macro_predictor import predict_reaction, format_prediction
-                    prediction = await asyncio.to_thread(
-                        predict_reaction, ev["title"], ev.get("forecast", "N/A")
-                    )
-                    if prediction:
-                        await bot.send_message(
-                            chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
+            for ev_single in group_events:
+                stat_key = f"STAT_{ev_single['date']}_{ev_single['time']}_{ev_single['title']}"
+                if -180 <= mins_away <= 0 and stat_key not in _sent_stat_prediction:
+                    try:
+                        from macro_predictor import predict_reaction, format_prediction
+                        prediction = await asyncio.to_thread(
+                            predict_reaction, ev_single["title"], ev_single.get("forecast", "N/A")
                         )
-                        _sent_stat_prediction.add(stat_key)
+                        if prediction:
+                            await bot.send_message(
+                                chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
+                            )
+                            _sent_stat_prediction.add(stat_key)
 
-                        # Chiusura protettiva basata sulla previsione statistica
-                        # (2026-09-09, richiesta esplicita dell'utente — "solo
-                        # protezione, niente nuovi trade"): stesso principio
-                        # già in produzione per il bias LLM pre-evento (vedi
-                        # sopra), qui esteso al caso in cui il bias LLM sia
-                        # NEUTRO/debole ma la previsione statistica (calibrata
-                        # su dati storici reali, non un'opinione dell'AI) sia
-                        # forte e discorde da un trade già aperto. MAI apre un
-                        # nuovo trade da sola — solo protegge quelli esistenti.
-                        # CONFIRM_THRESHOLD_USD (stessa soglia usata sotto per
-                        # il resoconto post-evento) evita di agire su previsioni
-                        # troppo piccole per essere significative.
-                        predicted_usd = prediction.get("predicted_reaction_usd", 0.0)
-                        if abs(predicted_usd) >= CONFIRM_THRESHOLD_USD:
-                            predicted_signal = "BUY" if predicted_usd > 0 else "SELL"
-                            price = await get_current_price_async()
-                            for open_trade in load_all_active_trades():
-                                trade_signal = open_trade.get("signal")
-                                if trade_signal not in ("BUY", "SELL") or trade_signal == predicted_signal:
-                                    continue
-                                trade_id = open_trade.get("trade_id")
-                                tf_label = TF_LABEL.get(open_trade.get("timeframe", ""), "?")
-                                title_safe = _escape_md(ev["title"])
-                                reason_note = (
-                                    f"Chiuso in anticipo: previsione statistica ({ev['title']}) "
-                                    f"discorde dal trade — {predicted_signal} atteso {predicted_usd:+.2f}$"
-                                )
-                                if open_trade.get("activated"):
-                                    if not close_trade(trade_id, "CLOSED_EARLY", price, reason_note):
+                            # Chiusura protettiva basata sulla previsione statistica
+                            # (2026-09-09, richiesta esplicita dell'utente — "solo
+                            # protezione, niente nuovi trade"): stesso principio
+                            # già in produzione per il bias LLM pre-evento (vedi
+                            # sopra), qui esteso al caso in cui il bias LLM sia
+                            # NEUTRO/debole ma la previsione statistica (calibrata
+                            # su dati storici reali, non un'opinione dell'AI) sia
+                            # forte e discorde da un trade già aperto. MAI apre un
+                            # nuovo trade da sola — solo protegge quelli esistenti.
+                            # CONFIRM_THRESHOLD_USD (stessa soglia usata sopra per
+                            # il resoconto post-evento) evita di agire su previsioni
+                            # troppo piccole per essere significative.
+                            predicted_usd = prediction.get("predicted_reaction_usd", 0.0)
+                            if abs(predicted_usd) >= CONFIRM_THRESHOLD_USD:
+                                predicted_signal = "BUY" if predicted_usd > 0 else "SELL"
+                                price = await get_current_price_async()
+                                for open_trade in load_all_active_trades():
+                                    trade_signal = open_trade.get("signal")
+                                    if trade_signal not in ("BUY", "SELL") or trade_signal == predicted_signal:
                                         continue
-                                    pips = calculate_trade_pips(trade_signal, open_trade.get("entry"), price)
-                                    protect_msg = (
-                                        f"🛡️ *CHIUSURA PROTETTIVA — PREVISIONE STATISTICA*\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
-                                        f"💰 Chiuso a: ${_fmt(price)} ({pips:+.1f} pips)\n"
-                                        f"📐 *{title_safe}*: reazione attesa *{predicted_signal}* ({predicted_usd:+.2f}$, n={prediction.get('n_historical')})\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"ID: `{trade_id}`"
+                                    trade_id = open_trade.get("trade_id")
+                                    tf_label = TF_LABEL.get(open_trade.get("timeframe", ""), "?")
+                                    title_safe = _escape_md(ev_single["title"])
+                                    reason_note = (
+                                        f"Chiuso in anticipo: previsione statistica ({ev_single['title']}) "
+                                        f"discorde dal trade — {predicted_signal} atteso {predicted_usd:+.2f}$"
                                     )
-                                else:
-                                    if not close_trade(trade_id, "CANCELLED", price, reason_note):
-                                        continue
-                                    protect_msg = (
-                                        f"🛡️ *PENDING CANCELLATO — PREVISIONE STATISTICA*\n"
-                                        f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
-                                        f"📐 *{title_safe}*: reazione attesa *{predicted_signal}* ({predicted_usd:+.2f}$, n={prediction.get('n_historical')})\n"
-                                        f"ID: `{trade_id}`"
-                                    )
-                                try:
-                                    await bot.send_message(chat_id=CHAT_ID, text=protect_msg, parse_mode="Markdown")
-                                except Exception as e:
-                                    logger.error(f"Notifica chiusura protettiva (previsione statistica) fallita per {trade_id}: {e}")
-                except Exception as e:
-                    logger.debug(f"[{ev['title']}] Previsione statistica non disponibile: {e}")
+                                    if open_trade.get("activated"):
+                                        if not close_trade(trade_id, "CLOSED_EARLY", price, reason_note):
+                                            continue
+                                        pips = calculate_trade_pips(trade_signal, open_trade.get("entry"), price)
+                                        protect_msg = (
+                                            f"🛡️ *CHIUSURA PROTETTIVA — PREVISIONE STATISTICA*\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                                            f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
+                                            f"💰 Chiuso a: ${_fmt(price)} ({pips:+.1f} pips)\n"
+                                            f"📐 *{title_safe}*: reazione attesa *{predicted_signal}* ({predicted_usd:+.2f}$, n={prediction.get('n_historical')})\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                                            f"ID: `{trade_id}`"
+                                        )
+                                    else:
+                                        if not close_trade(trade_id, "CANCELLED", price, reason_note):
+                                            continue
+                                        protect_msg = (
+                                            f"🛡️ *PENDING CANCELLATO — PREVISIONE STATISTICA*\n"
+                                            f"📍 {trade_signal} [{tf_label}] @ ${_fmt(open_trade.get('entry'))}\n"
+                                            f"📐 *{title_safe}*: reazione attesa *{predicted_signal}* ({predicted_usd:+.2f}$, n={prediction.get('n_historical')})\n"
+                                            f"ID: `{trade_id}`"
+                                        )
+                                    try:
+                                        await bot.send_message(chat_id=CHAT_ID, text=protect_msg, parse_mode="Markdown")
+                                    except Exception as e:
+                                        logger.error(f"Notifica chiusura protettiva (previsione statistica) fallita per {trade_id}: {e}")
+                    except Exception as e:
+                        logger.debug(f"[{ev_single['title']}] Previsione statistica non disponibile: {e}")
 
         # FIX (trovato in diretta il 2026-09-04, NFP): il digest notizie
         # veniva rifatto (fetch + chiamata LLM) e reinviato UNA VOLTA PER

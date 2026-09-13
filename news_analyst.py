@@ -110,11 +110,21 @@ def format_news_message(news: list, current_price: float = 0) -> str:
     # sanificazione manuale ne copriva solo 3 su 5. Un titolo con parentesi
     # quadre (es. "Fed [Update]") avrebbe potuto rompere il parsing
     # Markdown di Telegram ("can't parse entities").
+    #
+    # FIX 2026-09-13: get_extended_news() produce ogni voce su DUE righe
+    # ("fonte (data)\ntitolo") — prendere raw.split("\n")[0] mostrava SOLO
+    # fonte+data e scartava il titolo vero, il contenuto informativo. Il
+    # messaggio in produzione mostrava bullet come "Yahoo Entertainment
+    # (2026-09-10)" senza alcun titolo, inutile per capire la notizia (e
+    # scollegato dal Bias/Motivo sotto, che l'LLM deriva invece dal testo
+    # completo). Ora si prende l'ULTIMA riga non vuota (il titolo, se
+    # presente) — compatibile anche con un'eventuale voce a riga singola.
     headlines = []
     for n in news[:4]:
         raw = str(n).replace("*","").replace("_"," ").replace("`","").replace("[","").replace("]","")
-        first = raw.split("\n")[0].strip()[:90]
-        headlines.append(f"• {first}")
+        lines = [l.strip() for l in raw.split("\n") if l.strip()]
+        text = lines[-1][:90] if lines else ""
+        headlines.append(f"• {text}")
 
     msg = (
         f"📰 *NEWS XAU/USD* — {price_txt}\n"
@@ -182,6 +192,49 @@ def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str =
         max_tokens=80,
     )
     return analysis
+
+
+def analyze_combined_macro_event(events: list, current_price: float = 0) -> str:
+    """
+    Bias UNICO per più indicatori macro che escono ALLA STESSA ORA (es. CPI
+    m/m + CPI y/y + Core CPI m/m + Core CPI y/y, tutti alle 14:30 — stesso
+    rilascio, quattro angolazioni dello stesso dato). Prima, gold_bot.py
+    chiamava analyze_macro_event() una volta per titolo: con temperature>0
+    ogni chiamata è indipendente e può produrre bias diversi o persino
+    opposti per lo stesso identico momento (bug reale in produzione,
+    screenshot utente 2026-09-11 — 4 alert consecutivi con bias NEUTRO/BUY/
+    SELL/SELL tutti per le 14:30). Ora una SOLA chiamata ragiona su tutti
+    gli indicatori insieme e produce un solo bias coerente.
+
+    events: lista di dict con almeno "title", "forecast", "previous".
+    Con un solo elemento delega a analyze_macro_event() — stesso output di
+    prima, nessun cambio di comportamento nel caso comune (1 evento).
+    """
+    if len(events) == 1:
+        ev = events[0]
+        return analyze_macro_event(
+            ev["title"], ev.get("forecast", "N/A"), ev.get("previous", "N/A"), "N/A", current_price
+        )
+
+    price_txt = f"${current_price}" if current_price > 0 else "N/D"
+    righe = [
+        f"- {e['title']}: Previsione {e.get('forecast','N/A')} | Precedente {e.get('previous','N/A')}"
+        for e in events
+    ]
+    context = f"Prezzo XAU/USD: {price_txt}\nIndicatori in uscita insieme (stesso orario):\n" + "\n".join(righe)
+    return _call_groq(
+        system=(
+            "Sei un analista macro XAU/USD. Più indicatori escono ALLA STESSA ORA, fanno parte dello "
+            "stesso rilascio (es. dato mensile+annuale, headline+core dello stesso report) — dai UN "
+            "SOLO bias direzionale complessivo che li consideri TUTTI insieme, mai un bias per "
+            "indicatore preso isolatamente. MAI cifre precise (niente pip, livelli, entry/SL/TP). "
+            "Rispondi in italiano con ESATTAMENTE questo formato, 2 righe:\n"
+            "Bias: BUY|SELL|NEUTRO\n"
+            "Motivo: <una frase, massimo 25 parole, che spieghi il ragionamento complessivo>"
+        ),
+        user=context,
+        max_tokens=90,
+    )
 
 
 def analyze_breaking_news(source_label: str, title: str, summary: str = "",
