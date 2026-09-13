@@ -1,0 +1,346 @@
+{
+ "2016-01-07": {
+  "score": 0,
+  "note": "Misure supplementari QQE (proroga scadenza JGB, nuovo ETF) esplicitamente non easing aggiuntivo; dibattito acceso, stance di fondo invariata."
+ },
+ "2016-02-07": {
+  "score": -2,
+  "note": "Introduzione a sorpresa di QQE con tasso negativo (-0.1%), easing aggiuntivo esplicito contro rischi da mercati globali volatili."
+ },
+ "2016-03-23": {
+  "score": 0,
+  "note": "Valutazione post-NIRP: politica mantenuta invariata, crescente dissenso interno su effetti collaterali sulle banche, nessuna nuova azione."
+ },
+ "2016-05-11": {
+  "score": 0,
+  "note": "Mantenimento della politica corrente, si monitora la trasmissione degli effetti del tasso negativo, nessun cambio di stance."
+ },
+ "2016-06-23": {
+  "score": -1,
+  "note": "Toni cauti pre-Brexit, rischi orientati al ribasso, più voci pronte a easing aggiuntivo se il momentum si indebolisce."
+ },
+ "2016-08-07": {
+  "score": -2,
+  "note": "Easing aggiuntivo concreto: raddoppio acquisti ETF a 6 trilioni di yen e nuove misure di funding in valuta estera post-Brexit."
+ },
+ "2016-09-29": {
+  "score": -1,
+  "note": "Introduzione YCC e impegno di 'overshooting' dell'inflazione, guidance accomodante rafforzata esplicitamente nonostante dissenso su sostenibilità acquisti."
+ },
+ "2016-11-09": {
+  "score": 0,
+  "note": "Prima riunione post-YCC: mantenuta guida 80 trilioni/anno, nessuna nuova misura, dibattito tecnico su gestione operativa."
+ },
+ "2016-12-28": {
+  "score": 0,
+  "note": "Ripresa più solida post-elezioni USA, ma la maggioranza invoca pazienza e mantenimento della politica corrente per periodo prolungato."
+ },
+ "2017-02-07": {
+  "score": 0,
+  "note": "Miglioramento ciclico riconosciuto ma momentum verso il 2% non ancora solido; politica mantenuta, dissenso isolato ricorrente."
+ },
+ "2017-03-26": {
+  "score": 0,
+  "note": "Ripresa moderata confermata, salari in graduale aumento; nessun cambio di policy, segnalato aumento acquisti JGB a febbraio."
+ },
+ "2017-05-09": {
+  "score": 0,
+  "note": "Valutazione economica rivista al rialzo (output gap positivo) ma la stance di politica monetaria resta invariata e accomodante."
+ },
+ "2017-06-25": {
+  "score": 1,
+  "note": "Proposta esplicita di ridurre il ritmo di acquisto JGB a 45 trilioni/anno ('stealth tapering'), guidance ufficiale comunque invariata."
+ },
+ "2017-07-27": {
+  "score": 1,
+  "note": "Valutazione rivista a 'espansione moderata'; più membri propongono target inflazione flessibile e riduzione acquisti, lieve irrigidimento tecnico."
+ },
+ "2017-09-28": {
+  "score": 0,
+  "note": "Disoccupazione al 2.8% senza bolle, virtuous cycle confermato; maggioranza per persistenza dell'easing, un membro chiede stimolo aggiuntivo."
+ },
+ "2017-11-08": {
+  "score": 0,
+  "note": "Espansione moderata confermata, rischi esteri in calo; politica corrente mantenuta, dissenso su effetti collaterali di ulteriore easing."
+ },
+ "2017-12-27": {
+  "score": 0,
+  "note": "Prima diffusion index positiva dal 2008, crescita per 7 trimestri; maggioranza mantiene persistenza dell'easing, giudicato 'troppo presto' per cambiare."
+ },
+ "2018-01-30": {
+  "score": 0,
+  "note": "Crescita globale solida, inflazione ancora debole; si valuta un futuro aggiustamento tassi ma si respinge un'uscita anticipata."
+ },
+ "2018-03-18": {
+  "score": -1,
+  "note": "QQE con YCC confermato, nessuna normalizzazione prevista; toni prudenti su rischi finanziari esteri ma stance invariata."
+ },
+ "2018-05-09": {
+  "score": -1,
+  "note": "Stance dovish confermata, dibattito su comunicazione 'exit'/'normalizzazione' ma nessun cambio; preoccupazione su tassi di mercato in rialzo."
+ },
+ "2018-06-24": {
+  "score": -1,
+  "note": "Toni divisi tra cautela sugli effetti collaterali dell'easing ultra-accomodante e persistenza della politica; nessun cambio di stance."
+ },
+ "2018-08-07": {
+  "score": 0,
+  "note": "Ampliata la banda YCC e resi flessibili gli acquisti ETF: leggero irrigidimento tecnico bilanciato da nuova forward guidance dovish."
+ },
+ "2018-09-27": {
+  "score": -1,
+  "note": "Attriti commerciali USA-Cina in aumento, monitoraggio effetti di luglio; easing persistente confermato senza escalation di toni."
+ },
+ "2018-11-07": {
+  "score": -1,
+  "note": "Crollo azionario globale e rischi commerciali in aumento; la Bank ribadisce easing persistente, alcuni chiedono più flessibilità sulla YCC."
+ },
+ "2018-12-27": {
+  "score": -1,
+  "note": "PIL Q3 negativo, rischi al ribasso globali in aumento; espliciti richiami a possibile easing aggiuntivo se necessario."
+ },
+ "2019-01-30": {
+  "score": -1,
+  "note": "Rischi globali (Cina, mercati) chiaramente al ribasso; toni per azioni rapide e decise, incluso easing aggiuntivo se serve."
+ },
+ "2019-03-25": {
+  "score": -1,
+  "note": "Rallentamento globale (Cina, Europa) più marcato; la Bank è invitata a maggiore vigilanza e pronta a easing aggiuntivo deciso."
+ },
+ "2019-05-09": {
+  "score": -1,
+  "note": "Guerra commerciale pesa sull'outlook; discussione su rafforzare la forward guidance in senso più accomodante e possibile easing."
+ },
+ "2019-06-27": {
+  "score": -2,
+  "note": "Attriti commerciali intensificati, Fed e BCE tornano accomodanti; ampio ventaglio di misure di easing aggiuntivo attivamente deliberato."
+ },
+ "2019-08-06": {
+  "score": -2,
+  "note": "Fase 'cruciale' per sostenere il momentum inflazionistico; chiari appelli a easing preventivo e rafforzamento imminente di YCC/forward guidance."
+ },
+ "2019-09-29": {
+  "score": -2,
+  "note": "Forward guidance da rivedere, taglio del tasso a breve discusso esplicitamente come opzione appropriata data la curva piatta; momentum a rischio."
+ },
+ "2019-11-10": {
+  "score": -1,
+  "note": "Forward guidance rivista con bias più accomodante ma nessun ulteriore deterioramento del momentum; accordo commerciale parziale allevia i rischi."
+ },
+ "2019-12-26": {
+  "score": -1,
+  "note": "Rischi ora bilanciati tra downside e upside dopo l'accordo commerciale parziale; easing mantenuto, nessuna escalation ulteriore di toni."
+ },
+ "2020-01-28": {
+  "score": -1,
+  "note": "Segnali di stabilizzazione globale; la Bank mantiene la stance accomodante, con attenzione al rischio di 'giapponesizzazione' prolungata."
+ },
+ "2020-03-24": {
+  "score": -2,
+  "note": "Riunione d'emergenza per COVID-19: nuove misure di easing su finanziamento imprese e stabilità dei mercati, forte svolta accomodante."
+ },
+ "2020-05-10": {
+  "score": -2,
+  "note": "Ulteriore potenziamento dell'easing: acquisti JGB senza limiti, più CP/corporate bond, forward guidance legata al COVID; tra le fasi più accomodanti del periodo."
+ },
+ "2020-06-23": {
+  "score": -2,
+  "note": "COVID in fase acuta, misure di emergenza in corso; membri chiedono esplicitamente ulteriore easing per scongiurare deflazione."
+ },
+ "2020-07-26": {
+  "score": -2,
+  "note": "Proposta di rafforzare la forward guidance per impedire la deflazione e abilitare ulteriore easing; crisi ancora acuta."
+ },
+ "2020-09-28": {
+  "score": -1,
+  "note": "Ripresa moderata, nessuna nuova azione; si mantengono le tre misure di emergenza, tono ancora molto accomodante ma stabile."
+ },
+ "2020-11-08": {
+  "score": -1,
+  "note": "Nessuna nuova misura; si discute di evitare una fine prematura del supporto, focus su occupazione e stabilità finanziaria."
+ },
+ "2020-12-27": {
+  "score": -2,
+  "note": "Decisa l'estensione dello Special Program e avviata una assessment per un easing più sostenibile; azione dovish concreta."
+ },
+ "2021-01-28": {
+  "score": -2,
+  "note": "Stato di emergenza reistituito; proposta di rafforzare ulteriormente yield curve control e impegno di policy, stance molto accomodante."
+ },
+ "2021-03-28": {
+  "score": 0,
+  "note": "Esito dell'assessment: QQE+YCC confermato ma con banda ±0,25% e acquisti ETF più flessibili; aggiustamento tecnico, non nuovo stimolo."
+ },
+ "2021-05-10": {
+  "score": 0,
+  "note": "Nessuna decisione nuova; si valuta solo se estendere il programma pandemico, mercato reagisce con calma alle mosse di marzo."
+ },
+ "2021-06-27": {
+  "score": -1,
+  "note": "Estensione di 6 mesi dello Special Program e lancio della nuova misura sul clima; supporto ampliato ma non emergenziale."
+ },
+ "2021-07-27": {
+  "score": -1,
+  "note": "Nessuna nuova misura; la Bank rifiuta di stringere 'prematuramente' mentre altre economie iniziano a ridurre lo stimolo."
+ },
+ "2021-09-30": {
+  "score": -1,
+  "note": "Avviate le Climate Response Financing Operations; misure COVID mantenute, nessun segnale di stretta nonostante rallentamento cinese."
+ },
+ "2021-11-07": {
+  "score": -1,
+  "note": "Inflazione in salita ma la BOJ ribadisce 'nessuna ragione di aggiustare' la policy; forte reaffirmation dovish nonostante pressioni globali hawkish."
+ },
+ "2021-12-26": {
+  "score": 0,
+  "note": "Primo segnale di normalizzazione: fine programmata acquisti CP/bond, ma estensione supporto PMI; la BOJ nega sia una stretta."
+ },
+ "2022-01-25": {
+  "score": -1,
+  "note": "Omicron aumenta l'incertezza; CPI in salita verso 1-1,5% giudicato temporaneo, nessuna nuova azione, stance confermata accomodante."
+ },
+ "2022-03-28": {
+  "score": -1,
+  "note": "Invasione Ucraina e shock commodity; la BOJ si distingue esplicitamente da Fed/BoE, nessun cambio di policy nonostante inflazione globale."
+ },
+ "2022-05-11": {
+  "score": -2,
+  "note": "Annunciate operazioni di acquisto a tasso fisso 0,25% ogni giorno lavorativo per difendere il tetto YCC; azione dovish molto concreta."
+ },
+ "2022-06-26": {
+  "score": -2,
+  "note": "Prosegue la difesa quotidiana del cap YCC contro pressioni di mercato; stance fortemente accomodante nonostante i rialzi Fed."
+ },
+ "2022-07-28": {
+  "score": -1,
+  "note": "CPI core al 2%, ma la BOJ rimanda a settembre le misure COVID e conferma easing; alcuni membri notano rischio salari/import."
+ },
+ "2022-10-02": {
+  "score": -1,
+  "note": "Conferma easing pre-svolta YCC, minimizza rischi inflazione, salari non ancora confermati, nessun cambio di policy."
+ },
+ "2022-11-07": {
+  "score": -1,
+  "note": "Guidelines invariate, pronta a ulteriori misure di easing se necessario, ciclo virtuoso salari-prezzi non ancora confermato."
+ },
+ "2022-12-27": {
+  "score": 1,
+  "note": "Sorpresa: banda YCC ampliata a ±0.5%, primo passo verso normalizzazione anche se presentato come aggiustamento tecnico."
+ },
+ "2023-01-25": {
+  "score": -1,
+  "note": "Difende la mossa di dicembre come non-tightening, ribadisce necessità di easing prolungato, avverte contro modifiche premature."
+ },
+ "2023-03-19": {
+  "score": -1,
+  "note": "Ultima riunione Kuroda, avvia revisione di policy ma ribadisce di continuare easing su larga scala persistentemente."
+ },
+ "2023-05-10": {
+  "score": 0,
+  "note": "Primo meeting di Ueda, segnala continuità con easing e avvia la revisione di policy, tono cauto e attendista."
+ },
+ "2023-06-25": {
+  "score": 0,
+  "note": "Maggioranza per easing continuato, ma cresce il dibattito su una revisione anticipata della YCC in vista di luglio."
+ },
+ "2023-08-06": {
+  "score": 1,
+  "note": "YCC reso più flessibile, tetto 0.5% trattato come riferimento non rigido, altro passo di normalizzazione relativa."
+ },
+ "2023-10-01": {
+  "score": 0,
+  "note": "Nessuna azione, in attesa tra due flessibilizzazioni YCC, monitoraggio dati su salari e prezzi per decisione futura."
+ },
+ "2023-11-08": {
+  "score": 1,
+  "note": "Ulteriore flessibilizzazione YCC, limite 1% trattato come riferimento superiore, altro passo verso normalizzazione dei tassi."
+ },
+ "2023-12-26": {
+  "score": 0,
+  "note": "Nessuna azione ma retorica di normalizzazione sempre più insistente ('meglio agire che essere troppo cauti'), in attesa dati salari."
+ },
+ "2024-01-30": {
+  "score": 1,
+  "note": "Condizioni per fine tassi negativi 'si stanno realizzando', Bank 'entrata in fase' di normalizzazione, segnali chiaramente hawkish senza azione."
+ },
+ "2024-03-27": {
+  "score": 2,
+  "note": "Storico: fine tassi negativi, abolizione YCC, primo rialzo dal 2007, svolta decisa verso normalizzazione della politica monetaria."
+ },
+ "2024-05-08": {
+  "score": 1,
+  "note": "Nessun rialzo ma discussione su ulteriori aumenti tassi e riduzione acquisti JGB, prosecuzione della normalizzazione avviata a marzo."
+ },
+ "2024-06-23": {
+  "score": 1,
+  "note": "Nessun rialzo ma piano di riduzione acquisti JGB discusso, segnali di ulteriore normalizzazione e possibile rialzo prossimo."
+ },
+ "2024-08-07": {
+  "score": 1,
+  "note": "Secondo rialzo tassi a 0.25%, prosecuzione della normalizzazione dopo la svolta di marzo, riduzione acquisti JGB avviata."
+ },
+ "2024-09-30": {
+  "score": -1,
+  "note": "Pausa dopo turbolenza mercati di agosto, 'non alzeremo tassi con mercati instabili', tono più cauto e dovish relativo."
+ },
+ "2024-11-10": {
+  "score": 0,
+  "note": "Tassi invariati, cautela su elezioni USA ed economia, ma percorso di rialzo graduale confermato verso 1% entro il 2025."
+ },
+ "2024-12-26": {
+  "score": 1,
+  "note": "Tassi invariati ma molte opinioni indicano rialzo imminente; rischi prezzi al rialzo, cautela solo per incertezza sulla nuova amministrazione USA."
+ },
+ "2025-02-02": {
+  "score": 2,
+  "note": "Rialzo tassi a 0.5%: inflazione core in aumento verso 2%, rischi prezzi orientati al rialzo, necessità di proseguire la normalizzazione."
+ },
+ "2025-03-27": {
+  "score": -1,
+  "note": "Tassi fermi: incertezza sui dazi USA aumenta i rischi al ribasso, la Banca invita a cautela prima del prossimo rialzo."
+ },
+ "2025-05-12": {
+  "score": -1,
+  "note": "Pausa esplicita nei rialzi: shock dazi USA genera pressioni al ribasso su crescita e prezzi, Banca in attesa."
+ },
+ "2025-06-24": {
+  "score": -1,
+  "note": "Tassi fermi, condizioni accomodanti mantenute; la Banca rallenta anche il ritmo di riduzione degli acquisti di JGB."
+ },
+ "2025-08-07": {
+  "score": 1,
+  "note": "Accordo commerciale USA-Giappone riduce incertezza; toni più hawkish, si teme di perdere l'occasione per un rialzo."
+ },
+ "2025-09-29": {
+  "score": 1,
+  "note": "Tassi fermi ma clima sempre più hawkish; avviata la vendita di ETF/J-REIT, si valuta un nuovo rialzo a breve."
+ },
+ "2025-11-09": {
+  "score": 2,
+  "note": "Toni fortemente hawkish: condizioni per un nuovo rialzo quasi soddisfatte, si teme di perdere il momento giusto."
+ },
+ "2025-12-28": {
+  "score": 2,
+  "note": "Rialzo tassi allo 0.75%: profitti solidi, salari in aumento, si punta a evitare di restare indietro rispetto all'inflazione."
+ },
+ "2026-02-01": {
+  "score": 1,
+  "note": "Tassi fermi dopo il rialzo di dicembre, ma la maggioranza spinge per proseguire i rialzi a intervalli regolari."
+ },
+ "2026-03-29": {
+  "score": 1,
+  "note": "Tassi fermi per lo shock petrolifero mediorientale, ma la maggioranza resta hawkish e chiede di alzare senza esitazioni."
+ },
+ "2026-05-11": {
+  "score": 1,
+  "note": "Pausa per incertezza sul Medio Oriente, ma molte opinioni chiedono un rialzo presto senza attendere oltre."
+ },
+ "2026-06-23": {
+  "score": 2,
+  "note": "Rialzo tassi deciso: rischio di deviazione al rialzo dell'inflazione core, prezzi spinti da petrolio e domanda AI globale."
+ },
+ "2026-08-09": {
+  "score": 2,
+  "note": "Tassi fermi solo per valutare l'effetto del rialzo di giugno; focus ormai su evitare sforamenti al rialzo, ritmo possibile più rapido."
+ }
+}

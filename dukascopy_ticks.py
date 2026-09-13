@@ -279,6 +279,13 @@ EXTENDED_EVENT_NAMES = (
     "Fed Chair Powell Speaks", "Fed Chair Powell Testifies",
     "Fed Chair Yellen Speaks", "Fed Chair Yellen Testifies",
     "Fed Chairman Bernanke Speaks", "Fed Chairman Bernanke Testifies",
+    # Aggiunta 2026-09-13 per il progetto BOJ combinato (vedi
+    # historical_boj_opinions.py) — documento mai considerato prima,
+    # scoperto durante la ricerca approfondita sui buchi rimasti. Da solo
+    # sotto n>=100 (tetto teorico ~89-90), ma potenzialmente combinabile
+    # con "BOJ Outlook Report" (già sopra) per un pooling più robusto,
+    # stessa logica del "Combinato" FOMC.
+    "BOJ Summary of Opinions",
 )
 
 

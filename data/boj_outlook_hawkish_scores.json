@@ -1,0 +1,238 @@
+{
+ "2008-04-30": {
+  "score": -1,
+  "note": "Crescita rivista al ribasso per petrolio/materie prime, rischi al ribasso prevalenti, normalizzazione tassi messa in pausa."
+ },
+ "2008-10-31": {
+  "score": -2,
+  "note": "Post-Lehman: taglio tassi a 0.3%, rischi al ribasso aumentati fortemente, incertezza globale in forte crescita."
+ },
+ "2009-04-30": {
+  "score": -2,
+  "note": "Recessione GFC nel pieno, CPI atteso in forte calo, downside risks 'continued high', nessun segnale di stabilizzazione."
+ },
+ "2009-10-30": {
+  "score": -1,
+  "note": "Ripresa iniziale, downside risks 'somewhat diminished' ma deflazione persiste (CPI -1.5%), stance ancora accomodante."
+ },
+ "2010-04-30": {
+  "score": -1,
+  "note": "Ripresa confermata, CPI potrebbe tornare positivo in FY2011, easing esistente mantenuto senza nuove misure."
+ },
+ "2010-10-28": {
+  "score": -2,
+  "note": "Lancio Comprehensive Monetary Easing: tasso virtualmente zero + Asset Purchase Program, svolta dovish esplicita anti-deflazione."
+ },
+ "2011-04-28": {
+  "score": -2,
+  "note": "Post-terremoto/Fukushima: APP ampliato di 5mila mld yen, nuove misure straordinarie di sostegno alle aree colpite."
+ },
+ "2011-10-27": {
+  "score": -2,
+  "note": "Crisi debito europeo e yen forte: APP 'ripetutamente ampliato in misura significativa', easing aggressivo confermato."
+ },
+ "2012-04-27": {
+  "score": -1,
+  "note": "Rischi coda Europa 'waned', outlook CPI migliora verso goal 1%, easing confermato ma tono meno allarmato."
+ },
+ "2012-10-30": {
+  "score": -2,
+  "note": "APP ampliato per raggiungere ~91mila mld yen entro fine 2013, pressione politica crescente pre-Abenomics."
+ },
+ "2013-04-26": {
+  "score": -2,
+  "note": "Lancio QQE sotto Kuroda: raddoppio base monetaria, target 2% in ~2 anni, svolta piu' dovish del periodo."
+ },
+ "2013-10-31": {
+  "score": 0,
+  "note": "QQE prosegue senza nuove misure, sviluppi favorevoli diffusi, rischi economia e prezzi valutati bilanciati."
+ },
+ "2014-04-30": {
+  "score": 0,
+  "note": "QQE 'produce gli effetti attesi', rischi bilanciati, nessuna nuova azione nonostante rallentamento post-IVA."
+ },
+ "2014-10-31": {
+  "score": -2,
+  "note": "'Halloween surprise': QQE ampliato il 31/10/2014, rischi sui prezzi passano da bilanciati a sostanzialmente al ribasso."
+ },
+ "2015-04-30": {
+  "score": -1,
+  "note": "Nessuna nuova misura, ma target 2% posticipato di un anno (a H1 FY2016) e rischi prezzi skewed to downside."
+ },
+ "2015-10-30": {
+  "score": -1,
+  "note": "QQE confermato senza nuove misure; revisione al ribasso di crescita 2015 ed export per rallentamento emergenti, outlook 2016-17 invariato."
+ },
+ "2016-01-29": {
+  "score": -2,
+  "note": "Introduzione a sorpresa dei tassi negativi (-0.1%): svolta storica verso ulteriore easing rispetto al QQE gia' in atto."
+ },
+ "2016-04-28": {
+  "score": -1,
+  "note": "Nessun nuovo stimolo nonostante attese di mercato; crescita e inflazione 2016 riviste al ribasso, aspettative inflazionistiche indebolite."
+ },
+ "2016-07-29": {
+  "score": 0,
+  "note": "Crescita rivista al rialzo per stimolo fiscale non monetario; CPI 2016 rivisto al ribasso per yen forte e aspettative in ritardo."
+ },
+ "2016-11-01": {
+  "score": -1,
+  "note": "Introduzione YCC (cambio di strumento neutro), ma il testo ammette che il momentum inflazionistico e' piu' debole del report precedente."
+ },
+ "2017-01-31": {
+  "score": 1,
+  "note": "Crescita e crescita potenziale riviste al rialzo, output gap torna positivo; primi segnali di miglioramento ciclico reale."
+ },
+ "2017-04-27": {
+  "score": 0,
+  "note": "Previsioni sostanzialmente invariate; mercato del lavoro fortissimo (rapporto posti/candidati vicino al picco bolla) ma inflazione ancora debole."
+ },
+ "2017-07-20": {
+  "score": -1,
+  "note": "CPI effettivo debole, imprese restano caute su prezzi e salari; timing di raggiungimento del 2% posticipato al FY2019."
+ },
+ "2017-10-31": {
+  "score": 1,
+  "note": "Bilancio rischi attivita' economica migliorato da 'skewed downside' a 'bilanciato'; pressioni sui costi in aumento, primo segnale positivo concreto."
+ },
+ "2018-01-23": {
+  "score": 0,
+  "note": "Previsioni di crescita e CPI invariate, bilancio rischi invariato; nessun cambiamento sostanziale rispetto al report precedente."
+ },
+ "2018-04-27": {
+  "score": 0,
+  "note": "Crescita rivista al rialzo per solida crescita estera, ma nuovo rischio al ribasso per FY2019 in poi; CPI invariato."
+ },
+ "2018-07-31": {
+  "score": -2,
+  "note": "Nuova forward guidance esplicita su tassi estremamente bassi per periodo prolungato; CPI rivisto al ribasso, ampia analisi su inflazione debole persistente."
+ },
+ "2018-10-31": {
+  "score": -1,
+  "note": "CPI 2018 rivisto al ribasso; bilancio rischi attivita' torna 'skewed downside' perdendo la valutazione 'bilanciato' precedente."
+ },
+ "2019-01-23": {
+  "score": -1,
+  "note": "Crescita FY2018 tagliata per disastri naturali, CPI FY2019 rivisto al ribasso per petrolio; rischi esteri (guerra commerciale) 'in aumento'."
+ },
+ "2019-04-25": {
+  "score": -1,
+  "note": "Previsioni stabili ma rischi esteri definiti 'significativi'; forward guidance rafforzata con scadenza esplicita, almeno fino a primavera 2020."
+ },
+ "2019-07-30": {
+  "score": 0,
+  "note": "Outlook stabile, nessuna nuova misura; rischi al ribasso per commercio globale ma stance QQE+YCC invariata."
+ },
+ "2019-10-31": {
+  "score": -1,
+  "note": "Previsioni di crescita e inflazione riviste al ribasso, rischi esteri in aumento; tono leggermente più accomodante."
+ },
+ "2020-01-21": {
+  "score": 1,
+  "note": "Previsioni di crescita rivedute al rialzo per le misure fiscali del governo; nessun cambio di policy, lieve miglioramento."
+ },
+ "2020-04-27": {
+  "score": -2,
+  "note": "Crisi COVID, misure di easing straordinarie annunciate, PIL previsto in forte contrazione, stance fortemente accomodante di emergenza."
+ },
+ "2020-07-15": {
+  "score": -1,
+  "note": "Prosegue risposta di emergenza a COVID con nuovo programma SME, ripresa graduale attesa ma stance ancora fortemente accomodante."
+ },
+ "2020-10-29": {
+  "score": 0,
+  "note": "Miglioramento moderato dell'attività ma CPI ancora negativo; nessuna nuova misura di stimolo, stance invariata rispetto a luglio."
+ },
+ "2021-01-21": {
+  "score": 0,
+  "note": "Resurgenza COVID pesa su consumi ma prospettive di crescita riviste al rialzo per misure fiscali; policy BOJ invariata."
+ },
+ "2021-04-27": {
+  "score": 1,
+  "note": "Revisione di marzo 2021 rende gli acquisti ETF più flessibili; rischi di attività ora bilanciati nel medio periodo, lieve miglioramento."
+ },
+ "2021-07-16": {
+  "score": 0,
+  "note": "CPI 2021 rivisto al rialzo per energia; bilancio dei rischi invariato rispetto ad aprile, nessun cambio di policy."
+ },
+ "2021-10-28": {
+  "score": 0,
+  "note": "Aspettative di inflazione in lieve rialzo, CPI torna positivo per energia; policy BOJ resta invariata nonostante normalizzazione globale."
+ },
+ "2022-01-18": {
+  "score": 1,
+  "note": "Rischi sui prezzi passano da 'al ribasso' a 'bilanciati'; CPI atteso vicino a 1%, aspettative di inflazione in aumento moderato."
+ },
+ "2022-04-28": {
+  "score": -1,
+  "note": "CPI vicino al 2% per energia/Ucraina ma giudicato transitorio; BOJ conferma piena accomodazione in netta divergenza da Fed/BCE che alzano tassi."
+ },
+ "2022-07-21": {
+  "score": 0,
+  "note": "CPI si conferma al 2% ma BOJ mantiene stance identica ad aprile, nessuna mossa verso normalizzazione nonostante pressioni globali."
+ },
+ "2022-10-28": {
+  "score": -1,
+  "note": "CPI al 3% ma BOJ ribadisce piena accomodazione senza esitazioni; rischi su crescita ora al ribasso su tutto il periodo, stance ancora più accomodante."
+ },
+ "2023-01-18": {
+  "score": 1,
+  "note": "Pubblicato dopo l'ampliamento a sorpresa della banda YCC di dicembre 2022; primo segnale, seppur cauto, verso normalizzazione con Kuroda uscente."
+ },
+ "2023-04-28": {
+  "score": 0,
+  "note": "Insediamento Ueda, continuità con easing; nessun segnale nuovo di stance, cautamente neutro in apertura di ciclo di revisione."
+ },
+ "2023-07-28": {
+  "score": 1,
+  "note": "Flessibilizzazione YCC (banda come riferimento), stime CPI 2023 alzate nettamente, rischi prezzi al rialzo estesi al 2024."
+ },
+ "2023-10-31": {
+  "score": 1,
+  "note": "Ulteriore allentamento del limite YCC (1% come riferimento), CPI rivista ancora al rialzo, aspettative di inflazione in aumento."
+ },
+ "2024-01-23": {
+  "score": 1,
+  "note": "Fiducia crescente nel raggiungimento del target esplicitata per la prima volta, prepara la svolta storica di marzo 2024."
+ },
+ "2024-04-26": {
+  "score": 2,
+  "note": "Primo outlook dopo la storica uscita da tassi negativi e abolizione YCC (marzo 2024); linguaggio esplicito su nuovi rialzi condizionati ai dati."
+ },
+ "2024-07-31": {
+  "score": 2,
+  "note": "Outlook pubblicato lo stesso giorno del rialzo a 0.25%; linguaggio ancora più esplicito su prosecuzione dei rialzi tassi."
+ },
+ "2024-10-31": {
+  "score": 0,
+  "note": "Nessun rialzo al meeting, tono stabile ma con nuova cautela esplicita sui rischi legati all'economia USA; normalizzazione in pausa."
+ },
+ "2025-01-24": {
+  "score": 1,
+  "note": "Outlook del meeting con rialzo a 0.5%; stime CPI alzate per rincaro riso/yen debole, rischi prezzi ancora skewed al rialzo."
+ },
+ "2025-05-01": {
+  "score": -2,
+  "note": "Shock dazi USA: PIL e CPI rivisti al ribasso, bilancio dei rischi ribaltato al downside sia su crescita sia su prezzi, prima volta nel periodo."
+ },
+ "2025-07-31": {
+  "score": 0,
+  "note": "Stabilizzazione post-shock dazi: rischio prezzi migliora a bilanciato ma crescita resta downside-skewed, conduct di policy invariato."
+ },
+ "2025-10-30": {
+  "score": 0,
+  "note": "Proiezioni PIL/CPI sostanzialmente invariate rispetto a luglio, bilancio dei rischi stabile, nessun segnale di cambio di stance."
+ },
+ "2026-01-23": {
+  "score": 1,
+  "note": "Bilancio dei rischi migliora a pienamente bilanciato, PIL rivisto al rialzo, incertezza sui dazi definita in calo."
+ },
+ "2026-04-28": {
+  "score": 1,
+  "note": "Shock petrolio Medio Oriente frena la crescita, ma rischio inflazione esplicitamente skewed al rialzo con avviso di vigilanza e bias rialzista confermato."
+ },
+ "2026-07-31": {
+  "score": 2,
+  "note": "CPI atteso 'chiaramente sopra 2%', rischio crescita torna bilanciato, linguaggio più esplicito mai visto su necessità di continuare a rialzare i tassi."
+ }
+}
