@@ -265,6 +265,16 @@ def save_text_scores(event_name: str, scores_path: str, db_path: str = HIST_DB_P
     saved = 0
     with _connect(db_path) as conn:
         for date_utc, info in scores.items():
+            # score: null è legittimo (non un dato mancante) per fonti dove
+            # un singolo testo può non riguardare affatto politica monetaria
+            # — es. discorsi Fed Chair su temi come inclusione finanziaria o
+            # cybersecurity (stesso principio già in news_analyst.py:
+            # analyze_breaking_news, bug reale osservato il 2026-09-03 su un
+            # discorso Waller forzato in un bias BUY/SELL senza fondamento).
+            # Forzare uno score qui inquinerebbe la regressione con rumore
+            # etichettato come segnale — va saltato, non salvato come 0.
+            if info.get("score") is None:
+                continue
             query = "SELECT event_uid FROM macro_events WHERE event_name=? AND date_utc=?"
             params = [event_name, date_utc]
             if currency is not None:

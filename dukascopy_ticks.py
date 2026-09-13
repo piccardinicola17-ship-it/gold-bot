@@ -269,6 +269,16 @@ EXTENDED_EVENT_NAMES = (
     # evento, valuta diversa) - un'unica voce qui basta, il filtro di
     # dukascopy_ticks.py e' per event_name non per currency+event_name.
     "Monetary Policy Statement",
+    # Aggiunte 2026-09-11 per il progetto discorsi/testimonianze Fed Chair
+    # fuori riunione (vedi historical_fed_speeches.py) — stesso principio
+    # degli Statement/Minutes/PressConf sopra: nessun forecast numerico,
+    # serve solo la reazione di prezzo da confrontare con lo score
+    # hawkish/dovish del testo. Solo i 3 Fed Chair (Powell/Yellen/Bernanke,
+    # Speaks+Testifies) — gli altri membri FOMC (Bullard/Dudley/ecc.) hanno
+    # 1-6 eventi ciascuno in macro_events, non raggiungeranno mai n>=100.
+    "Fed Chair Powell Speaks", "Fed Chair Powell Testifies",
+    "Fed Chair Yellen Speaks", "Fed Chair Yellen Testifies",
+    "Fed Chairman Bernanke Speaks", "Fed Chairman Bernanke Testifies",
 )
 
 

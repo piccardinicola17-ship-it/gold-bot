@@ -1,0 +1,378 @@
+{
+ "2015-02-19": {
+  "score": -2,
+  "note": "Lancio del QE: annuncio acquisti da 60 miliardi/mese da marzo 2015, easing straordinario, decisione storica di forte stimolo."
+ },
+ "2015-04-02": {
+  "score": 0,
+  "note": "Prima riunione dopo il lancio del QE: nessuna modifica, piena conferma dell'attuazione, tono di 'steady course'."
+ },
+ "2015-05-21": {
+  "score": 0,
+  "note": "Nessun cambiamento di policy, riafferma attuazione dell'APP, lower bound sui tassi confermato, focus su implementazione."
+ },
+ "2015-07-02": {
+  "score": 0,
+  "note": "Nessuna azione nonostante la volatilità dei bond (bund tantrum), il Consiglio decide di 'guardare oltre', stance invariata."
+ },
+ "2015-08-13": {
+  "score": 0,
+  "note": "Nessuna modifica nonostante la crisi greca, riafferma il corso stabile della politica monetaria e la disponibilita ad agire."
+ },
+ "2015-10-08": {
+  "score": -1,
+  "note": "Rischi al ribasso aumentati per la turbolenza in Cina, nessuna azione ma segnali piu espliciti di apertura a nuovo stimolo."
+ },
+ "2015-11-19": {
+  "score": -2,
+  "note": "Annuncio esplicito di riesame dello stimolo a dicembre, discusse opzioni concrete (taglio tassi, estensione APP): forte segnale dovish."
+ },
+ "2016-01-14": {
+  "score": -2,
+  "note": "Pacchetto di easing: taglio del deposit rate a -0.30%, estensione APP a marzo 2017, reinvestimento principal payments."
+ },
+ "2016-02-18": {
+  "score": -1,
+  "note": "Nessuna azione ma segnale esplicito di riesame a marzo, rischi al ribasso aumentati, forward guidance dovish rafforzata."
+ },
+ "2016-04-07": {
+  "score": -2,
+  "note": "Maxi-pacchetto: tassi tagliati (deposit -0.40%), APP aumentato a 80 miliardi/mese, nuovo CSPP corporate bond, lanciato TLTRO II."
+ },
+ "2016-05-19": {
+  "score": 0,
+  "note": "Nessuna nuova misura, focus sull'implementazione del pacchetto di marzo (CSPP e TLTRO II in avvio), stance confermata."
+ },
+ "2016-07-07": {
+  "score": 0,
+  "note": "Nessuna modifica, crescita rivista lievemente al rialzo, focus su implementazione di CSPP e TLTRO II appena avviati."
+ },
+ "2016-08-18": {
+  "score": 0,
+  "note": "Post-Brexit: nessuna azione, giudicato 'prematuro' valutare l'impatto, riafferma disponibilita ad agire senza impegni concreti."
+ },
+ "2016-10-06": {
+  "score": 0,
+  "note": "Nessuna modifica, attesa delle proiezioni di dicembre per rivalutare la stance, rischi al ribasso permangono ma nessuna azione."
+ },
+ "2016-11-17": {
+  "score": 0,
+  "note": "Nessuna modifica, 'prematuro' un giudizio definitivo, rinvio della valutazione a dicembre con nuove proiezioni e analisi APP."
+ },
+ "2017-01-12": {
+  "score": 1,
+  "note": "Riduzione ritmo APP da 80 a 60 miliardi da aprile ma estensione a dicembre 2017: tapering lieve compensato da durata maggiore."
+ },
+ "2017-02-16": {
+  "score": 0,
+  "note": "Nessuna novità: APP confermato a 60 mld/mese, forward guidance invariata, inflazione sottostante debole, serve pazienza."
+ },
+ "2017-04-06": {
+  "score": 1,
+  "note": "Discusso rimuovere easing bias sui tassi, deciso di non farlo ma tono più fiducioso e minor urgenza per nuovi stimoli."
+ },
+ "2017-05-18": {
+  "score": 0,
+  "note": "Comunicazione confermata invariata, tono più positivo sulla crescita ma nessuna modifica a stance o forward guidance."
+ },
+ "2017-07-06": {
+  "score": 1,
+  "note": "Rimosso il riferimento a possibili ulteriori tagli dei tassi dalla forward guidance: primo passo hawkish concreto, APP confermato invariato."
+ },
+ "2017-08-17": {
+  "score": 0,
+  "note": "Nessun cambio di policy, stance confermata, decisione sulla ricalibrazione dell'APP esplicitamente rinviata all'autunno."
+ },
+ "2017-10-05": {
+  "score": 0,
+  "note": "Discussione preliminare su riduzione APP rinviata a ottobre, condizioni finanziarie giudicate favorevoli, nessuna decisione presa in questa riunione."
+ },
+ "2017-11-23": {
+  "score": 1,
+  "note": "Annuncio taper: APP ridotto da 60 a 30 mld/mese da gennaio 2018, esteso di 9 mesi; forward guidance sui tassi invariata."
+ },
+ "2018-01-11": {
+  "score": 0,
+  "note": "Confermate senza modifiche le decisioni di ottobre, comunicazione in piena continuità, pazienza ancora ritenuta necessaria."
+ },
+ "2018-02-22": {
+  "score": 0,
+  "note": "Riconfermate le decisioni di ottobre; alcuni membri volevano rimuovere l'easing bias sull'APP ma giudicato prematuro."
+ },
+ "2018-04-12": {
+  "score": 1,
+  "note": "Rimosso l'easing bias sull'APP dalla forward guidance: passo hawkish concreto, ritmo acquisti e tassi confermati invariati."
+ },
+ "2018-05-24": {
+  "score": 0,
+  "note": "Registrata moderazione della crescita, rischi da protezionismo più prominenti, stance e forward guidance confermate senza modifiche."
+ },
+ "2018-07-12": {
+  "score": 1,
+  "note": "Annunciato piano di fine QE: acquisti ridotti a 15 mld/mese (ott-dic) poi stop; guidance tassi invariati 'almeno fino a estate 2019'."
+ },
+ "2018-08-23": {
+  "score": 0,
+  "note": "Riconfermate senza modifiche le decisioni di giugno, nessuna nuova indicazione, comunicazione a tono stabile."
+ },
+ "2018-10-11": {
+  "score": 0,
+  "note": "Attuata la riduzione dell'APP a 15 mld/mese già annunciata a giugno, nessuna sorpresa; citati rischi da protezionismo e mercati emergenti."
+ },
+ "2018-11-22": {
+  "score": 0,
+  "note": "Dati di crescita più deboli del previsto, rischi verso il basso ma ancora 'bilanciati'; confermata la fine acquisti a dicembre come da piano."
+ },
+ "2019-01-10": {
+  "score": 0,
+  "note": "Fine formale del QE a dicembre 2018 come da piano; guidance sui reinvestimenti resa più accomodante ('chained'); rischi spostati verso il basso."
+ },
+ "2019-02-21": {
+  "score": -1,
+  "note": "Rischi di crescita spostati al ribasso, dati piu' deboli del previsto; guidance confermata invariata, nessuna nuova misura di stimolo."
+ },
+ "2019-04-04": {
+  "score": -2,
+  "note": "Guidance tassi estesa a fine 2019, lanciato TLTRO-III; forte revisione al ribasso di crescita e inflazione nelle proiezioni di marzo."
+ },
+ "2019-05-23": {
+  "score": -1,
+  "note": "Nessuna nuova misura; guidance e stance confermate, rischi ancora al ribasso, dettagli TLTRO-III rimandati alla riunione successiva."
+ },
+ "2019-07-11": {
+  "score": -2,
+  "note": "Guidance tassi estesa a meta' 2020, pricing TLTRO-III reso piu' favorevole (MRO+10pb); stimolo aggiuntivo concreto deciso."
+ },
+ "2019-08-22": {
+  "score": -2,
+  "note": "Reintrodotto easing bias esplicito, avviato lavoro preparatorio su QE, tiering e taglio tassi; segnale fortemente dovish in vista di settembre."
+ },
+ "2019-10-10": {
+  "score": -2,
+  "note": "Pacchetto storico: taglio depo a -0,50%, QE riavviato a 20 mld/mese senza scadenza fissa, tiering introdotto; svolta molto dovish."
+ },
+ "2019-11-21": {
+  "score": -1,
+  "note": "Nessuna nuova azione, pacchetto di settembre confermato; rischi al ribasso ma percepiti meno pronunciati rispetto a prima."
+ },
+ "2020-01-16": {
+  "score": -1,
+  "note": "Stance invariata, lanciata la strategy review; inflazione ancora sotto obiettivo ma segnali di stabilizzazione della crescita."
+ },
+ "2020-02-20": {
+  "score": -1,
+  "note": "Stance confermata invariata; accordo commerciale USA-Cina allenta l'incertezza, primi segnali di stabilizzazione ma nessuna stretta."
+ },
+ "2020-04-09": {
+  "score": -2,
+  "note": "Lancio del PEPP da 750 mld per la crisi COVID, ampliato CSPP e allentate garanzie collaterali; risposta di emergenza estrema."
+ },
+ "2020-05-22": {
+  "score": -2,
+  "note": "TLTRO-III reso ancora piu' generoso (fino a -1,00%), lanciate nuove PELTRO; ulteriore easing per sostenere l'economia in pandemia."
+ },
+ "2020-06-25": {
+  "score": -2,
+  "note": "PEPP ampliato di 600 mld a 1.350 mld totali, orizzonte esteso a giugno 2021; massiccio nuovo stimolo monetario."
+ },
+ "2020-08-20": {
+  "score": -1,
+  "note": "Stance lasciata invariata, pacchetto esistente riconfermato; nessuna nuova misura ma accomodamento pandemico pienamente mantenuto."
+ },
+ "2020-10-08": {
+  "score": -1,
+  "note": "Stance invariata; preoccupazione per apprezzamento dell'euro e impatto disinflazionistico, pronti ad agire ma nessuna nuova misura."
+ },
+ "2020-11-26": {
+  "score": -2,
+  "note": "Nessuna azione ora ma segnale esplicito di ricalibrazione a dicembre; seconda ondata COVID peggiora l'outlook, rischi chiaramente al ribasso."
+ },
+ "2021-01-14": {
+  "score": -2,
+  "note": "PEPP ampliato di 500 mld a 1.850 mld totali, orizzonte esteso a marzo 2022, condizioni TLTRO-III rafforzate ulteriormente."
+ },
+ "2021-02-18": {
+  "score": -2,
+  "note": "Conferma PEPP a pieno ritmo, condizioni di finanziamento favorevoli, rischi orientati al ribasso: stance pienamente accomodante, nessun segnale di normalizzazione."
+ },
+ "2021-04-08": {
+  "score": -2,
+  "note": "Decide di aumentare significativamente il ritmo di acquisti PEPP per contrastare il rialzo dei rendimenti: stimolo rafforzato, massimamente dovish."
+ },
+ "2021-05-14": {
+  "score": -2,
+  "note": "Conferma il ritmo elevato di acquisti PEPP, inflazione vista come transitoria, nessuna azione restrittiva: stance ancora fortemente accomodante."
+ },
+ "2021-07-09": {
+  "score": -2,
+  "note": "Prosegue gli acquisti PEPP a ritmo significativamente più alto, rischi di crescita bilanciati, inflazione ancora giudicata transitoria."
+ },
+ "2021-07-29": {
+  "score": -1,
+  "note": "Conclusione della revisione strategica: target simmetrico al 2% con tolleranza per overshoot transitorio, quadro leggermente più accomodante."
+ },
+ "2021-08-26": {
+  "score": -2,
+  "note": "Nuova forward guidance con tre condizioni stringenti prima di alzare i tassi: rinvia esplicitamente il rialzo, interpretata come dovish."
+ },
+ "2021-10-07": {
+  "score": -1,
+  "note": "Prima riduzione moderata del ritmo PEPP per il quarto trimestre, definita 'lock-in' dell'accomodamento necessario: primo passo cauto verso normalizzazione."
+ },
+ "2021-11-25": {
+  "score": 0,
+  "note": "Conferma il ritmo PEPP invariato rispetto a settembre, nessuna nuova decisione: stance sostanzialmente invariata rispetto alla riunione precedente."
+ },
+ "2022-01-20": {
+  "score": 1,
+  "note": "Decide la fine del PEPP a marzo 2022 e aumenta temporaneamente l'APP per compensare: normalizzazione cauta, primi segnali hawkish."
+ },
+ "2022-03-03": {
+  "score": 2,
+  "note": "Riconosce che acquisti netti e tassi negativi non sono più coerenti con i dati in arrivo: svolta retorica hawkish marcata."
+ },
+ "2022-04-06": {
+  "score": 2,
+  "note": "Accelera il percorso di riduzione dell'APP (40-30-20 mld) e anticipa la tempistica dei rialzi nonostante la guerra: hawkish deciso."
+ },
+ "2022-05-19": {
+  "score": 1,
+  "note": "Conferma la fine dell'APP nel terzo trimestre e rialzi 'qualche tempo dopo', ma rischi di crescita al ribasso per la guerra."
+ },
+ "2022-07-07": {
+  "score": 2,
+  "note": "Decide la fine dell'APP e annuncia il rialzo di luglio con possibilità di incremento maggiore a settembre: svolta hawkish netta."
+ },
+ "2022-08-25": {
+  "score": 2,
+  "note": "Primo rialzo in 11 anni, +50 punti base (doppio del previsto), approvato anche il TPI: svolta storica, fortemente hawkish."
+ },
+ "2022-10-06": {
+  "score": 2,
+  "note": "Rialzo record di 75 punti base per frontloadare la normalizzazione contro l'inflazione persistente e in forte sorpresa al rialzo: massimamente hawkish."
+ },
+ "2022-11-24": {
+  "score": 2,
+  "note": "Terzo rialzo consecutivo di 75 punti base e ricalibrazione delle TLTRO per rimuovere il sussidio: prosegue la stretta aggressiva."
+ },
+ "2023-01-19": {
+  "score": 2,
+  "note": "Rialzo 50pb (riunione dic 2022), guidance esplicita per nuovi aumenti significativi, avvio riduzione APP da marzo: stance pienamente restrittiva."
+ },
+ "2023-03-02": {
+  "score": 2,
+  "note": "Rialzo 50pb (feb 2023) con impegno esplicito ad altri 50pb a marzo; timori di overtightening giudicati prematuri."
+ },
+ "2023-04-20": {
+  "score": 1,
+  "note": "Rialzo 50pb nonostante crisi Credit Suisse/SVB, ma guidance sostituita da piena data-dependence: determinazione con più cautela comunicativa."
+ },
+ "2023-06-01": {
+  "score": 1,
+  "note": "Rialzo ridotto a 25pb (da 50), ma bias direzionale confermato: ancora margine di rialzi da percorrere secondo i membri."
+ },
+ "2023-07-13": {
+  "score": 1,
+  "note": "Rialzo 25pb (deposit 3.50%), possibili nuovi aumenti oltre luglio se necessario; confermata fine dei reinvestimenti APP."
+ },
+ "2023-08-31": {
+  "score": 0,
+  "note": "Rialzo 25pb ma guidance deliberatamente neutra: né annuncio di nuovi rialzi né di pausa, massima incertezza su settembre."
+ },
+ "2023-10-12": {
+  "score": 1,
+  "note": "Ultimo rialzo del ciclo (25pb, deposit 4.00%), decisione 'close call' con logica assicurativa contro nuovi shock inflattivi."
+ },
+ "2023-11-23": {
+  "score": 0,
+  "note": "Prima pausa dopo 10 rialzi consecutivi; tono vigile, porta aperta a nuovi rialzi, nessun segnale di taglio imminente."
+ },
+ "2024-01-18": {
+  "score": 0,
+  "note": "Tassi invariati, focus tecnico su riduzione reinvestimenti PEPP; nessuna indicazione chiara su tagli o nuovi rialzi."
+ },
+ "2024-02-22": {
+  "score": 1,
+  "note": "Tassi fermi; giudicato prematuro discutere tagli, rischio di tagliare troppo presto ancora superiore a quello di tagliare troppo tardi."
+ },
+ "2024-04-04": {
+  "score": -1,
+  "note": "Tassi fermi ma i verbali riconoscono che le condizioni per un taglio si stanno rafforzando, prima data di taglio più vicina."
+ },
+ "2024-05-10": {
+  "score": -1,
+  "note": "Tassi fermi; ampio consenso che un taglio a giugno sia plausibile se i dati confermano le proiezioni di marzo."
+ },
+ "2024-07-04": {
+  "score": -2,
+  "note": "Primo taglio del ciclo (-25pb, deposit 3.75%), svolta dovish pur senza impegno su un percorso preimpostato; una voce dissenziente."
+ },
+ "2024-08-22": {
+  "score": 0,
+  "note": "Pausa dopo il primo taglio; 'ultimo miglio' della disinflazione giudicato più difficile, approccio cauto e attendista confermato."
+ },
+ "2024-10-10": {
+  "score": -1,
+  "note": "Secondo taglio (-25pb, deposit 3.50%); disinflazione 'a piano' ma preoccupazione crescente per un outlook di crescita più debole."
+ },
+ "2024-11-14": {
+  "score": -1,
+  "note": "Terzo taglio consecutivo (-25pb, deposit 3.25%); tendenza disinflazionistica in rafforzamento, gestione del rischio favorisce l'allentamento."
+ },
+ "2025-01-16": {
+  "score": -1,
+  "note": "Taglio 25pb a 3,00%; alcuni proponevano 50pb ma prevale gradualismo, linguaggio meno vincolante sulla restrizione futura."
+ },
+ "2025-02-27": {
+  "score": -1,
+  "note": "Taglio 25pb a 2,75%; emerge cautela sul ritmo, dibattito su tasso neutrale vicino, prime avvisaglie di fine ciclo."
+ },
+ "2025-04-03": {
+  "score": -1,
+  "note": "Taglio 25pb a 2,50%; acceso dibattito se la politica sia ancora restrittiva, comunicazione vira verso 'meno restrittiva'."
+ },
+ "2025-05-22": {
+  "score": -1,
+  "note": "Taglio 25pb a 2,25% per shock dazi Trump; rimosso riferimento a restrizione, 'lotta all'inflazione quasi conclusa'."
+ },
+ "2025-07-03": {
+  "score": -1,
+  "note": "Taglio 25pb a 2,00%; alcuni membri preferivano una pausa, tassi giudicati ormai in territorio neutrale o accomodante."
+ },
+ "2025-08-28": {
+  "score": 1,
+  "note": "Revisione strategica: enfasi su azione forte contro overshoot inflazionistico, autocritica sul ritardo dei rialzi 2021-22, scetticismo su nuovo QE."
+ },
+ "2025-10-09": {
+  "score": 0,
+  "note": "Tassi invariati a 2,00%; BCE 'in buona posizione', rischi bilanciati, mercati escludono nuovi tagli nel 2025."
+ },
+ "2025-11-27": {
+  "score": 1,
+  "note": "Tassi invariati; ciclo di tagli visto concluso, mercati ora vedono un rialzo come prossima mossa, rischi al rialzo in aumento."
+ },
+ "2026-01-22": {
+  "score": 1,
+  "note": "Tassi invariati; sorprese al rialzo su salari e servizi, mercati anticipano il primo rialzo nel 2027, rischi spostati in alto."
+ },
+ "2026-03-05": {
+  "score": -1,
+  "note": "Tassi invariati; inflazione di gennaio sorprende al ribasso, 'secondo shock Cina' disinflattivo, attese di rialzo posticipate al 2028."
+ },
+ "2026-04-16": {
+  "score": 2,
+  "note": "Guerra in Medio Oriente fa esplodere i prezzi energia; tutti i membri vedono rischi inflazione al rialzo, mercati prezzano rialzi imminenti."
+ },
+ "2026-05-28": {
+  "score": 2,
+  "note": "Tassi invariati ma decisione 'al limite'; alcuni membri avrebbero sostenuto un rialzo, 'guardare oltre' lo shock giudicato non più adeguato."
+ },
+ "2026-07-09": {
+  "score": 2,
+  "note": "Primo rialzo del ciclo, +25pb, per shock energetico persistente ed effetti indiretti su inflazione core in ampliamento."
+ },
+ "2026-08-27": {
+  "score": 1,
+  "note": "Pausa dopo il rialzo di giugno; inflazione di giugno sorprende al ribasso ma i rischi restano orientati al rialzo."
+ }
+}

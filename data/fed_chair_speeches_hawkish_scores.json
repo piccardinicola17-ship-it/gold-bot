@@ -1,0 +1,1014 @@
+{
+ "Fed Chairman Bernanke Testifies": {
+  "2007-01-18": {
+   "score": null,
+   "note": "Testimonianza su sfide fiscali di lungo termine (deficit, Social Security, Medicare); non riguarda la politica monetaria."
+  },
+  "2007-02-14": {
+   "score": 0,
+   "note": "Ribadisce che il rischio inflazione resta la preoccupazione predominante della Fed, in linea con la stance FOMC prevalente."
+  },
+  "2007-02-28": {
+   "score": null,
+   "note": "Testimonianza sul bilancio federale e le sfide fiscali di lungo periodo; non tratta la politica monetaria."
+  },
+  "2007-03-28": {
+   "score": -1,
+   "note": "Ribadisce il concern inflazione ma segnala maggiore incertezza e apertura a dipendere dai dati: lieve ammorbidimento rispetto a febbraio."
+  },
+  "2007-07-18": {
+   "score": 0,
+   "note": "Semiannual testimony: FOMC mantiene tasso al 5,25%, ribadisce il rischio inflazione come preoccupazione predominante, stance invariata."
+  },
+  "2007-09-20": {
+   "score": -2,
+   "note": "Conferma il taglio di 50pb dei fed funds appena deciso dal FOMC per contrastare la crisi creditizia: azione fortemente dovish."
+  },
+  "2007-11-08": {
+   "score": 0,
+   "note": "Riassume i tagli fatti, ribadisce rischi 'bilanciati' come nello statement FOMC di ottobre, nessun nuovo segnale dovish aggiuntivo."
+  },
+  "2008-01-17": {
+   "score": -2,
+   "note": "Ripete quasi testualmente il linguaggio dovish del 10/1: azione aggiuntiva necessaria, pronti ad agire in modo deciso e tempestivo."
+  },
+  "2008-02-14": {
+   "score": -1,
+   "note": "Dopo 125bp di tagli a gennaio, conferma outlook debole e disponibilità a fornire 'assicurazione' contro i rischi al ribasso sulla crescita."
+  },
+  "2008-02-27": {
+   "score": -1,
+   "note": "Semiannual report: proiezioni di crescita riviste al ribasso, inflazione in lieve aumento ma focus resta su assicurazione contro rischi di crescita."
+  },
+  "2008-04-02": {
+   "score": -1,
+   "note": "Ammette possibile contrazione del PIL nel 1H 2008, difende i tagli aggressivi già fatti (300bp), tono accomodante ma poche nuove indicazioni."
+  },
+  "2008-04-03": {
+   "score": -1,
+   "note": "Racconta il salvataggio di Bear Stearns e le misure di liquidità, tono accomodante generico, poca indicazione esplicita su tassi futuri."
+  },
+  "2008-07-10": {
+   "score": null,
+   "note": "Testimonianza su riforma regolamentare (Basel, vigilanza banche d'investimento, regime di risoluzione), non sulla stance di politica monetaria."
+  },
+  "2008-07-15": {
+   "score": 1,
+   "note": "Semiannual report: enfatizza fortemente i rischi al rialzo per l'inflazione, 'dobbiamo essere particolarmente vigili', più hawkish del tono precedente pur fermi al 2%."
+  },
+  "2008-09-24": {
+   "score": -2,
+   "note": "Testimonianza post-Lehman/AIG, tono di massima emergenza, chiede TARP urgente, enfatizza rischi al ribasso su crescita."
+  },
+  "2008-10-20": {
+   "score": -2,
+   "note": "Sostiene esplicitamente un pacchetto di stimolo fiscale aggiuntivo data l'economia debole, nessun accenno a rischi inflazione."
+  },
+  "2008-11-18": {
+   "score": 0,
+   "note": "Resoconto operativo su TARP e liquidity facilities della Fed, nessun nuovo segnale su tassi o inflazione rispetto al baseline noto."
+  },
+  "2009-02-10": {
+   "score": 0,
+   "note": "Rassegna operativa dei programmi di credito Fed (13(3)) e trasparenza, nessun nuovo segnale su tassi o inflazione."
+  },
+  "2009-03-03": {
+   "score": -1,
+   "note": "Riafferma guidance su tassi eccezionalmente bassi e inflazione bassa già nota, sostiene deficit fiscale per stimolo, nessuna nuova escalation Fed."
+  },
+  "2009-05-05": {
+   "score": -1,
+   "note": "Outlook economico con segnali tentativi di stabilizzazione, inflazione ancora vista in calo, nessuna nuova azione Fed annunciata."
+  },
+  "2009-06-03": {
+   "score": 0,
+   "note": "Testimonianza su bilancio federale ed economia; conferma outlook dovish prevalente (inflazione bassa, slack elevato) senza segnali di svolta."
+  },
+  "2009-06-25": {
+   "score": null,
+   "note": "Testimonianza sull'acquisizione Merrill Lynch da parte di BofA; tema di vigilanza/governance, non politica monetaria."
+  },
+  "2009-07-21": {
+   "score": 0,
+   "note": "Semiannual Monetary Policy Report: conferma tassi eccezionalmente bassi 'extended period', illustra strumenti di exit strategy senza azioni concrete."
+  },
+  "2009-07-24": {
+   "score": null,
+   "note": "Testimonianza su riforma regolamentare (supervisione consolidata, too-big-to-fail); nessun contenuto sulla stance di politica monetaria."
+  },
+  "2009-10-01": {
+   "score": null,
+   "note": "Testimonianza su riforma regolamentare (consiglio di vigilanza sistemica, risoluzione); nessun contenuto sulla stance di politica monetaria."
+  },
+  "2010-02-24": {
+   "score": 1,
+   "note": "Semiannual MPR: rialzo discount rate di 25bp, chiusura facility di emergenza, fine acquisti MBS QE1 a marzo; primi passi hawkish relativi all'espansione."
+  },
+  "2010-03-17": {
+   "score": null,
+   "note": "Testimonianza sul ruolo di vigilanza bancaria della Fed; nessun contenuto sulla stance di politica monetaria."
+  },
+  "2010-03-25": {
+   "score": 0,
+   "note": "Illustra gli strumenti di uscita ma riafferma tassi bassi 'per un periodo prolungato'; nessun cambio di stance, solo preparazione tecnica."
+  },
+  "2010-04-14": {
+   "score": 0,
+   "note": "Descrive outlook economico (crescita moderata, inflazione contenuta, disoccupazione elevata) senza segnalare un cambio di stance."
+  },
+  "2010-04-20": {
+   "score": null,
+   "note": "Testimonianza sul fallimento di Lehman Brothers e lezioni regolamentari, non su politica monetaria."
+  },
+  "2010-06-09": {
+   "score": -1,
+   "note": "Testimonianza su budget: nuovi rischi dalla crisi del debito europeo, mercati in tensione, outlook piu' cauto."
+  },
+  "2010-07-21": {
+   "score": -1,
+   "note": "Semiannual Report: outlook indebolito da crisi europea, inflazione attesa piu' bassa, Fed 'pronta a ulteriori azioni politiche se necessario'."
+  },
+  "2010-09-02": {
+   "score": null,
+   "note": "Testimonianza FCIC sulle cause storiche della crisi finanziaria, non sulla stance di politica monetaria attuale."
+  },
+  "2010-09-30": {
+   "score": null,
+   "note": "Testimonianza su attuazione Dodd-Frank Act (regolamentazione), non sulla stance di politica monetaria."
+  },
+  "2011-01-07": {
+   "score": 0,
+   "note": "Testimonianza Senate Budget: riafferma QE2 ($600mld) e tassi vicino zero, enfatizza rischio deflazione, nessun cambio di stance."
+  },
+  "2011-02-09": {
+   "score": 0,
+   "note": "Testimonianza House Budget: contenuto quasi identico al discorso Senate, riafferma QE2 senza variazioni di stance."
+  },
+  "2011-03-01": {
+   "score": 0,
+   "note": "Semiannual testimony: riafferma QE2, rischio deflazione ormai trascurabile, outlook lievemente migliorato ma nessun cambio di rotta."
+  },
+  "2011-04-20": {
+   "score": null,
+   "note": "Dichiarazione scritta al Congresso su educazione finanziaria, argomento estraneo alla politica monetaria."
+  },
+  "2011-07-13": {
+   "score": -1,
+   "note": "Semiannual testimony: outlook rivisto al ribasso, elenca esplicitamente strumenti di ulteriore easing se necessario."
+  },
+  "2011-07-21": {
+   "score": null,
+   "note": "Testimonianza sul primo anniversario del Dodd-Frank Act, argomento regolamentare non di stance monetaria."
+  },
+  "2011-10-04": {
+   "score": -1,
+   "note": "Testimonianza congressuale: riporta Operation Twist appena avviata e segnala disponibilita' a nuove azioni se necessario, tono accomodante."
+  },
+  "2012-02-02": {
+   "score": -1,
+   "note": "Testimonianza sul budget: riporta estensione della forward guidance a fine 2014, stance 'highly accommodative' confermata."
+  },
+  "2012-02-29": {
+   "score": -1,
+   "note": "Semiannual Monetary Policy Report: conferma stance altamente accomodante e guidance a fine 2014, nessuna nuova azione."
+  },
+  "2012-03-21": {
+   "score": null,
+   "note": "Testimonianza su crisi europea, swap line e stress test bancari; tema di stabilita' finanziaria, non stance monetaria domestica."
+  },
+  "2012-07-17": {
+   "score": -2,
+   "note": "Semiannual Monetary Policy Report: FOMC 'ease' con estensione MEP, outlook rivisto al ribasso, pronto a nuove azioni (pre-QE3)."
+  }
+ },
+ "Fed Chairman Bernanke Speaks": {
+  "2007-03-06": {
+   "score": null,
+   "note": "Discorso su GSE (Fannie Mae/Freddie Mac), rischio sistemico e regolamentazione; non riguarda la stance sui tassi."
+  },
+  "2007-03-30": {
+   "score": null,
+   "note": "Discorso storico/celebrativo sul Community Reinvestment Act; nessun contenuto di politica monetaria."
+  },
+  "2007-04-11": {
+   "score": null,
+   "note": "Discorso su regolamentazione bancaria e hedge fund (disciplina di mercato); non riguarda la stance monetaria."
+  },
+  "2007-05-01": {
+   "score": null,
+   "note": "Discorso sul libero commercio e occupazione; nessun riferimento alla politica monetaria della Fed."
+  },
+  "2007-05-17": {
+   "score": null,
+   "note": "Discorso tecnico sul mercato subprime e risposte regolamentari; non affronta esplicitamente la stance sui tassi."
+  },
+  "2007-06-05": {
+   "score": 0,
+   "note": "Ribadisce lo stesso bilancio dei rischi inflazione-crescita del FOMC (rischi al rialzo per l'inflazione), nessun cambio di stance."
+  },
+  "2007-08-31": {
+   "score": -2,
+   "note": "Jackson Hole: annuncia taglio del tasso di sconto, rischi al ribasso 'appreciably increased', pronta ad agire: svolta dovish marcata."
+  },
+  "2007-09-11": {
+   "score": null,
+   "note": "Lezione Bundesbank su squilibri globali e current account; non tratta la stance di politica monetaria interna."
+  },
+  "2007-09-24": {
+   "score": null,
+   "note": "Discorso su istruzione e competitività economica; nessun contenuto di politica monetaria."
+  },
+  "2007-10-15": {
+   "score": -1,
+   "note": "Spiega il taglio di settembre enfatizzando i rischi al ribasso da turbolenza finanziaria, pur con cautela residua sull'inflazione."
+  },
+  "2007-10-19": {
+   "score": null,
+   "note": "Discorso accademico su incertezza e teoria della politica monetaria (in onore di Bill Poole); non riguarda la stance attuale."
+  },
+  "2007-11-06": {
+   "score": null,
+   "note": "Discorso sulla microfinanza negli Stati Uniti; nessun contenuto di politica monetaria."
+  },
+  "2007-11-14": {
+   "score": null,
+   "note": "Discorso su trasparenza/comunicazione della Fed (proiezioni economiche), nessun contenuto sulla stance di politica monetaria attuale."
+  },
+  "2008-01-10": {
+   "score": -2,
+   "note": "Segnala esplicitamente che 'ulteriori tagli potrebbero essere necessari', pronti ad azione decisiva; precede il taglio d'emergenza del 22/1."
+  },
+  "2008-03-14": {
+   "score": null,
+   "note": "Discorso su prevenzione pignoramenti e nuove regole HOEPA, tema regolamentare/consumatori, nessuna indicazione sulla stance di politica monetaria."
+  },
+  "2008-04-09": {
+   "score": null,
+   "note": "Discorso su educazione finanziaria giovanile (indagine Jump$tart), nessuna attinenza con la politica monetaria."
+  },
+  "2008-04-10": {
+   "score": null,
+   "note": "Discorso sul rapporto del President's Working Group e riforme regolamentari dei mercati finanziari, non sulla stance dei tassi."
+  },
+  "2008-05-15": {
+   "score": null,
+   "note": "Discorso su risk management bancario e supervisione a una conferenza Fed di Chicago, tema regolamentare, non sulla stance monetaria."
+  },
+  "2008-06-04": {
+   "score": null,
+   "note": "Discorso di laurea (Class Day) ad Harvard su energia e produttività storica, nessun contenuto di politica monetaria attuale."
+  },
+  "2008-06-12": {
+   "score": null,
+   "note": "Discorso cerimoniale per l'inaugurazione del nuovo edificio della Fed di Kansas City, nessun contenuto di politica monetaria."
+  },
+  "2008-06-16": {
+   "score": null,
+   "note": "Discorso sulla riforma del sistema sanitario USA, completamente estraneo alla stance di politica monetaria."
+  },
+  "2008-07-08": {
+   "score": null,
+   "note": "Discorso su regolamentazione finanziaria e mutui a famiglie a basso reddito (forum FDIC), non sulla stance dei tassi."
+  },
+  "2008-08-22": {
+   "score": null,
+   "note": "Discorso Jackson Hole su rischio sistemico e regolazione finanziaria (too-big-to-fail), non su stance di politica monetaria."
+  },
+  "2008-10-07": {
+   "score": -2,
+   "note": "Dice esplicitamente che rischi al ribasso su crescita sono aumentati e la Fed dovrà rivalutare la stance di policy."
+  },
+  "2008-10-15": {
+   "score": -2,
+   "note": "Descrive taglio tassi coordinato con altre banche centrali e piano TARP, inflazione vista in moderazione, tono accomodante."
+  },
+  "2008-10-31": {
+   "score": null,
+   "note": "Discorso sul futuro della cartolarizzazione dei mutui e struttura delle GSE, non riguarda la stance di politica monetaria."
+  },
+  "2008-12-01": {
+   "score": -2,
+   "note": "Annuncia nuovo programma di acquisto debito GSE/MBS (fino 600 mld) e dice che ulteriori tagli tassi sono fattibili."
+  },
+  "2008-12-04": {
+   "score": null,
+   "note": "Discorso centrato su prevenzione foreclosure e design di programmi di modifica dei mutui, non su stance di politica monetaria."
+  },
+  "2009-01-13": {
+   "score": -2,
+   "note": "Discorso fondativo sul 'credit easing', introduce forward guidance esplicita su tassi bassi a lungo e valuta acquisti Treasury."
+  },
+  "2009-02-18": {
+   "score": -2,
+   "note": "Annuncia espansione della TALF a nuove classi di asset (CMBS, RMBS privati), inflazione attesa bassa a lungo, molto accomodante."
+  },
+  "2009-03-10": {
+   "score": null,
+   "note": "Discorso su riforma regolatoria per il rischio sistemico (too-big-to-fail, infrastruttura finanziaria), non su stance monetaria."
+  },
+  "2009-03-20": {
+   "score": -2,
+   "note": "Riafferma e dettaglia la maxi espansione QE appena annunciata (1,25 mila mld MBS, 300 mld Treasury, 200 mld debito agency)."
+  },
+  "2009-04-03": {
+   "score": -1,
+   "note": "Tour dettagliato del bilancio Fed, riafferma il QE di marzo senza nuova escalation, ampio spazio a strumenti di exit strategy."
+  },
+  "2009-04-17": {
+   "score": null,
+   "note": "Discorso su innovazione finanziaria e tutela dei consumatori (carte di credito, mutui, overdraft), non su politica monetaria."
+  },
+  "2009-05-07": {
+   "score": null,
+   "note": "Discorso sulla supervisione bancaria post-crisi (capitale, liquidità, risk management); nessun contenuto sulla stance di politica monetaria."
+  },
+  "2009-05-11": {
+   "score": null,
+   "note": "Discorso interamente dedicato allo stress test bancario (SCAP); nessuna discussione della stance di politica monetaria."
+  },
+  "2009-05-22": {
+   "score": null,
+   "note": "Discorso di laurea; Bernanke dichiara esplicitamente di non parlare di mercati o politica monetaria."
+  },
+  "2009-06-04": {
+   "score": null,
+   "note": "Discorso di benvenuto a conferenza accademica su mercati finanziari e politica monetaria; solo presentazione dei paper, nessun contenuto di stance."
+  },
+  "2009-06-17": {
+   "score": null,
+   "note": "Discorso sulle Community Development Financial Institutions; nessun contenuto di politica monetaria."
+  },
+  "2009-10-08": {
+   "score": 0,
+   "note": "Spiegazione tecnica del bilancio Fed e 'credit easing'; conferma accomodamento per periodo prolungato, dettaglia strumenti di exit senza azione."
+  },
+  "2009-10-19": {
+   "score": null,
+   "note": "Discorso su Asia e crisi globale, focus su commercio e squilibri globali; non riguarda la stance di politica monetaria USA."
+  },
+  "2009-10-23": {
+   "score": null,
+   "note": "Discorso su regolamentazione e vigilanza post-crisi (capitale, liquidità, compensi); nessun contenuto sulla stance di politica monetaria."
+  },
+  "2009-11-16": {
+   "score": -1,
+   "note": "Outlook economico: conferma tassi bassi 'extended period' ma enfatizza fortemente debolezza del mercato del lavoro e rischio 'jobless recovery'."
+  },
+  "2009-12-07": {
+   "score": 0,
+   "note": "FAQ su economia e Fed: conferma tassi bassi, spiega perché non genereranno inflazione e illustra strumenti di exit senza azione."
+  },
+  "2010-01-03": {
+   "score": 0,
+   "note": "Discorso accademico retrospettivo su politica monetaria 2002-06 e bolla immobiliare; nessun segnale sulla stance attuale o futura."
+  },
+  "2010-04-13": {
+   "score": null,
+   "note": "Discorso sull'alfabetizzazione finanziaria dei consumatori, non riguarda la stance di politica monetaria."
+  },
+  "2010-05-06": {
+   "score": null,
+   "note": "Discorso sullo stress test bancario SCAP a un anno di distanza, tema di vigilanza non di politica monetaria."
+  },
+  "2010-06-09": {
+   "score": null,
+   "note": "Discorso su sviluppo forza lavoro/community college, irrilevante alla stance monetaria."
+  },
+  "2010-07-12": {
+   "score": null,
+   "note": "Discorso sull'accesso al credito per le piccole imprese, non riguarda la stance di politica monetaria."
+  },
+  "2010-08-02": {
+   "score": 0,
+   "note": "Discorso su bilanci statali; ripete outlook gia' noto (disoccupazione alta, inflazione bassa) senza nuovo segnale di stance."
+  },
+  "2010-08-27": {
+   "score": -2,
+   "note": "Discorso di Jackson Hole: elenca esplicitamente gli strumenti per ulteriore easing (acquisti titoli, guidance, IOER), prepara il terreno per QE2."
+  },
+  "2010-09-30": {
+   "score": null,
+   "note": "Discorso di benvenuto a educatori su alfabetizzazione economica, irrilevante alla stance monetaria."
+  },
+  "2010-10-04": {
+   "score": null,
+   "note": "Discorso su sostenibilita' fiscale e regole di bilancio federale, non su politica monetaria."
+  },
+  "2010-10-15": {
+   "score": -2,
+   "note": "Argomenta esplicitamente che 'sembra esserci un caso per ulteriore azione'; FOMC 'pronto a fornire accomodamento aggiuntivo' (pre-QE2)."
+  },
+  "2010-10-25": {
+   "score": null,
+   "note": "Discorso di apertura su pignoramenti immobiliari e stabilizzazione dei quartieri, non su politica monetaria."
+  },
+  "2010-11-19": {
+   "score": -2,
+   "note": "Difende e spiega l'annuncio di acquisti aggiuntivi di titoli (QE2) appena varato, conferma stance fortemente accomodante."
+  },
+  "2011-02-03": {
+   "score": 0,
+   "note": "National Press Club: riafferma QE2 in corso, inflazione core ancora bassa, nessuna nuova indicazione di easing o tightening."
+  },
+  "2011-02-18": {
+   "score": null,
+   "note": "Discorso su squilibri globali e flussi di capitale (Banque de France), non tratta la stance di politica monetaria USA."
+  },
+  "2011-03-23": {
+   "score": null,
+   "note": "Discorso su community banking, Dodd-Frank e Basel III davanti a ICBA, nessun contenuto sulla stance monetaria."
+  },
+  "2011-04-04": {
+   "score": null,
+   "note": "Discorso su clearinghouse e infrastrutture finanziarie (Dodd-Frank Title 8), nessun riferimento alla stance monetaria."
+  },
+  "2011-04-29": {
+   "score": null,
+   "note": "Discorso su sviluppo comunitario e crisi immobiliare locale, non riguarda la stance di politica monetaria."
+  },
+  "2011-05-05": {
+   "score": null,
+   "note": "Discorso su supervisione macroprudenziale e Dodd-Frank, tema regolamentare non di stance monetaria."
+  },
+  "2011-05-16": {
+   "score": null,
+   "note": "Discorso su politiche di R&D e crescita di lungo periodo, nessun contenuto di politica monetaria."
+  },
+  "2011-06-07": {
+   "score": 0,
+   "note": "IMC Atlanta: conferma completamento di QE2 a fine giugno come da piano, inflazione da commodity giudicata transitoria, nessun cambio."
+  },
+  "2011-06-14": {
+   "score": null,
+   "note": "Discorso su sostenibilità fiscale e tetto del debito, non riguarda la stance di politica monetaria."
+  },
+  "2011-08-26": {
+   "score": -2,
+   "note": "Jackson Hole: estende forward guidance a tassi bassi 'almeno fino a metà 2013', outlook rivisto al ribasso, apre a nuovi strumenti (poi Operation Twist)."
+  },
+  "2011-09-08": {
+   "score": -1,
+   "note": "Minneapolis: riafferma guidance fino a metà 2013 e outlook rivisto al ribasso, pronto a nuovi strumenti al meeting di settembre."
+  },
+  "2011-09-28": {
+   "score": null,
+   "note": "Discorso su crescita dei mercati emergenti e Washington Consensus, nessun contenuto sulla stance di politica monetaria USA."
+  },
+  "2011-10-18": {
+   "score": null,
+   "note": "Discorso accademico su dottrina di banca centrale e politiche di stabilita' finanziaria post-crisi, non segnala la stance attuale."
+  },
+  "2012-02-16": {
+   "score": null,
+   "note": "Discorso su banche di comunita', regolamentazione e supervisione locale; non riguarda la stance di politica monetaria."
+  },
+  "2012-03-14": {
+   "score": null,
+   "note": "Video messaggio a banchieri di comunita' su regolamentazione, Dodd-Frank e supervisione; non tratta la stance monetaria."
+  },
+  "2012-03-26": {
+   "score": -1,
+   "note": "Discorso sul mercato del lavoro: sostiene che disoccupazione e' soprattutto ciclica, a favore di politiche accomodanti continuate."
+  },
+  "2012-04-09": {
+   "score": null,
+   "note": "Discorso su stabilita' finanziaria, shadow banking e regolamentazione Dodd-Frank; non riguarda la stance di politica monetaria."
+  },
+  "2012-04-13": {
+   "score": null,
+   "note": "Retrospettiva sulle cause della crisi 2007-09; Bernanke esplicita che rimanda la discussione di politica monetaria ad altra occasione."
+  },
+  "2012-05-10": {
+   "score": null,
+   "note": "Discorso su condizioni del sistema bancario, capitale e credito; tema di supervisione/regolamentazione, non stance monetaria."
+  },
+  "2012-08-06": {
+   "score": null,
+   "note": "Discorso accademico su misurazione economica e benessere; nessun contenuto su stance di politica monetaria attuale."
+  },
+  "2012-08-31": {
+   "score": -2,
+   "note": "Discorso di Jackson Hole: difende efficacia dei LSAP, costi gestibili, promette accomodamento aggiuntivo; prepara il lancio di QE3."
+  },
+  "2012-10-01": {
+   "score": -2,
+   "note": "Spiega il neo-lanciato QE3 open-ended ($85mld/mese) e l'estensione della guidance a meta' 2015, stance massimamente accomodante."
+  },
+  "2012-11-15": {
+   "score": -1,
+   "note": "Discorso su mercato immobiliare e inclusione finanziaria; menziona la conferma di QE3 ma non e' il tema centrale."
+  },
+  "2012-11-20": {
+   "score": -2,
+   "note": "Riconferma pienamente QE3 e guidance a meta' 2015, accomodamento 'per un periodo considerevole' dopo la ripresa."
+  },
+  "2013-03-25": {
+   "score": -1,
+   "note": "Discorso a Londra su spillover internazionali: difende le politiche espansive in corso come benefiche, nessun segnale di cambiamento."
+  },
+  "2013-04-08": {
+   "score": null,
+   "note": "Discorso su bank stress testing (SCAP/DFAST/CCAR), nessun contenuto di politica monetaria."
+  },
+  "2013-04-12": {
+   "score": null,
+   "note": "Discorso su sviluppo comunitario e povertà, nessun riferimento alla stance FOMC."
+  },
+  "2013-05-10": {
+   "score": null,
+   "note": "Discorso su monitoraggio della stabilità finanziaria e regolamentazione, non su politica monetaria."
+  },
+  "2013-07-10": {
+   "score": null,
+   "note": "Rassegna storica accademica dei 100 anni della Fed; esplicitamente rimanda la politica attuale ad altra sede."
+  },
+  "2013-10-02": {
+   "score": null,
+   "note": "Discorso di benvenuto a conferenza su community banking, nessun contenuto di politica monetaria."
+  },
+  "2014-01-03": {
+   "score": 0,
+   "note": "Bernanke riepiloga taper di dicembre e guidance 'well past' soglia 6,5%: conferma dello stance già annunciato, nessuna sorpresa."
+  }
+ },
+ "Fed Chair Yellen Testifies": {
+  "2013-11-14": {
+   "score": -1,
+   "note": "Yellen conferma impegno a mantenere accomodamento data disoccupazione alta e inflazione sotto target, in continuità dopo rinvio taper."
+  },
+  "2014-02-11": {
+   "score": 0,
+   "note": "Yellen conferma continuità: taper prosegue di $10mld a riunione come da programma, guidance dovish invariata."
+  },
+  "2014-05-07": {
+   "score": 0,
+   "note": "Testimonianza JEC: conferma prosecuzione taper come previsto e accomodamento elevato, nessuna sorpresa rispetto a febbraio."
+  },
+  "2014-07-15": {
+   "score": 1,
+   "note": "Yellen annuncia fine QE a ottobre, introduce linguaggio bidirezionale su rialzi 'prima e più rapidi' e avvia discussione normalizzazione."
+  },
+  "2015-11-04": {
+   "score": null,
+   "note": "Testimonianza su vigilanza e regolamentazione bancaria (LISCC, capitale, TLAC), non su stance monetaria."
+  },
+  "2015-12-03": {
+   "score": 1,
+   "note": "Testimonianza quasi identica al discorso del 2 dicembre, stessa conferma del rialzo imminente."
+  },
+  "2016-06-21": {
+   "score": -1,
+   "note": "Testimonianza semestrale: ribadisce approccio cauto sui rialzi citando mercato del lavoro debole e Brexit."
+  },
+  "2016-09-28": {
+   "score": null,
+   "note": "Testimonianza su vigilanza e regolamentazione bancaria (CCAR, G-SIB, risoluzione), non su stance monetaria."
+  },
+  "2016-11-17": {
+   "score": 1,
+   "note": "Testimonianza: un rialzo potrebbe diventare appropriato 'relativamente presto', prepara il mercato al rialzo di dicembre 2016."
+  },
+  "2017-02-14": {
+   "score": 1,
+   "note": "Testimonianza: 'aspettare troppo per rimuovere accomodamento sarebbe imprudente', sorpresa hawkish che anticipa il rialzo di marzo 2017."
+  },
+  "2017-11-29": {
+   "score": 0,
+   "note": "Testimonianza: conferma rialzi graduali e avvio del QT, in linea con le aspettative già formate per l'ultimo rialzo del 2017."
+  }
+ },
+ "Fed Chair Yellen Speaks": {
+  "2014-03-31": {
+   "score": -2,
+   "note": "Discorso 'Dorine/Jermaine/Vicki': forte enfasi su slack del mercato del lavoro, accomodamento ancora necessario a lungo."
+  },
+  "2014-04-15": {
+   "score": null,
+   "note": "Discorso su standard di liquidità Basilea III (LCR/NSFR), regolamentazione bancaria non politica monetaria."
+  },
+  "2014-04-16": {
+   "score": -1,
+   "note": "Yellen ribadisce ampio slack, rischio inflazione sotto target maggiore di sopra target, rassicura dopo lettura hawkish di marzo."
+  },
+  "2014-05-01": {
+   "score": null,
+   "note": "Discorso su supervisione tailored delle community bank e too-big-to-fail, non su politica monetaria."
+  },
+  "2014-05-15": {
+   "score": 0,
+   "note": "Discorso celebrativo su piccole imprese, breve richiamo a politica accomodante invariata, nessuna nuova indicazione."
+  },
+  "2014-07-02": {
+   "score": 0,
+   "note": "Lezione teorica su macroprudenziale vs politica monetaria; conclude che non serve deviare da focus su mandato duale."
+  },
+  "2014-08-22": {
+   "score": 0,
+   "note": "Jackson Hole: analisi bilanciata su slack lavoro, ribadisce guidance bidirezionale già nota, nessuno spostamento netto."
+  },
+  "2014-09-18": {
+   "score": null,
+   "note": "Discorso su costruzione di risparmio per famiglie a basso reddito, nessun contenuto di politica monetaria."
+  },
+  "2014-10-30": {
+   "score": null,
+   "note": "Discorso sulla diversità nella professione economica, nessun contenuto di politica monetaria."
+  },
+  "2014-11-07": {
+   "score": 0,
+   "note": "Rassegna storica del mix macro post-crisi; nessun nuovo segnale sulla direzione della politica USA."
+  },
+  "2015-03-27": {
+   "score": 0,
+   "note": "Conferma il piano di liftoff graduale già annunciato dal FOMC, con forte enfasi su cautela e rischi."
+  },
+  "2015-05-06": {
+   "score": null,
+   "note": "Discorso su regolamentazione finanziaria e incentivi distorti nel settore bancario, non su politica monetaria."
+  },
+  "2015-05-22": {
+   "score": 0,
+   "note": "Ribadisce l'aspettativa di liftoff nel 2015 e normalizzazione graduale, in linea con la guidance FOMC."
+  },
+  "2015-07-10": {
+   "score": 0,
+   "note": "Stesso messaggio: rialzo atteso più avanti nel 2015, ritmo graduale, nessuna novità di stance."
+  },
+  "2015-09-24": {
+   "score": 1,
+   "note": "Dopo la pausa dovish di settembre, ribadisce che un rialzo entro fine 2015 resta probabile."
+  },
+  "2015-09-30": {
+   "score": null,
+   "note": "Discorso di benvenuto a conferenza su banche comunitarie, nessun contenuto di politica monetaria."
+  },
+  "2015-11-12": {
+   "score": null,
+   "note": "Discorso di benvenuto a conferenza accademica su implementazione tecnica della politica monetaria, nessun segnale di stance."
+  },
+  "2015-12-02": {
+   "score": 1,
+   "note": "Conferma con enfasi il rialzo di dicembre 2015 come imminente e atteso con favore dal FOMC."
+  },
+  "2016-03-29": {
+   "score": -2,
+   "note": "Taglia drasticamente il dot plot (2 rialzi invece di 4) e invita a 'procedere con cautela': pivot dovish netto."
+  },
+  "2016-06-06": {
+   "score": -1,
+   "note": "Cautela dopo il debole report occupazionale di maggio, incertezza su rallentamento e rischio Brexit."
+  },
+  "2016-08-26": {
+   "score": 1,
+   "note": "A Jackson Hole dichiara che 'il caso per un rialzo dei tassi si è rafforzato', segnale hawkish esplicito."
+  },
+  "2016-09-29": {
+   "score": null,
+   "note": "Discorso su diversità e inclusione per banchieri di minoranze, nessun contenuto di politica monetaria."
+  },
+  "2016-10-14": {
+   "score": null,
+   "note": "Discorso accademico su domande di ricerca macro aperte (isteresi, eterogeneità, inflazione); non riguarda la stance attuale."
+  },
+  "2016-12-19": {
+   "score": null,
+   "note": "Discorso di laurea sul mercato del lavoro per neolaureati; nessun contenuto di politica monetaria."
+  },
+  "2017-01-18": {
+   "score": 0,
+   "note": "Riafferma il percorso di rialzi graduali già annunciato a dicembre verso il tasso neutrale del 3%; nessuna sorpresa rispetto allo stance prevalente."
+  },
+  "2017-03-03": {
+   "score": 2,
+   "note": "Annuncia esplicitamente che il ritmo dei rialzi 'non sarà lento come nel 2015-2016', preparando il mercato al rialzo imminente."
+  },
+  "2017-03-23": {
+   "score": null,
+   "note": "Discorso di apertura di una conferenza sullo sviluppo economico delle comunità; nessun contenuto di politica monetaria."
+  },
+  "2017-05-05": {
+   "score": null,
+   "note": "Discorso storico sulla partecipazione femminile al mercato del lavoro in 125 anni; nessun contenuto di politica monetaria corrente."
+  },
+  "2017-08-25": {
+   "score": null,
+   "note": "Discorso di Jackson Hole 2017 interamente dedicato alla regolamentazione finanziaria post-crisi, non alla stance monetaria."
+  },
+  "2017-09-26": {
+   "score": 1,
+   "note": "Difende la prosecuzione dei rialzi nonostante l'inflazione bassa, dice che sarebbe imprudente attendere il 2%; conferma il rialzo di dicembre."
+  },
+  "2017-10-04": {
+   "score": null,
+   "note": "Discorso di benvenuto a conferenza su banche comunitarie e regolamentazione; nessun contenuto di politica monetaria."
+  },
+  "2017-10-20": {
+   "score": 0,
+   "note": "Retrospettiva sugli strumenti non convenzionali e sul QT avviato a ottobre; conferma il percorso in corso senza nuovo segnale direzionale."
+  },
+  "2017-11-07": {
+   "score": null,
+   "note": "Discorso di accettazione di un premio per l'etica nel governo; nessun contenuto di politica monetaria."
+  }
+ },
+ "Fed Chair Powell Testifies": {
+  "2017-11-28": {
+   "score": 0,
+   "note": "Audizione di conferma di Powell: conferma la continuità dei rialzi graduali e della riduzione del bilancio già in atto, nessuna sorpresa."
+  },
+  "2018-07-17": {
+   "score": 0,
+   "note": "Testimonianza semestrale: inflazione vicina al 2%, lavoro forte, conferma di proseguire con rialzi graduali; in linea con lo stance già hawkish."
+  },
+  "2019-02-26": {
+   "score": -1,
+   "note": "Conferma la svolta 'paziente' di gennaio e annuncia la valutazione della fine del runoff del bilancio: prosegue la svolta dovish."
+  },
+  "2019-11-13": {
+   "score": 0,
+   "note": "Testimonianza post-pausa: acquisti Treasury definiti misure tecniche, nessun cambio di stance dopo i 3 tagli assicurativi."
+  },
+  "2020-02-11": {
+   "score": 0,
+   "note": "Pre-COVID: stance attuale 'probabilmente appropriata', nessun segnale di cambiamento rispetto alla pausa post-tagli 2019."
+  },
+  "2020-05-19": {
+   "score": -2,
+   "note": "Dettaglia le facility di emergenza e i tassi vicino a zero varati per la crisi COVID, tono fortemente accomodante."
+  },
+  "2020-06-16": {
+   "score": -1,
+   "note": "Testimonianza semestrale: riafferma tassi zero e QE; segnali di stabilizzazione ma impegno a sostenere l'economia."
+  },
+  "2020-06-30": {
+   "score": -1,
+   "note": "Riafferma la politica accomodante esistente, descrive ripresa iniziale ma enfatizza incertezza e necessità di sostegno prolungato."
+  },
+  "2020-09-22": {
+   "score": -1,
+   "note": "Riafferma impegno 'per tutto il tempo necessario', tassi zero e QE dopo adozione AIT, nessuna nuova azione."
+  },
+  "2020-12-01": {
+   "score": -1,
+   "note": "Riafferma sostegno accomodante nonostante il rallentamento; ottimismo sul vaccino bilanciato da incertezza persistente sulla ripresa."
+  },
+  "2021-02-23": {
+   "score": -1,
+   "note": "Testimonianza semestrale post-AIT: riafferma che non stringerà per un mercato del lavoro forte, politica invariata."
+  },
+  "2021-03-23": {
+   "score": -1,
+   "note": "Riafferma sostegno 'per tutto il tempo necessario', nota miglioramento della ripresa ma nessun segnale di stretta imminente."
+  },
+  "2021-06-22": {
+   "score": -1,
+   "note": "Riafferma inflazione 'transitoria' e sostegno prolungato; nessun accenno esplicito al tapering in questo testo."
+  },
+  "2021-07-14": {
+   "score": 0,
+   "note": "Ribadisce la guidance FOMC vigente (tassi vicino zero, acquisti invariati), nessun segnale di cambiamento; inflazione ancora definita transitoria."
+  },
+  "2021-09-28": {
+   "score": 0,
+   "note": "Testimonianza su CARES Act e liquidazione delle facility pandemiche; outlook su inflazione e lavoro invariato rispetto a luglio."
+  },
+  "2021-11-30": {
+   "score": 2,
+   "note": "Ammette che le pressioni inflazionistiche dureranno 'well into next year', di fatto abbandonando la narrativa transitoria: svolta hawkish."
+  },
+  "2022-01-11": {
+   "score": 0,
+   "note": "Audizione di nomina, perlopiù retrospettiva/istituzionale; ribadisce impegno anti-inflazione senza aggiungere nuovi segnali di policy."
+  },
+  "2022-06-22": {
+   "score": 2,
+   "note": "Semiannual testimony: rialzi consecutivi, QT avviato, 'ongoing increases will be appropriate', pienamente in linea col ciclo aggressivo."
+  },
+  "2023-03-07": {
+   "score": 2,
+   "note": "Dati più forti del previsto, apre esplicitamente a un ritmo di rialzi più veloce: sorpresa hawkish prima della crisi SVB."
+  },
+  "2023-06-21": {
+   "score": 1,
+   "note": "Prima pausa nei rialzi ma quasi tutti i partecipanti attendono altri rialzi entro l'anno: pausa comunque hawkish."
+  },
+  "2024-07-09": {
+   "score": -1,
+   "note": "Segnala fiducia crescente sui progressi dell'inflazione, apre a tagli imminenti dopo la pausa hawkish di inizio 2024."
+  },
+  "2025-02-11": {
+   "score": 1,
+   "note": "Segnala pausa nei tagli: 'nessuna fretta', può mantenere restrizione più a lungo se l'inflazione non scende; hawkish relativo al trend di tagli 2024."
+  }
+ },
+ "Fed Chair Powell Speaks": {
+  "2018-04-06": {
+   "score": 0,
+   "note": "Conferma la prosecuzione dei rialzi graduali e la riduzione del bilancio 'senza intoppi'; in linea con la traiettoria hawkish già nota."
+  },
+  "2018-05-08": {
+   "score": null,
+   "note": "Discorso accademico sugli spillover internazionali della politica monetaria USA verso i mercati emergenti; non riguarda la stance interna."
+  },
+  "2018-08-24": {
+   "score": 1,
+   "note": "Difende la normalizzazione graduale in corso; nessun accenno dovish, conferma piano di ulteriori rialzi se l'economia resta forte."
+  },
+  "2018-10-02": {
+   "score": 1,
+   "note": "Ribadisce che i rialzi graduali restano appropriati; spiega perché la bassa inflazione non giustifica una pausa; tono hawkish moderato."
+  },
+  "2018-11-28": {
+   "score": -1,
+   "note": "Passa da 'lontano dal neutro' a 'appena sotto' il range neutro: primo segnale di svolta dovish dopo il picco di ottobre."
+  },
+  "2018-12-03": {
+   "score": null,
+   "note": "Discorso commemorativo su community development e diversità finanziaria, nessun contenuto di politica monetaria."
+  },
+  "2018-12-06": {
+   "score": null,
+   "note": "Discorso di benvenuto su edilizia rurale, tema sociale non di politica monetaria."
+  },
+  "2019-02-12": {
+   "score": null,
+   "note": "Forum su povertà rurale ed educazione, nessun riferimento alla stance di politica monetaria."
+  },
+  "2019-03-11": {
+   "score": null,
+   "note": "Breve intervento su CRA e inclusione finanziaria, nessun contenuto di politica monetaria."
+  },
+  "2019-05-20": {
+   "score": null,
+   "note": "Discorso su debito corporate e stabilità finanziaria, non riguarda la stance sui tassi."
+  },
+  "2019-06-04": {
+   "score": -1,
+   "note": "Introduce la frase 'act as appropriate to sustain the expansion' poco prima del taglio di luglio: primo segnale dovish del pivot 2019."
+  },
+  "2019-06-25": {
+   "score": -1,
+   "note": "Conferma che 'molti partecipanti' vedono rafforzato il caso per policy più accomodante dopo il FOMC di giugno; segnale dovish esplicito."
+  },
+  "2019-07-09": {
+   "score": null,
+   "note": "Discorso di benvenuto su stress test bancari, tema di supervisione non di politica monetaria."
+  },
+  "2019-07-16": {
+   "score": -1,
+   "note": "Ribadisce il linguaggio dovish di giugno in vista del taglio di luglio, citando rischi commerciali e crescita globale debole."
+  },
+  "2019-08-23": {
+   "score": -1,
+   "note": "Jackson Hole post-taglio di luglio: conferma stance accomodante, cita nuovi dazi e rallentamento globale, 'act as appropriate' ribadito."
+  },
+  "2019-10-04": {
+   "score": 0,
+   "note": "Evento Fed Listens, descrive l'economia 'in un buon posto' senza nuovo segnale di stance sui tassi rispetto al taglio di settembre."
+  },
+  "2019-10-07": {
+   "score": null,
+   "note": "Discorso commemorativo su Marriner Eccles, contenuto storico/istituzionale senza riferimento alla stance attuale."
+  },
+  "2019-10-08": {
+   "score": -1,
+   "note": "Conferma i due tagli già fatti e riafferma 'act as appropriate' poco prima del taglio di ottobre: stance accomodante mantenuta."
+  },
+  "2019-10-09": {
+   "score": 0,
+   "note": "Evento Fed Listens Kansas City, testo quasi identico al 4 ottobre, nessun nuovo segnale di stance sui tassi."
+  },
+  "2020-04-09": {
+   "score": -2,
+   "note": "Prima descrizione della risposta emergenziale COVID: tassi vicino a zero 'finché non confidenti', QE e facility straordinarie."
+  },
+  "2020-05-13": {
+   "score": -2,
+   "note": "Sottolinea gravità inedita della crisi, apre a 'misure aggiuntive' monetarie/fiscali, userà gli strumenti 'al massimo' finché serve."
+  },
+  "2020-05-21": {
+   "score": null,
+   "note": "Discorso di apertura cerimoniale a un evento Fed Listens, nessun contenuto esplicito sulla stance di politica monetaria."
+  },
+  "2020-08-27": {
+   "score": -2,
+   "note": "Annuncio del nuovo framework Average Inflation Targeting: permette inflazione sopra il 2%, esplicitamente più dovish del precedente."
+  },
+  "2020-10-06": {
+   "score": -2,
+   "note": "Argomenta esplicitamente che il rischio di fare troppo poco supera quello di fare troppo, a favore di più stimolo."
+  },
+  "2021-02-10": {
+   "score": -1,
+   "note": "Enfatizza mercato del lavoro lontano dal massimo impiego, riafferma QE $120mld/mese e impegno a non stringere prematuramente."
+  },
+  "2021-03-18": {
+   "score": null,
+   "note": "Discorso su pagamenti transfrontalieri, FedNow e CBDC: nessun contenuto sulla stance di politica monetaria."
+  },
+  "2021-05-03": {
+   "score": null,
+   "note": "Discorso su sviluppo comunitario, disparità razziali e inclusione finanziaria: non riguarda la stance di politica monetaria."
+  },
+  "2021-08-17": {
+   "score": null,
+   "note": "Discorso di benvenuto a un evento per insegnanti e studenti, nessun contenuto di politica monetaria."
+  },
+  "2021-08-27": {
+   "score": 1,
+   "note": "Jackson Hole: segnala che il test 'substantial further progress' è soddisfatto per l'inflazione, tapering possibile entro l'anno."
+  },
+  "2021-09-24": {
+   "score": null,
+   "note": "Osservazioni introduttive a un evento Fed Listens, nessun contenuto sostanziale di politica monetaria."
+  },
+  "2021-11-08": {
+   "score": null,
+   "note": "Discorso di apertura sulla conferenza genere ed economia, nessun contenuto di politica monetaria."
+  },
+  "2021-11-09": {
+   "score": null,
+   "note": "Discorso di apertura su diversità e inclusione in economia, nessun contenuto di politica monetaria."
+  },
+  "2022-03-21": {
+   "score": 2,
+   "note": "Chiede di muovere 'expeditiously', apre a rialzi oltre 25bp e QT imminente: retorica marcatamente restrittiva."
+  },
+  "2022-06-17": {
+   "score": null,
+   "note": "Discorso sul ruolo internazionale del dollaro, CBDC e FedNow; nessuna sostanza sulla stance di politica monetaria."
+  },
+  "2022-08-26": {
+   "score": 2,
+   "note": "Jackson Hole 'some pain' speech: messaggio esplicitamente restrittivo, avverte contro un allentamento prematuro della politica."
+  },
+  "2022-11-30": {
+   "score": 1,
+   "note": "Segnala rallentamento del ritmo dei rialzi ma ribadisce 'long way to go' e stance restrittiva prolungata."
+  },
+  "2023-01-10": {
+   "score": null,
+   "note": "Panel su indipendenza delle banche centrali e ambito del mandato; non riguarda la stance di politica monetaria attuale."
+  },
+  "2023-06-29": {
+   "score": 1,
+   "note": "Focus su stabilità finanziaria post-SVB; ribadisce che la maggioranza attende due o più rialzi entro fine anno."
+  },
+  "2023-08-25": {
+   "score": 1,
+   "note": "Jackson Hole: apertura a nuovi rialzi, mantiene stance restrittiva finché inflazione non scende stabilmente; hawkish pur segnalando fine ciclo rialzi."
+  },
+  "2023-09-28": {
+   "score": null,
+   "note": "Discorso cerimoniale a insegnanti (Economic Education Month), nessun contenuto di politica monetaria."
+  },
+  "2023-10-19": {
+   "score": 0,
+   "note": "Ribadisce la stance esistente: pronto a rialzare se crescita/lavoro restano forti, ma nessun cambio rispetto a Jackson Hole."
+  },
+  "2023-10-25": {
+   "score": null,
+   "note": "Discorso introduttivo per il premio Moynihan ad Alan Blinder, tema accademico/commemorativo, non su politica monetaria."
+  },
+  "2023-11-08": {
+   "score": null,
+   "note": "Discorso celebrativo per il centenario della divisione Ricerca e Statistiche, nessuna indicazione di stance."
+  },
+  "2023-11-09": {
+   "score": 1,
+   "note": "Contrasta le attese di mercato su fine dei rialzi: 'non esiterà a rialzare ulteriormente', correzione hawkish dopo il FOMC di novembre."
+  },
+  "2023-12-01": {
+   "score": 0,
+   "note": "Ribadisce che è prematuro parlare di tagli, pronto a rialzare se necessario; in linea con stance già nota, nessun nuovo segnale."
+  },
+  "2024-04-03": {
+   "score": 1,
+   "note": "Dati su inflazione/lavoro più forti del previsto rallentano i tagli attesi; 'abbiamo tempo', posticipa il primo taglio, hawkish relativo alle attese di mercato."
+  },
+  "2024-08-23": {
+   "score": -2,
+   "note": "'È arrivato il momento di aggiustare la policy': pivot esplicito verso i tagli, enfasi sui rischi occupazionali, fortemente dovish."
+  },
+  "2024-09-26": {
+   "score": null,
+   "note": "Apertura della conferenza sul mercato dei Treasury, tema struttura di mercato, nessun contenuto sulla stance di policy."
+  },
+  "2024-09-30": {
+   "score": 1,
+   "note": "Dopo il taglio da 50bp, frena le attese di ulteriori tagli aggressivi: 'nessuna fretta', correzione hawkish rispetto allo slancio dovish."
+  },
+  "2024-11-14": {
+   "score": 0,
+   "note": "Dopo il taglio di novembre, conferma percorso graduale verso neutralità senza fretta; in linea con la stance già comunicata."
+  },
+  "2025-03-07": {
+   "score": 0,
+   "note": "Ribadisce pausa e attesa di chiarezza su dazi/politiche commerciali, nessun cambio rispetto alla stance di febbraio."
+  },
+  "2025-04-04": {
+   "score": 0,
+   "note": "Rischi bilanciati: i dazi aumentano l'inflazione attesa ma anche i rischi di rallentamento; messaggio equilibrato, coerente con la cautela neutrale del 2025."
+  }
+ }
+}
