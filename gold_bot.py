@@ -1184,13 +1184,18 @@ async def _send_weekly_review(bot):
         logger.error(f"Errore weekly review: {e}")
 
 
-async def _build_weekend_outlook() -> str:
+async def _build_weekend_outlook() -> tuple:
     """
     Analisi multi-timeframe di XAU/USD (M15/H1/H4/D1) per anticipare cosa
     potrebbe accadere alla riapertura di lunedì. Riusa la stessa pipeline
     di analisi dei segnali live (agent_orchestrator.run_pipeline), ma è
     puramente informativa: non apre trade, va letta anche se final_decision
     non è EXECUTE.
+
+    Ritorna (msg, chart_path): chart_path è il PNG con le zone chiave
+    (supporto/resistenza/prezzo attuale/trend) generato da weekly_chart,
+    calcolate sugli STESSI dati riportati nel testo — oppure None se il
+    grafico non è stato generabile (es. dati 4h non disponibili).
     """
     outlook_tfs = ["15min", "1h", "4h", "1day"]
     lines = []
@@ -1233,6 +1238,26 @@ async def _build_weekend_outlook() -> str:
     except Exception:
         pass
 
+    zone_txt = ""
+    chart_path = None
+    try:
+        from analyzer import get_data
+        from weekly_chart import compute_weekly_zones, render_weekly_outlook_chart
+        df_4h = await asyncio.to_thread(get_data, "4h", 90)
+        zones = compute_weekly_zones(df_4h)
+        bias_dir = "BUY" if bias_votes["BUY"] > bias_votes["SELL"] else (
+            "SELL" if bias_votes["SELL"] > bias_votes["BUY"] else "NEUTRAL"
+        )
+        chart_path = await asyncio.to_thread(render_weekly_outlook_chart, df_4h, zones, bias_dir)
+        zone_txt = (
+            "\n\n🎯 *Zone chiave (4H):*\n"
+            f"🔴 Resistenza: {zones['resistance']:,.2f} (max settimana {zones['week_high']:,.2f})\n"
+            f"🟢 Supporto: {zones['support']:,.2f} (min settimana {zones['week_low']:,.2f})\n"
+            f"⚪ Prezzo attuale: {zones['current_price']:,.2f} | Pivot: {zones['pivot']:,.2f}"
+        )
+    except Exception as e:
+        logger.error(f"Errore generazione grafico weekend: {e}")
+
     msg = (
         f"🔮 *ANALISI WEEKEND — XAU/USD*\n"
         f"_In vista della riapertura di lunedì_\n"
@@ -1240,9 +1265,34 @@ async def _build_weekend_outlook() -> str:
         f"{overall}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         + "\n\n".join(lines)
+        + zone_txt
         + events_txt
     )
-    return msg
+    return msg, chart_path
+
+
+async def _send_chart_then_message(bot_or_message, chart_path: str, msg: str, *, is_update_reply: bool):
+    """Invia prima la foto (se disponibile) e poi il messaggio testuale —
+    stesso ordine dell'esempio a cui si è ispirata la richiesta: prima le
+    zone chiave a colpo d'occhio, poi il dettaglio scritto."""
+    if chart_path:
+        try:
+            with open(chart_path, "rb") as photo:
+                if is_update_reply:
+                    await bot_or_message.reply_photo(photo)
+                else:
+                    await bot_or_message.send_photo(chat_id=CHAT_ID, photo=photo)
+        except Exception as e:
+            logger.error(f"Errore invio grafico weekend: {e}")
+        finally:
+            try:
+                os.remove(chart_path)
+            except OSError:
+                pass
+    if is_update_reply:
+        await bot_or_message.reply_text(msg, parse_mode="Markdown")
+    else:
+        await bot_or_message.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
 
 
 async def _send_weekend_outlook(bot):
@@ -1250,9 +1300,9 @@ async def _send_weekend_outlook(bot):
     if is_bot_paused():
         return
     try:
-        msg = await _build_weekend_outlook()
+        msg, chart_path = await _build_weekend_outlook()
         if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
-        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+        await _send_chart_then_message(bot, chart_path, msg, is_update_reply=False)
     except Exception as e:
         logger.error(f"Errore weekend outlook: {e}")
 
@@ -1262,9 +1312,9 @@ async def cmd_weekend(update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update): return
     await update.message.reply_text("⏳ Analisi multi-timeframe in corso... (1-2 min)")
     try:
-        msg = await _build_weekend_outlook()
+        msg, chart_path = await _build_weekend_outlook()
         if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await _send_chart_then_message(update.message, chart_path, msg, is_update_reply=True)
     except Exception as e:
         await update.message.reply_text(f"❌ Errore: {e}")
 
