@@ -8,7 +8,7 @@
     "surprise_std": 0.13343492064965784,
     "surprise_zscore_clip": 4.0,
     "n": 83,
-    "fitted_at": "2026-09-08T19:21:08.549986+00:00"
+    "fitted_at": "2026-09-14T19:49:59.591505+00:00"
   },
   "Unemployment Claims": {
     "event_name": "Unemployment Claims",
@@ -19,7 +19,7 @@
     "surprise_std": 145259.20758490043,
     "surprise_zscore_clip": 4.0,
     "n": 130,
-    "fitted_at": "2026-09-08T19:21:08.554974+00:00"
+    "fitted_at": "2026-09-14T19:49:59.593543+00:00"
   },
   "ADP Non-Farm Employment Change": {
     "event_name": "ADP Non-Farm Employment Change",
@@ -30,7 +30,7 @@
     "surprise_std": 473367.48146792396,
     "surprise_zscore_clip": 4.0,
     "n": 184,
-    "fitted_at": "2026-09-08T19:21:08.562000+00:00"
+    "fitted_at": "2026-09-14T19:49:59.595836+00:00"
   },
   "CB Consumer Confidence": {
     "event_name": "CB Consumer Confidence",
@@ -41,7 +41,7 @@
     "surprise_std": 5.193085098161531,
     "surprise_zscore_clip": 4.0,
     "n": 180,
-    "fitted_at": "2026-09-08T19:21:08.567798+00:00"
+    "fitted_at": "2026-09-14T19:49:59.597998+00:00"
   },
   "ISM Manufacturing PMI": {
     "event_name": "ISM Manufacturing PMI",
@@ -52,7 +52,7 @@
     "surprise_std": 1.7079703574769338,
     "surprise_zscore_clip": 4.0,
     "n": 196,
-    "fitted_at": "2026-09-08T19:21:08.573455+00:00"
+    "fitted_at": "2026-09-14T19:49:59.600290+00:00"
   },
   "ISM Services PMI": {
     "event_name": "ISM Services PMI",
@@ -63,6 +63,28 @@
     "surprise_std": 2.1941588607282396,
     "surprise_zscore_clip": 4.0,
     "n": 163,
-    "fitted_at": "2026-09-08T19:21:08.578230+00:00"
+    "fitted_at": "2026-09-14T19:49:59.602312+00:00"
+  },
+  "PPI y/y": {
+    "event_name": "PPI y/y",
+    "horizon": "reaction_30m",
+    "slope": -1.2460226320372885,
+    "intercept": 0.6328208467713861,
+    "surprise_mean": 0.030701754385964924,
+    "surprise_std": 0.32536628589467426,
+    "surprise_zscore_clip": 4.0,
+    "n": 114,
+    "fitted_at": "2026-09-14T19:49:59.604020+00:00"
+  },
+  "Core CPI y/y": {
+    "event_name": "Core CPI y/y",
+    "horizon": "reaction_30m",
+    "slope": -2.4000079794917433,
+    "intercept": 0.8428340953140729,
+    "surprise_mean": 0.01730769230769229,
+    "surprise_std": 0.14906980686542357,
+    "surprise_zscore_clip": 4.0,
+    "n": 104,
+    "fitted_at": "2026-09-14T19:49:59.605629+00:00"
   }
 }

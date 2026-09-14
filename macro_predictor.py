@@ -90,6 +90,18 @@ FRED_SERIES = {
     "Core CPI m/m":                    {"series_id": "CPILFESL",     "value_type": "mom_pct"},
     "Unemployment Claims":             {"series_id": "ICSA",         "value_type": "level"},
     "ADP Non-Farm Employment Change":  {"series_id": "ADPMNUSNERSA", "value_type": "mom_diff"},
+    # Aggiunte 2026-09-14: le 2 serie (su 3 mai trovate in nessuna fonte,
+    # vedi historical_events.py) validate con edge genuino dopo lo sblocco
+    # dati Kaggle — vedi historical_model.DEPLOYED_EVENTS. "Core CPI y/y"
+    # legge la STESSA serie livello di "Core CPI m/m" (confronto sui 12
+    # mesi invece che sul mese precedente, vedi value_type "yoy_pct") — il
+    # terzo elemento del calendario CPI oggi coperto (m/m, y/y, entrambi
+    # core). PPI y/y usa PPIFIS ("Producer Price Index by Final Demand",
+    # la definizione moderna BLS usata dal 2009 in poi - non PPIACO, serie
+    # storica diversa/discontinuata per questo scopo, verificato
+    # confrontando i valori ricalcolati contro gli actual storici reali).
+    "Core CPI y/y":                    {"series_id": "CPILFESL",     "value_type": "yoy_pct"},
+    "PPI y/y":                         {"series_id": "PPIFIS",       "value_type": "yoy_pct"},
 }
 
 # Serie senza fonte FRED, lette dai comunicati stampa via RSS (vedi nota
@@ -168,18 +180,27 @@ def _fetch_fred_series(series_id: str) -> pd.Series:
     return series
 
 
-def _new_release_mom_pct(series_id: str, last_seen: dict) -> tuple[str, float] | None:
+def _new_release_mom_pct(series_id: str, last_seen: dict, seen_key: str | None = None) -> tuple[str, float] | None:
     """
     Ritorna (data_iso, variazione_percentuale_mese_su_mese) se su FRED è
     comparso un punto dati più recente dell'ultimo già processato per
     questa serie, altrimenti None (nessuna novità, o FRED non ancora
     aggiornato).
+
+    seen_key: chiave con cui tracciare "ultimo visto" in last_seen — di
+    default series_id, ma va passato ESPLICITO (l'event_name) quando due
+    eventi diversi condividono la stessa serie FRED sottostante (es. "Core
+    CPI m/m" e "Core CPI y/y" leggono entrambi CPILFESL) — altrimenti il
+    primo dei due che gira segna la serie come "vista" e l'altro non
+    scatterebbe mai più per lo stesso rilascio. Bug evitato qui prima che
+    esistesse, introducendo Core CPI y/y (2026-09-14).
     """
+    seen_key = seen_key or series_id
     s = _fetch_fred_series(series_id)
     if s.empty:
         return None
     latest_date = s.index.max()
-    prev_seen = last_seen.get(series_id)
+    prev_seen = last_seen.get(seen_key)
     if prev_seen and latest_date <= pd.Timestamp(prev_seen):
         return None
 
@@ -206,7 +227,42 @@ def _new_release_mom_pct(series_id: str, last_seen: dict) -> tuple[str, float] |
     return latest_date.isoformat(), float(mom_pct)
 
 
-def _new_release_mom_diff(series_id: str, last_seen: dict) -> tuple[str, float] | None:
+def _new_release_yoy_pct(series_id: str, last_seen: dict, seen_key: str | None = None) -> tuple[str, float] | None:
+    """
+    Come _new_release_mom_pct ma variazione percentuale ANNO su anno
+    (confronto col valore di 12 mesi prima, non del mese precedente) —
+    es. Core CPI y/y e PPI y/y leggono lo stesso indice-livello FRED già
+    usato per la variante m/m (CPILFESL per Core CPI), ma il training si
+    aspetta il confronto sui 12 mesi.
+
+    Scarto vs actual ufficiale più ampio del mom_pct (verificato
+    empiricamente il 2026-09-14 su 6 mesi 2024 di PPI y/y: fino a ~0.5pp,
+    contro ~0.1pp di mom_pct) — atteso: un confronto a 12 mesi accumula le
+    revisioni di TUTTI gli 11 mesi intermedi, non solo dell'ultimo. Vedi
+    disclaimer dedicato in format_prediction().
+    """
+    seen_key = seen_key or series_id
+    s = _fetch_fred_series(series_id)
+    if s.empty:
+        return None
+    latest_date = s.index.max()
+    prev_seen = last_seen.get(seen_key)
+    if prev_seen and latest_date <= pd.Timestamp(prev_seen):
+        return None
+
+    pos = s.index.get_loc(latest_date)
+    if pos < 12:
+        return None
+    year_ago_value = s.iloc[pos - 12]
+    current_value = s.iloc[pos]
+    if pd.isna(year_ago_value) or year_ago_value == 0:
+        return None
+
+    yoy_pct = round((current_value - year_ago_value) / year_ago_value * 100, 1)
+    return latest_date.isoformat(), float(yoy_pct)
+
+
+def _new_release_mom_diff(series_id: str, last_seen: dict, seen_key: str | None = None) -> tuple[str, float] | None:
     """
     Come _new_release_mom_pct ma per serie dove il dataset di training è
     la DIFFERENZA ASSOLUTA mese su mese (non %) - es. ADP Non-Farm
@@ -214,11 +270,12 @@ def _new_release_mom_diff(series_id: str, last_seen: dict) -> tuple[str, float] 
     degli occupati, il calendario/training riportano invece quante
     persone in più/meno rispetto al mese precedente ("155K").
     """
+    seen_key = seen_key or series_id
     s = _fetch_fred_series(series_id)
     if s.empty:
         return None
     latest_date = s.index.max()
-    prev_seen = last_seen.get(series_id)
+    prev_seen = last_seen.get(seen_key)
     if prev_seen and latest_date <= pd.Timestamp(prev_seen):
         return None
 
@@ -236,18 +293,19 @@ def _new_release_mom_diff(series_id: str, last_seen: dict) -> tuple[str, float] 
     return latest_date.isoformat(), float(diff)
 
 
-def _new_release_level(series_id: str, last_seen: dict) -> tuple[str, float] | None:
+def _new_release_level(series_id: str, last_seen: dict, seen_key: str | None = None) -> tuple[str, float] | None:
     """
     Come _new_release_mom_pct ma per serie il cui valore è già un livello
     grezzo nel dataset di training (es. Unemployment Claims, "219K") —
     nessuna trasformazione: solo l'ultimo valore pubblicato su FRED, così
     com'è, comparabile direttamente al forecast (stessa unità).
     """
+    seen_key = seen_key or series_id
     s = _fetch_fred_series(series_id)
     if s.empty:
         return None
     latest_date = s.index.max()
-    prev_seen = last_seen.get(series_id)
+    prev_seen = last_seen.get(seen_key)
     if prev_seen and latest_date <= pd.Timestamp(prev_seen):
         return None
 
@@ -326,21 +384,36 @@ def _fetch_new_actual(event_name: str) -> tuple[str, float, str] | None:
     if fred_cfg:
         series_id = fred_cfg["series_id"]
         value_type = fred_cfg["value_type"]
+        # seen_key=event_name, MAI series_id: da quando Core CPI y/y legge
+        # la stessa serie CPILFESL di Core CPI m/m, tracciare "ultimo
+        # visto" per series_id farebbe si' che il primo dei due eventi
+        # controllato segni la serie come vista e l'altro non scatti mai
+        # piu' per lo stesso rilascio (vedi commento in _new_release_mom_pct).
         last_seen = load_fred_last_seen()
+        # Migrazione one-time dal vecchio schema (chiave = series_id): le 3
+        # serie già live prima di questo cambio avevano il loro "ultimo
+        # visto" salvato sotto series_id, non event_name. Senza questo
+        # seed, al primo giro dopo il deploy risulterebbero tutte "mai
+        # viste" e potrebbero far scattare un alert per un rilascio già
+        # notificato giorni/settimane fa sotto la chiave vecchia.
+        if event_name not in last_seen and series_id in last_seen:
+            last_seen[event_name] = last_seen[series_id]
         try:
             if value_type == "level":
-                release = _new_release_level(series_id, last_seen)
+                release = _new_release_level(series_id, last_seen, seen_key=event_name)
             elif value_type == "mom_diff":
-                release = _new_release_mom_diff(series_id, last_seen)
+                release = _new_release_mom_diff(series_id, last_seen, seen_key=event_name)
+            elif value_type == "yoy_pct":
+                release = _new_release_yoy_pct(series_id, last_seen, seen_key=event_name)
             else:
-                release = _new_release_mom_pct(series_id, last_seen)
+                release = _new_release_mom_pct(series_id, last_seen, seen_key=event_name)
         except Exception as e:
             logger.warning(f"FRED non raggiungibile per {series_id}: {e}")
             return None
         if release is None:
             return None
         release_date, actual_value = release
-        last_seen[series_id] = release_date
+        last_seen[event_name] = release_date
         save_fred_last_seen(last_seen)
         return release_date, actual_value, "fred"
 
@@ -458,6 +531,13 @@ def format_prediction(pred: dict) -> str:
             "_L'actual è l'ultimo valore pubblicato da FRED (aggiornato entro circa un'ora "
             "dal rilascio ufficiale), non letto dal comunicato — in rari casi FRED può "
             "revisionare un dato dopo la pubblicazione originale._"
+        )
+    elif value_type == "yoy_pct":
+        note_source = (
+            "_L'actual è ricalcolato da FRED confrontando col dato di 12 mesi fa, non letto dal "
+            "comunicato ufficiale — lo scarto da revisioni può essere più ampio che per un dato "
+            "mese su mese (fino a ~0.5pp, verificato empiricamente) perché si accumulano le "
+            "revisioni di un anno intero, non di un solo mese._"
         )
     else:
         note_source = (

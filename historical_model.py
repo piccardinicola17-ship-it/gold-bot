@@ -324,6 +324,18 @@ DEPLOYED_EVENTS = {
     "CB Consumer Confidence": "reaction_30m",
     "ISM Manufacturing PMI": "reaction_30m",
     "ISM Services PMI": "reaction_1m",
+    # Aggiunte 2026-09-14, sbloccate da una fonte Kaggle (vedi
+    # historical_events.py) dopo essere state per mesi le uniche 3 serie
+    # mai trovate in nessuna fonte gratuita. Entrambe reggono beats_naive
+    # su TUTTI gli split cronologici e direction_accuracy >=55% su
+    # reaction_30m (lo stesso orizzonte di default, non scelto ad hoc):
+    #   PPI y/y       n=114  3/5 orizzonti genuini (1m/15m/30m)
+    #   Core CPI y/y  n=104  3/5 orizzonti genuini (5m/30m/60m)
+    # Uno dei risultati più forti di tutta la campagna (direction_accuracy
+    # fino all'85% su alcuni split) — ma n appena sopra la soglia 100,
+    # stesso livello di cautela già usato per Core CPI m/m (n=83).
+    "PPI y/y": "reaction_30m",
+    "Core CPI y/y": "reaction_30m",
 }
 
 

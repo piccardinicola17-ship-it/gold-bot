@@ -279,6 +279,72 @@ class TestNewReleaseRss(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestNewReleaseYoyPct(unittest.TestCase):
+    """_new_release_yoy_pct (2026-09-14, Core CPI y/y + PPI y/y): confronto
+    coi 12 mesi prima, non col mese precedente come mom_pct."""
+
+    def test_new_value_detected(self):
+        dates = pd.date_range("2024-01-01", periods=13, freq="MS")
+        values = [100.0] * 12 + [103.5]
+        s = pd.Series(values, index=dates)
+        with mock.patch("macro_predictor._fetch_fred_series", return_value=s):
+            result = mp._new_release_yoy_pct("CPILFESL", last_seen={})
+        self.assertIsNotNone(result)
+        _, value = result
+        self.assertAlmostEqual(value, 3.5, places=1)
+
+    def test_less_than_12_months_of_history_returns_none(self):
+        dates = pd.date_range("2024-01-01", periods=6, freq="MS")
+        s = pd.Series([100.0] * 6, index=dates)
+        with mock.patch("macro_predictor._fetch_fred_series", return_value=s):
+            result = mp._new_release_yoy_pct("CPILFESL", last_seen={})
+        self.assertIsNone(result)
+
+    def test_already_seen_returns_none(self):
+        dates = pd.date_range("2024-01-01", periods=13, freq="MS")
+        s = pd.Series([100.0] * 12 + [103.5], index=dates)
+        with mock.patch("macro_predictor._fetch_fred_series", return_value=s):
+            result = mp._new_release_yoy_pct(
+                "CPILFESL", last_seen={"CPILFESL": dates[-1].isoformat()}
+            )
+        self.assertIsNone(result)
+
+    def test_seen_key_defaults_to_series_id_when_not_given(self):
+        dates = pd.date_range("2024-01-01", periods=13, freq="MS")
+        s = pd.Series([100.0] * 12 + [103.5], index=dates)
+        with mock.patch("macro_predictor._fetch_fred_series", return_value=s):
+            result = mp._new_release_yoy_pct(
+                "CPILFESL", last_seen={"CPILFESL": dates[-1].isoformat()}, seen_key=None
+            )
+        self.assertIsNone(result)
+
+
+class TestFredSeenKeySharedSeries(unittest.TestCase):
+    """Bug evitato il 2026-09-14: Core CPI m/m e Core CPI y/y leggono la
+    STESSA serie FRED (CPILFESL). Tracciare 'ultimo visto' per series_id
+    (invece che per event_name) farebbe si' che il primo dei due eventi
+    controllato segni la serie come vista, bloccando per sempre l'altro
+    sullo stesso rilascio — anche se non e' mai stato notificato."""
+
+    def test_checking_mom_variant_first_does_not_block_yoy_variant(self):
+        dates = pd.date_range("2024-01-01", periods=13, freq="MS")
+        s = pd.Series([100.0] * 12 + [103.5], index=dates)
+        last_seen = {}
+
+        def fake_save(value):
+            last_seen.clear()
+            last_seen.update(value)
+
+        with mock.patch("macro_predictor._fetch_fred_series", return_value=s), \
+             mock.patch("macro_predictor.load_fred_last_seen", side_effect=lambda: dict(last_seen)), \
+             mock.patch("macro_predictor.save_fred_last_seen", side_effect=fake_save):
+            first = mp._fetch_new_actual("Core CPI m/m")
+            second = mp._fetch_new_actual("Core CPI y/y")
+
+        self.assertIsNotNone(first, "Core CPI m/m deve rilevare il nuovo dato")
+        self.assertIsNotNone(second, "Core CPI y/y NON deve essere bloccato dal check di Core CPI m/m sulla stessa serie")
+
+
 class TestPredictReactionRssSeries(unittest.TestCase):
     def setUp(self):
         self.model = {
