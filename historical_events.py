@@ -139,6 +139,52 @@ CENTRAL_BANK_EVENT_NAMES = (
     "BOJ Outlook Report", "Monetary Policy Meeting Minutes",
 )
 
+# Fonte 3 (2026-09-14): dataset Kaggle iscorod92/economic-calendar-us-2015-2024
+# (calendario stile Investing.com, non ForexFactory) — unica fonte trovata
+# finora per le 3 serie MAI presenti ne' in HF ne' in github_ff_spoluan (vedi
+# commento sopra, riga ~71): PCE Price Index m/m (headline, non-core), Core
+# CPI y/y, PPI y/y. Richiede un account Kaggle + token API dell'utente
+# (~/.kaggle/kaggle.json) - non riscaricabile in automatico da un URL
+# pubblico come le altre fonti, va scaricato una volta con
+# `kaggle datasets download -d iscorod92/economic-calendar-us-2015-2024`
+# e salvato in RAW_DIR (fatto, vedi KAGGLE_US_CSV_NAME).
+#
+# Copertura 2015-01 -> 2024-12: Core CPI (YoY) n=121, PPI (YoY) n=120
+# (entrambe sopra la soglia n>=100 del progetto anche PRIMA della perdita
+# di righe nella fase tick-reaction), PCE price index (MoM) n=27 (troppo
+# poche, quasi certamente resterà "dati insufficienti" ma e' comunque dato
+# nuovo che prima non esisteva da nessuna fonte).
+KAGGLE_US_CSV_NAME = "kaggle_iscorod92_economic_calendar_us.csv"
+KAGGLE_US_SOURCE_NAME = "kaggle_iscorod92_us"
+
+# Nome grezzo nella fonte (con suffisso mese, es. "  (Dec)", rimosso da
+# _strip_month_suffix) -> nome canonico usato nel resto del DB, stessa
+# convenzione ForexFactory di HF/github_ff ("Core CPI m/m", "PPI m/m" ecc.
+# gia' presenti li'; qui le varianti y/y e la PCE headline mai viste prima).
+KAGGLE_US_EVENT_RENAME = {
+    "PCE price index (MoM)": "PCE Price Index m/m",
+    "Core CPI (YoY)": "Core CPI y/y",
+    "PPI (YoY)": "PPI y/y",
+}
+
+# Il campo "time" di questa fonte e' un orario locale con offset FISSO
+# rispetto al vero orario UTC del rilascio (stesso tipo di pattern gia'
+# visto per github_ff, offset diverso) - non un fuso reale con la propria
+# regola DST: verificato su Core CPI (YoY)/PPI (YoY) confrontando 2015,
+# 2018, 2024 - il campo mostra 13:30 nei mesi EDT USA e 14:30 nei mesi EST
+# USA, con la transizione che cade esattamente alle date del cambio ora
+# legale USA (non a un cambio ora europeo) - cioe' il vero orario UTC di
+# un rilascio delle 8:30am ET (13:30 UTC in EST, 12:30 UTC in EDT) piu' 1h
+# fisso, sempre. Sottrarre 1h da questo campo da' quindi sempre il vero
+# UTC, in ogni stagione.
+KAGGLE_US_UTC_OFFSET_HOURS = 1
+
+_MONTH_SUFFIX_RE = re.compile(r"\s*\([A-Z][a-z]{2}\)\s*$")
+
+
+def _strip_month_suffix(event: str) -> str:
+    return _MONTH_SUFFIX_RE.sub("", str(event)).strip()
+
 # Suffisso unità -> moltiplicatore. "%" non viene scalato (4.2% -> 4.2, non 0.042):
 # è il numero così come lo leggerebbe un trader, non una frazione.
 _UNIT_MULTIPLIER = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000, "T": 1_000_000_000_000}
@@ -597,6 +643,138 @@ def ingest_github_ff_source(skip_download: bool = False, db_path: str = HIST_DB_
         )
 
     logger.info(f"github_ff: inserite {inserted:,} righe nuove (le altre erano già presenti, idempotente)")
+    return inserted
+
+
+def _load_kaggle_us_dataframe() -> pd.DataFrame:
+    path = RAW_DIR / KAGGLE_US_CSV_NAME
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} non trovato — scaricare una volta con "
+            "'kaggle datasets download -d iscorod92/economic-calendar-us-2015-2024 --unzip' "
+            f"e salvare il CSV in {RAW_DIR} col nome {KAGGLE_US_CSV_NAME}"
+        )
+    df = pd.read_csv(path)
+    expected_cols = {"date", "time", "currency", "event", "actual", "forecast", "previous"}
+    missing = expected_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Schema kaggle_iscorod92 cambiato, colonne mancanti: {missing}")
+    logger.info(f"kaggle_iscorod92: {len(df):,} righe grezze lette")
+    return df
+
+
+def _normalize_kaggle_us(df: pd.DataFrame, existing_dates: dict[str, set] | None = None) -> pd.DataFrame:
+    """Stesso schema/pattern di _normalize_github_ff. existing_dates evita di
+    duplicare un rilascio reale se un'altra fonte lo copre già per quella
+    data (qui non dovrebbe mai succedere per costruzione — le 3 serie non
+    sono MAI presenti altrove — ma teniamo la stessa protezione per
+    coerenza e in caso una fonte futura le copra parzialmente)."""
+    out = df[df["currency"] == "USD"].copy()
+    out["base_event"] = out["event"].apply(_strip_month_suffix)
+    out = out[out["base_event"].isin(KAGGLE_US_EVENT_RENAME.keys())].copy()
+    logger.info(f"kaggle_iscorod92: {len(out):,} righe USD nei nomi target dopo il filtro")
+
+    naive_local = pd.to_datetime(
+        out["date"] + " " + out["time"], format="%d/%m/%Y %H:%M", errors="coerce"
+    )
+    bad_time = naive_local.isna()
+    if bad_time.any():
+        logger.info(f"kaggle_iscorod92: {bad_time.sum():,} righe con data/ora non parsabile scartate (es. 'All Day')")
+    out = out[~bad_time]
+    naive_local = naive_local[~bad_time]
+    out["datetime_utc"] = (naive_local - pd.Timedelta(hours=KAGGLE_US_UTC_OFFSET_HOURS)).dt.tz_localize("UTC")
+
+    out["date_utc"] = out["datetime_utc"].dt.strftime("%Y-%m-%d")
+    out["datetime_utc"] = out["datetime_utc"].apply(lambda ts: ts.isoformat())
+    out["event_name"] = out["base_event"].map(KAGGLE_US_EVENT_RENAME)
+
+    parsed = out["actual"].apply(_parse_number)
+    out["actual_num"], out["unit_actual"] = zip(*parsed) if len(parsed) else ([], [])
+    parsed = out["forecast"].apply(_parse_number)
+    out["forecast_num"], out["unit_forecast"] = zip(*parsed) if len(parsed) else ([], [])
+    parsed = out["previous"].apply(_parse_number)
+    out["previous_num"], out["unit_previous"] = zip(*parsed) if len(parsed) else ([], [])
+    out["unit"] = out["unit_actual"].combine_first(out["unit_forecast"]).combine_first(out["unit_previous"])
+
+    out["macro_category"] = out["event_name"].apply(_tag_category)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    out["event_uid"] = out.apply(
+        lambda r: _event_uid("USD", r["event_name"], r["datetime_utc"], KAGGLE_US_SOURCE_NAME), axis=1
+    )
+    out["ingested_at"] = now_iso
+    out["source"] = KAGGLE_US_SOURCE_NAME
+    out["source_detail"] = None
+    # Queste 3 serie sono varianti dirette (y/y o headline) di famiglie
+    # gia' trattate come alto impatto nel resto del DB (Core CPI m/m, PPI
+    # m/m, Core PCE Price Index m/m) - l'etichetta "medium"/"low" di questa
+    # fonte riflette la scala di importanza propria di Investing.com, non
+    # quella ForexFactory che il resto del DB usa (dove CPI/PPI/PCE sono
+    # sempre HIGH). Fissato a HIGH per coerenza col resto del DB, non
+    # perche' la fonte lo etichetti cosi'.
+    out["impact"] = "HIGH"
+
+    out = out.rename(columns={
+        "actual": "actual_raw", "forecast": "forecast_raw", "previous": "previous_raw",
+    })[[
+        "event_uid", "datetime_utc", "date_utc", "impact", "event_name", "macro_category",
+        "actual_raw", "forecast_raw", "previous_raw", "actual_num", "forecast_num", "previous_num",
+        "unit", "source", "source_detail", "ingested_at",
+    ]].assign(currency="USD")
+
+    if existing_dates is not None:
+        before = len(out)
+        keep = out.apply(
+            lambda r: r["date_utc"] not in existing_dates.get(r["event_name"], set()), axis=1
+        )
+        out = out[keep]
+        logger.info(
+            f"kaggle_iscorod92: {before - len(out):,} righe scartate perché la data era già coperta "
+            f"da un'altra fonte per lo stesso evento (gap-filling, mai duplicati)"
+        )
+
+    return out
+
+
+def ingest_kaggle_us_source(db_path: str = HIST_DB_PATH) -> int:
+    target_names = tuple(KAGGLE_US_EVENT_RENAME.values())
+    existing_dates = _existing_dates_by_event(target_names, db_path)
+    df = _load_kaggle_us_dataframe()
+    norm = _normalize_kaggle_us(df, existing_dates=existing_dates)
+
+    init_historical_db(db_path)
+    inserted = 0
+    with _connect(db_path) as conn:
+        for row in norm.itertuples(index=False):
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO macro_events (
+                    event_uid, datetime_utc, date_utc, currency, impact, event_name,
+                    macro_category, actual_raw, forecast_raw, previous_raw,
+                    actual_num, forecast_num, previous_num, unit, source, source_detail, ingested_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    row.event_uid, row.datetime_utc, row.date_utc, row.currency, row.impact,
+                    row.event_name, row.macro_category, row.actual_raw, row.forecast_raw, row.previous_raw,
+                    row.actual_num, row.forecast_num, row.previous_num, row.unit,
+                    row.source, row.source_detail, row.ingested_at,
+                ),
+            )
+            inserted += cur.rowcount
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        date_min, date_max = norm["date_utc"].min(), norm["date_utc"].max()
+        conn.execute(
+            "INSERT OR IGNORE INTO macro_events_coverage "
+            "(source, range_start_utc, range_end_utc, row_count, ingested_at, notes) VALUES (?,?,?,?,?,?)",
+            (
+                KAGGLE_US_SOURCE_NAME, date_min, date_max, len(norm), now_iso,
+                "Kaggle iscorod92/economic-calendar-us-2015-2024, solo PCE Price Index m/m + "
+                "Core CPI y/y + PPI y/y (le 3 serie mai trovate in nessun'altra fonte)",
+            ),
+        )
+
+    logger.info(f"kaggle_iscorod92: inserite {inserted:,} righe nuove (le altre erano già presenti, idempotente)")
     return inserted
 
 

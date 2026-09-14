@@ -286,6 +286,12 @@ EXTENDED_EVENT_NAMES = (
     # con "BOJ Outlook Report" (già sopra) per un pooling più robusto,
     # stessa logica del "Combinato" FOMC.
     "BOJ Summary of Opinions",
+    # Aggiunte 2026-09-14: le 3 serie mai trovate in nessuna fonte fino ad
+    # oggi (PCE headline non-core, Core CPI y/y, PPI y/y), ora recuperate
+    # da un dataset Kaggle (vedi historical_events.ingest_kaggle_us_source)
+    # — Core CPI y/y e PPI y/y hanno già n=120 in macro_events, sopra
+    # soglia anche prima di eventuali perdite in questa fase tick-reaction.
+    "PCE Price Index m/m", "Core CPI y/y", "PPI y/y",
 )
 
 
