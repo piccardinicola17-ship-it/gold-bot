@@ -1626,6 +1626,12 @@ def enqueue_broker_order(trade_id: str, data: dict) -> None:
         "tp2":        float(data.get("tp2", 0)),
         "tp3":        float(data.get("tp3", 0)),
         "timeframe":  data.get("timeframe"),
+        # % di rischio, non un lotto già calcolato: "lot_size" in "data" è
+        # dimensionato sul saldo virtuale del paper trading, non su quello
+        # vero del conto demo MT5 — l'EA lo ricalcola da solo sul proprio
+        # saldo reale (stesso identico standard di risk_manager.calculate_
+        # lot_size, ma coi tick value reali del broker per XAUUSD+).
+        "risk_pct":   float(data.get("risk_pct", 0)),
         "created_at": datetime.now(TIMEZONE).isoformat(),
     }
     _save_state_json("broker_orders_pending", pending)

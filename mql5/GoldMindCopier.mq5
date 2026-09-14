@@ -11,6 +11,12 @@
 //| — apre solo ordini nuovi. GoldMind continua a fare la propria      |
 //| simulazione paper esattamente come prima: questo EA e' un          |
 //| consumatore in piu' dello stesso segnale, non sostituisce nulla.   |
+//|                                                                    |
+//| Lottaggio: se RiskBasedSizing=true (default) il lotto e' calcolato |
+//| dal risk_pct del trade sul saldo REALE di questo conto (stesso     |
+//| standard di risk_manager.calculate_lot_size() lato bot, coi tick   |
+//| value veri del broker) — non un lotto fisso identico per ogni      |
+//| segnale a prescindere dallo stop loss o dal capitale disponibile.  |
 //+------------------------------------------------------------------+
 #property copyright "GoldMind"
 #property version   "1.00"
@@ -18,11 +24,13 @@
 #include <Trade\Trade.mqh>
 CTrade trade;
 
-input string ServerUrl     = "https://goldmind-bot-production.up.railway.app"; // URL GoldMind (Railway)
-input string ApiToken      = "";           // stesso DASHBOARD_TOKEN configurato su Railway
-input int    PollSeconds   = 5;            // ogni quanto controllare nuovi segnali
-input double LotSize       = 0.01;         // lotto fisso per ogni copia (demo: non replica il position sizing del bot)
-input string SymbolToTrade = "XAUUSD";     // simbolo oro su questo broker
+input string ServerUrl        = "https://goldmind-bot-production.up.railway.app"; // URL GoldMind (Railway)
+input string ApiToken         = "";           // stesso DASHBOARD_TOKEN configurato su Railway
+input int    PollSeconds      = 5;            // ogni quanto controllare nuovi segnali
+input bool   RiskBasedSizing  = true;         // true: lotto calcolato da risk_pct sul saldo REALE del conto; false: usa sempre LotSize
+input double LotSize          = 0.01;         // lotto fisso di riserva (usato se RiskBasedSizing=false o se il calcolo dinamico fallisce)
+input double MaxLotSize       = 1.0;          // tetto di sicurezza: mai superato, qualunque cosa dica il calcolo dinamico
+input string SymbolToTrade    = "XAUUSD";     // simbolo oro su questo broker
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -31,7 +39,11 @@ int OnInit()
    if(ApiToken == "")
       Print("ATTENZIONE: ApiToken vuoto — /api/ea/pending risponderà 401, nessun ordine verrà copiato.");
    EventSetTimer(PollSeconds);
-   Print("GoldMindCopier avviato — polling ", ServerUrl, " ogni ", PollSeconds, "s su ", SymbolToTrade);
+   string sizingMode = RiskBasedSizing
+      ? StringFormat("lotto dinamico da risk_pct (tetto %.2f, riserva %.2f se non calcolabile)", MaxLotSize, LotSize)
+      : StringFormat("lotto fisso %.2f", LotSize);
+   Print("GoldMindCopier avviato — polling ", ServerUrl, " ogni ", PollSeconds, "s su ", SymbolToTrade,
+         " — ", sizingMode);
    return(INIT_SUCCEEDED);
 }
 
@@ -146,6 +158,56 @@ double JsonNumberValue(string json, string key)
 }
 
 //+------------------------------------------------------------------+
+//| Stesso standard di risk_manager.calculate_lot_size() lato bot, ma  |
+//| coi tick value REALI di questo broker per SymbolToTrade invece di  |
+//| assumere 100 oz/lotto — SYMBOL_TRADE_TICK_VALUE/TICK_SIZE danno il  |
+//| valore monetario per 1 lotto di qualunque distanza di prezzo,      |
+//| corretto anche se il contratto di XAUUSD+ differisse da quello     |
+//| "standard" assunto lato Python (che dimensiona solo il saldo       |
+//| VIRTUALE del paper trading, mai usato per il conto vero).          |
+//+------------------------------------------------------------------+
+double CalculateDynamicLot(double riskPct, double entry, double sl)
+{
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double slDistance = MathAbs(entry - sl);
+   double tickValue = SymbolInfoDouble(SymbolToTrade, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize  = SymbolInfoDouble(SymbolToTrade, SYMBOL_TRADE_TICK_SIZE);
+
+   if(balance <= 0 || riskPct <= 0 || slDistance <= 0 || tickValue <= 0 || tickSize <= 0)
+   {
+      Print("Lotto dinamico non calcolabile (balance=", balance, " risk_pct=", riskPct,
+            " sl_distance=", slDistance, ") — uso LotSize di riserva ", LotSize);
+      return LotSize;
+   }
+
+   double valuePerLot = slDistance / tickSize * tickValue;
+   double riskAmount  = balance * riskPct / 100.0;
+   double rawLot      = riskAmount / valuePerLot;
+
+   double lotStep = SymbolInfoDouble(SymbolToTrade, SYMBOL_VOLUME_STEP);
+   double lotMin  = SymbolInfoDouble(SymbolToTrade, SYMBOL_VOLUME_MIN);
+   double lotMax  = SymbolInfoDouble(SymbolToTrade, SYMBOL_VOLUME_MAX);
+   if(lotStep <= 0) lotStep = 0.01;
+
+   double steppedLot = MathFloor(rawLot / lotStep) * lotStep;
+   steppedLot = MathMax(steppedLot, lotMin);
+   steppedLot = MathMin(steppedLot, MathMin(lotMax, MaxLotSize));
+   steppedLot = NormalizeDouble(steppedLot, 2);
+
+   if(steppedLot < lotMin)
+   {
+      Print("Lotto dinamico (", DoubleToString(rawLot, 4), ") sotto il minimo broker (", lotMin,
+            ") anche dopo l'arrotondamento — uso LotSize di riserva ", LotSize);
+      return LotSize;
+   }
+
+   Print("Lotto dinamico: saldo=", DoubleToString(balance, 2), " risk=", riskPct,
+         "% -> rischio $", DoubleToString(riskAmount, 2), " / SL ", DoubleToString(slDistance, 2),
+         " -> lotto ", DoubleToString(steppedLot, 2));
+   return steppedLot;
+}
+
+//+------------------------------------------------------------------+
 //| Apre l'ordine corrispondente a un oggetto JSON, poi conferma.      |
 //| Dedup locale via GlobalVariable (a livello di terminale, non solo  |
 //| di questo EA) oltre alla rimozione server-side via ack: se l'ack   |
@@ -159,6 +221,7 @@ void ProcessOneOrder(string obj)
    double entry = JsonNumberValue(obj, "entry");
    double sl    = JsonNumberValue(obj, "sl");
    double tp1   = JsonNumberValue(obj, "tp1");
+   double riskPct = JsonNumberValue(obj, "risk_pct");
 
    if(tradeId == "")
       return;
@@ -175,18 +238,20 @@ void ProcessOneOrder(string obj)
    bool sent = false;
    string cmt = "GoldMind " + tradeId;
 
+   double lot = RiskBasedSizing ? CalculateDynamicLot(riskPct, entry, sl) : LotSize;
+
    if(ot == "BUY")
-      sent = trade.Buy(LotSize, SymbolToTrade, 0.0, sl, tp1, cmt);
+      sent = trade.Buy(lot, SymbolToTrade, 0.0, sl, tp1, cmt);
    else if(ot == "SELL")
-      sent = trade.Sell(LotSize, SymbolToTrade, 0.0, sl, tp1, cmt);
+      sent = trade.Sell(lot, SymbolToTrade, 0.0, sl, tp1, cmt);
    else if(ot == "BUY LIMIT")
-      sent = trade.BuyLimit(LotSize, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.BuyLimit(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
    else if(ot == "SELL LIMIT")
-      sent = trade.SellLimit(LotSize, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.SellLimit(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
    else if(ot == "BUY STOP")
-      sent = trade.BuyStop(LotSize, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.BuyStop(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
    else if(ot == "SELL STOP")
-      sent = trade.SellStop(LotSize, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.SellStop(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
    else
    {
       Print("Tipo ordine sconosciuto: '", orderType, "' (trade_id ", tradeId, ") — scartato senza aprire nulla.");
@@ -196,7 +261,8 @@ void ProcessOneOrder(string obj)
 
    if(sent)
    {
-      Print("Copiato: ", ot, " ", SymbolToTrade, " entry=", entry, " sl=", sl, " tp=", tp1, " (", tradeId, ")");
+      Print("Copiato: ", ot, " ", SymbolToTrade, " lotto=", DoubleToString(lot, 2),
+            " entry=", entry, " sl=", sl, " tp=", tp1, " (", tradeId, ")");
       GlobalVariableSet(seenVar, 1);
    }
    else

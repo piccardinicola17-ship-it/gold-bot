@@ -684,6 +684,37 @@ class TestRebuildSessionsPreservesSafetyStop(TradeManagerTestCase):
             self.assertTrue(tm._migration_done(conn, "rebuild_sessions_from_trades_v2"))
 
 
+class TestEaBridgeQueue(TradeManagerTestCase):
+    """enqueue_broker_order() include risk_pct (non lot_size) nel payload —
+    l'EA calcola il lotto da solo sul saldo REALE del conto demo, il
+    lot_size salvato sul trade è dimensionato sul saldo virtuale del paper
+    trading e sarebbe sbagliato per il conto vero."""
+
+    def setUp(self):
+        super().setUp()
+        self._orig_enabled = tm.EA_BRIDGE_ENABLED
+        tm.EA_BRIDGE_ENABLED = True
+
+    def tearDown(self):
+        tm.EA_BRIDGE_ENABLED = self._orig_enabled
+        super().tearDown()
+
+    def test_open_trade_enqueues_risk_pct_not_lot_size(self):
+        data = _base_trade_data(risk_pct=0.75, lot_size=0.03)
+        trade_id = tm.open_trade(data)
+
+        pending = tm.load_broker_orders_pending()
+        self.assertIn(trade_id, pending)
+        order = pending[trade_id]
+        self.assertEqual(order["risk_pct"], 0.75)
+        self.assertNotIn("lot_size", order)
+
+    def test_disabled_bridge_enqueues_nothing(self):
+        tm.EA_BRIDGE_ENABLED = False
+        tm.open_trade(_base_trade_data())
+        self.assertEqual(tm.load_broker_orders_pending(), {})
+
+
 class TestCalculateTradePips(unittest.TestCase):
     def test_buy_direction(self):
         self.assertAlmostEqual(tm.calculate_trade_pips("BUY", 4300.00, 4310.00), 100.0, places=1)
