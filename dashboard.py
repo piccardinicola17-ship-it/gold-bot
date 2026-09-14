@@ -23,7 +23,10 @@ from flask import Flask, abort, g, jsonify, redirect, render_template_string, re
 # foreign_keys=ON che trade_manager applica — es. /api/reset cancellava
 # righe passando per una connessione che non forzava i vincoli FK che
 # trade_manager applica scrivendo le stesse tabelle.
-from trade_manager import is_decisive_win, amend_closed_trade, RESULT_PNL, DB_PATH, _connect
+from trade_manager import (
+    is_decisive_win, amend_closed_trade, RESULT_PNL, DB_PATH, _connect,
+    load_broker_orders_pending, ack_broker_order,
+)
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -214,6 +217,33 @@ def api_data():
             "updated": datetime.now(TIMEZONE).strftime("%H:%M:%S"),
         }
     )
+
+
+@app.route("/api/ea/pending")
+def api_ea_pending():
+    """Ordini in attesa di essere copiati sul conto demo MT5 reale —
+    interrogato dall'Expert Advisor (mql5/GoldMindCopier.mq5) ogni pochi
+    secondi. Stessa coda che trade_manager.open_trade() riempie, nessun
+    secondo calcolo qui: la dashboard si limita a esporla via HTTP.
+
+    Array JSON (non un oggetto chiave/valore): MQL5 non ha un parser JSON
+    nativo, un array di oggetti piatti è molto più semplice da spezzare a
+    mano lato Expert Advisor di un dizionario con chiavi dinamiche (i
+    trade_id, degli UUID)."""
+    return jsonify(list(load_broker_orders_pending().values()))
+
+
+@app.route("/api/ea/ack", methods=["POST"])
+def api_ea_ack():
+    """L'EA chiama questo endpoint subito dopo aver aperto (o tentato di
+    aprire) l'ordine sul broker, cosi da non riceverlo di nuovo al prossimo
+    polling."""
+    payload = request.get_json(silent=True) or {}
+    trade_id = str(payload.get("trade_id", "")).strip()
+    if not trade_id:
+        return jsonify({"error": "trade_id mancante"}), 400
+    ack_broker_order(trade_id)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/correct-trade", methods=["POST"])

@@ -38,6 +38,14 @@ ACTIVE_FILE = str(BOT_DIR / "active_trades.json")
 TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "")
 AUTHORIZED_ID = os.environ.get("CHAT_ID", "").strip()
 
+# Copia dei segnali sul conto demo MT5 reale (vedi dashboard.py /api/ea/* e
+# l'Expert Advisor in mql5/GoldMindCopier.mq5) — spenta di default: finché
+# non è "true" open_trade() continua a fare solo paper trading come sempre,
+# senza accodare nulla. Va accesa esplicitamente (env Railway) quando l'EA
+# è installato e pronto a consumare la coda.
+EA_BRIDGE_ENABLED = os.environ.get("EA_BRIDGE_ENABLED", "false").strip().lower() == "true"
+EA_BRIDGE_ORDER_TTL_HOURS = 12
+
 TF_LABEL = {"5min": "M5", "15min": "M15", "1h": "H1", "4h": "H4", "1day": "D1"}
 PENDING_TTL_MINUTES = {
     "5min": 30,
@@ -779,6 +787,8 @@ def open_trade(data: dict) -> str:
         activate_trade(trade_id)
     else:
         _sync_active_snapshot()
+
+    enqueue_broker_order(trade_id, data)
 
     logger.info("Trade registrato: %s", trade_id)
     return trade_id
@@ -1587,6 +1597,51 @@ def _save_state_json(key: str, value) -> None:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, json.dumps(value)),
         )
+
+
+def enqueue_broker_order(trade_id: str, data: dict) -> None:
+    """
+    Accoda l'ordine perché l'Expert Advisor MT5 (mql5/GoldMindCopier.mq5,
+    installato sul conto demo reale) lo legga e lo apra sul broker — vedi
+    dashboard.py /api/ea/pending. GoldMind continua a fare la propria
+    simulazione paper esattamente come prima: questa coda è un effetto
+    collaterale in più, non sostituisce né condiziona nulla della logica
+    di trading esistente. No-op se EA_BRIDGE_ENABLED non è attivo.
+    """
+    if not EA_BRIDGE_ENABLED:
+        return
+    pending = _load_state_json("broker_orders_pending")
+    cutoff = (datetime.now(TIMEZONE) - timedelta(hours=EA_BRIDGE_ORDER_TTL_HOURS)).isoformat()
+    pending = {
+        tid: order for tid, order in pending.items()
+        if order.get("created_at", "") >= cutoff
+    }
+    pending[trade_id] = {
+        "trade_id":   trade_id,
+        "signal":     data.get("signal"),
+        "order_type": data.get("order_type", data.get("signal")),
+        "entry":      float(data.get("entry", 0)),
+        "sl":         float(data.get("sl", 0)),
+        "tp1":        float(data.get("tp1", 0)),
+        "tp2":        float(data.get("tp2", 0)),
+        "tp3":        float(data.get("tp3", 0)),
+        "timeframe":  data.get("timeframe"),
+        "created_at": datetime.now(TIMEZONE).isoformat(),
+    }
+    _save_state_json("broker_orders_pending", pending)
+
+
+def load_broker_orders_pending() -> dict:
+    return _load_state_json("broker_orders_pending")
+
+
+def ack_broker_order(trade_id: str) -> None:
+    """Rimuove l'ordine dalla coda — l'EA lo chiama dopo averlo aperto sul
+    broker (con successo o con un errore che non ha senso ritentare)."""
+    pending = _load_state_json("broker_orders_pending")
+    if trade_id in pending:
+        pending.pop(trade_id, None)
+        _save_state_json("broker_orders_pending", pending)
 
 
 def load_fred_last_seen() -> dict:
