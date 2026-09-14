@@ -54,6 +54,7 @@ import io
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -139,7 +140,22 @@ def _load_model(event_name: str) -> dict | None:
     return models.get(event_name)
 
 
+_FRED_SERIES_CACHE: dict[str, tuple[float, pd.Series]] = {}
+# TTL più corto del ciclo dello scheduler (5 min, vedi check_macro_alerts in
+# gold_bot.py): serve solo a deduplicare più chiamate per la STESSA serie
+# nello stesso giro (es. più eventi pending che condividono una serie FRED),
+# non a ritardare la rilevazione di un nuovo dato tra un giro e l'altro —
+# a quel punto la cache è già scaduta comunque, stesso comportamento di
+# prima. Senza questo, un evento macro monitorato per fino a 3 ore
+# (-180<=mins_away<=0) ri-scaricava l'intera serie storica ogni 5 minuti,
+# 35 volte su 36 solo per scoprire "nessun dato nuovo".
+_FRED_CACHE_TTL_SECONDS = 240
+
+
 def _fetch_fred_series(series_id: str) -> pd.Series:
+    cached = _FRED_SERIES_CACHE.get(series_id)
+    if cached and (time.time() - cached[0]) < _FRED_CACHE_TTL_SECONDS:
+        return cached[1]
     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()
@@ -147,7 +163,9 @@ def _fetch_fred_series(series_id: str) -> pd.Series:
     df.columns = ["date", "value"]
     df["date"] = pd.to_datetime(df["date"])
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    return df.dropna().set_index("date")["value"].sort_index()
+    series = df.dropna().set_index("date")["value"].sort_index()
+    _FRED_SERIES_CACHE[series_id] = (time.time(), series)
+    return series
 
 
 def _new_release_mom_pct(series_id: str, last_seen: dict) -> tuple[str, float] | None:

@@ -5,16 +5,15 @@ FIX: escape Markdown nelle headlines per evitare "Can't parse entities"
 
 import os
 import logging
-import requests
 from datetime import datetime
 import pytz
+
+import groq_client
 
 logger   = logging.getLogger(__name__)
 TIMEZONE = pytz.timezone("Europe/Rome")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL   = "groq/compound-mini"
 
 MACRO_DB = {
     "NFP": {"nome":"Non-Farm Payrolls","impatto":"MOLTO ALTO","logica":"NFP forte → dollaro su → oro giù. NFP debole → oro su.","soglia":"Sorpresa > ±50k","ora_tipica":"15:30 IT"},
@@ -42,14 +41,11 @@ def _call_groq(system: str, user: str, max_tokens: int = 500) -> str:
     if not GROQ_API_KEY:
         return "GROQ_API_KEY non configurata."
     try:
-        response = requests.post(
-            GROQ_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": GROQ_MODEL, "messages": [{"role":"system","content":system},{"role":"user","content":user}], "temperature":0.3, "max_tokens":max_tokens},
-            timeout=25,
+        return groq_client.chat(
+            GROQ_API_KEY,
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            max_tokens=max_tokens, temperature=0.3, timeout=25,
         )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.error(f"Errore Groq: {e}")
         return f"Analisi AI non disponibile: {e}"

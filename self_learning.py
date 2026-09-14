@@ -12,8 +12,8 @@ import tempfile
 from datetime import datetime, timedelta
 from typing import Optional
 import pytz
-import requests
 
+import groq_client
 from trade_manager import DB_PATH, BOT_DIR, is_decisive_win
 
 logger   = logging.getLogger(__name__)
@@ -27,8 +27,6 @@ TIMEZONE = pytz.timezone("Europe/Rome")
 LEARNED_WEIGHTS = os.path.join(str(BOT_DIR), "learned_weights.json")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL   = "groq/compound-mini"
 
 MIN_TRADES_FOR_LEARNING = 10
 MIN_TRADES_PER_STRATEGY = 3
@@ -114,14 +112,11 @@ def _call_groq(system: str, user: str, max_tokens: int = 500) -> str:
     if not GROQ_API_KEY:
         return "{}"
     try:
-        response = requests.post(
-            GROQ_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": GROQ_MODEL, "messages": [{"role":"system","content":system},{"role":"user","content":user}], "temperature":0.2, "max_tokens":max_tokens},
-            timeout=25,
+        return groq_client.chat(
+            GROQ_API_KEY,
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            max_tokens=max_tokens, temperature=0.2, timeout=25,
         )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.error(f"Errore Groq: {e}")
         return "{}"

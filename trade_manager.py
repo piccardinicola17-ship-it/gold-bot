@@ -1359,19 +1359,24 @@ def _fetch_price_with_scale_sync() -> tuple:
     if now - _price_cache["ts"] < _PRICE_CACHE_TTL and _price_cache["price"] > 0:
         return float(_price_cache["price"]), bool(_price_cache["futures"])
 
+    # Ogni fonte dichiara la propria scala esplicitamente (terzo elemento),
+    # invece di essere dedotta altrove confrontando il nome per stringa —
+    # quel confronto causò in produzione un mismatch di scala da $40 quando
+    # una fonte spot venne anteposta a Yahoo senza aggiornare il check.
+    # Aggiungere una fonte futures in futuro (es. un secondo feed COMEX)
+    # richiede solo scrivere True qui, non toccare un controllo altrove.
     sources = [
-        ("Yahoo Finance", _fetch_price_yahoo),
-        ("gold-api.com",  _fetch_price_goldapi),
+        ("Yahoo Finance", _fetch_price_yahoo, True),
+        ("gold-api.com",  _fetch_price_goldapi, False),
     ]
     if analyzer._twelvedata_available():
-        sources.append(("Twelve Data", _fetch_price_twelvedata))
-    sources.append(("metals.live", _fetch_price_metals_api))
+        sources.append(("Twelve Data", _fetch_price_twelvedata, False))
+    sources.append(("metals.live", _fetch_price_metals_api, False))
 
-    for name, fetch_fn in sources:
+    for name, fetch_fn, is_futures in sources:
         try:
             price = fetch_fn()
             if price > 0:
-                is_futures = (name == "Yahoo Finance")
                 _price_cache.update(price=price, ts=now, futures=is_futures)
                 logger.debug(f"Prezzo da {name}: ${price}")
                 return price, is_futures
@@ -1509,12 +1514,7 @@ def load_breaking_news_seen() -> tuple[dict, bool]:
 
 
 def save_breaking_news_seen(seen_ids) -> None:
-    with _write_lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO bot_state(key, value) VALUES('breaking_news_seen', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (json.dumps(list(seen_ids)),),
-        )
+    _save_state_json("breaking_news_seen", list(seen_ids))
 
 
 def load_macro_alert_state() -> dict:
@@ -1564,6 +1564,31 @@ def save_macro_alert_state(sent_event_alerts, sent_post_event_alerts,
         )
 
 
+def _load_state_json(key: str) -> dict:
+    """Legge un blob JSON dalla stessa tabella bot_state(key, value) usata
+    per tutto lo stato persistito non-trade (dedup, cooldown, ultimo dato
+    macro visto, ecc.) — prima ogni tipo di stato aveva la propria coppia
+    load/save identica (stesso SQL, solo la chiave cambiava), ripetuta ad
+    ogni nuova aggiunta invece di essere parametrizzata una volta sola."""
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM bot_state WHERE key=?", (key,)
+            ).fetchone()
+        return json.loads(row["value"]) if row else {}
+    except Exception:
+        return {}
+
+
+def _save_state_json(key: str, value) -> None:
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO bot_state(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, json.dumps(value)),
+        )
+
+
 def load_fred_last_seen() -> dict:
     """
     Ultima data (per serie FRED, es. 'CPILFESL') già processata dal
@@ -1572,23 +1597,11 @@ def load_fred_last_seen() -> dict:
     FRED in attesa che pubblichi il nuovo dato. Persistito qui, sopravvive
     ai riavvii, stesso pattern di load_macro_alert_state.
     """
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM bot_state WHERE key='fred_last_seen'"
-            ).fetchone()
-        return json.loads(row["value"]) if row else {}
-    except Exception:
-        return {}
+    return _load_state_json("fred_last_seen")
 
 
 def save_fred_last_seen(state: dict) -> None:
-    with _write_lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO bot_state(key, value) VALUES('fred_last_seen', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (json.dumps(state),),
-        )
+    _save_state_json("fred_last_seen", state)
 
 
 def load_rss_macro_last_seen() -> dict:
@@ -1599,23 +1612,11 @@ def load_rss_macro_last_seen() -> dict:
     dell'ultimo comunicato stampa già processato}, per non ri-notificare
     lo stesso rilascio ogni volta che si ricontrolla il feed RSS.
     """
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM bot_state WHERE key='rss_macro_last_seen'"
-            ).fetchone()
-        return json.loads(row["value"]) if row else {}
-    except Exception:
-        return {}
+    return _load_state_json("rss_macro_last_seen")
 
 
 def save_rss_macro_last_seen(state: dict) -> None:
-    with _write_lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO bot_state(key, value) VALUES('rss_macro_last_seen', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (json.dumps(state),),
-        )
+    _save_state_json("rss_macro_last_seen", state)
 
 
 # Cooldown su un timeframe dopo un pending CANCELLED, prima di poter
@@ -1647,46 +1648,22 @@ CANCELLED_SIGNAL_STREAK_RESET_HOURS = 4
 
 
 def load_last_cancelled_by_tf() -> dict:
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM bot_state WHERE key='last_cancelled_by_tf'"
-            ).fetchone()
-        return json.loads(row["value"]) if row else {}
-    except Exception:
-        return {}
+    return _load_state_json("last_cancelled_by_tf")
 
 
 def save_last_cancelled_by_tf(state: dict) -> None:
-    with _write_lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO bot_state(key, value) VALUES('last_cancelled_by_tf', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (json.dumps(state),),
-        )
+    _save_state_json("last_cancelled_by_tf", state)
 
 
 def load_cancelled_streak_by_tf() -> dict:
     """{timeframe: {"count": N, "at": iso}} - N cancellazioni consecutive
     sullo stesso timeframe, senza un'attivazione riuscita o una pausa
     lunga nel mezzo (vedi mark_cancelled_on_timeframe)."""
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM bot_state WHERE key='cancelled_streak_by_tf'"
-            ).fetchone()
-        return json.loads(row["value"]) if row else {}
-    except Exception:
-        return {}
+    return _load_state_json("cancelled_streak_by_tf")
 
 
 def save_cancelled_streak_by_tf(state: dict) -> None:
-    with _write_lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO bot_state(key, value) VALUES('cancelled_streak_by_tf', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (json.dumps(state),),
-        )
+    _save_state_json("cancelled_streak_by_tf", state)
 
 
 def mark_cancelled_on_timeframe(timeframe: str) -> None:
@@ -1811,23 +1788,11 @@ def load_breaking_news_pending() -> dict:
     per sopravvivere a un riavvio/deploy a metà finestra. Chiave: item_id
     del breaking alert (vedi breaking_news._item_id).
     """
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM bot_state WHERE key='breaking_news_pending'"
-            ).fetchone()
-        return json.loads(row["value"]) if row else {}
-    except Exception:
-        return {}
+    return _load_state_json("breaking_news_pending")
 
 
 def save_breaking_news_pending(pending: dict) -> None:
-    with _write_lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO bot_state(key, value) VALUES('breaking_news_pending', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (json.dumps(pending),),
-        )
+    _save_state_json("breaking_news_pending", pending)
 
 
 def check_order_activation(trade: dict, price: float) -> bool:

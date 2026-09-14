@@ -12,20 +12,23 @@ import logging
 import os
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 
 import pytz
 from flask import Flask, abort, g, jsonify, redirect, render_template_string, request
 
-from trade_manager import is_decisive_win, amend_closed_trade, RESULT_PNL
+# DB_PATH e _connect() importati da trade_manager (unica fonte di verità):
+# prima dashboard.py ricalcolava DB_PATH per conto proprio (stesso schema,
+# ma duplicato) e apriva le connessioni con la propria _connect(), con
+# timeout più basso (10s vs 15s) e senza i pragma synchronous=NORMAL e
+# foreign_keys=ON che trade_manager applica — es. /api/reset cancellava
+# righe passando per una connessione che non forzava i vincoli FK che
+# trade_manager applica scrivendo le stesse tabelle.
+from trade_manager import is_decisive_win, amend_closed_trade, RESULT_PNL, DB_PATH, _connect
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
 TIMEZONE = pytz.timezone("Europe/Rome")
 
-PROJECT_DIR = Path(__file__).resolve().parent
-BOT_DIR = Path(os.environ.get("BOT_DIR", PROJECT_DIR / "data")).expanduser().resolve()
-DB_PATH = os.environ.get("DB_PATH", str(BOT_DIR / "goldbot.db"))
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
 ALLOW_RESET = os.environ.get("ALLOW_DASHBOARD_RESET", "false").lower() == "true"
 XAUUSD_PIP_SIZE = float(os.environ.get("XAUUSD_PIP_SIZE", "0.10"))
@@ -39,15 +42,22 @@ def _is_loopback() -> bool:
 def protect_dashboard():
     if request.path == "/health":
         return None
-    # /api/reset cancella tutti i trade e /api/correct-trade altera un
-    # risultato/pnl_r già registrato: richiedono sempre il token, anche da
-    # loopback. L'esenzione loopback esiste per comodità di lettura locale,
-    # non deve coprire un endpoint che scrive/distrugge dati — altrimenti
+    # Le richieste che scrivono/distruggono dati (oggi /api/reset e
+    # /api/correct-trade, entrambe POST) richiedono sempre il token, anche
+    # da loopback. L'esenzione loopback esiste per comodità di lettura
+    # locale, non deve coprire un endpoint che muta lo stato — altrimenti
     # qualunque processo nello stesso container (non solo l'utente)
     # potrebbe azzerare il DB o falsificare un trade senza presentare
     # alcuna credenziale. Bug reale trovato 2026-09-03 (per /api/reset).
-    _WRITE_ENDPOINTS = ("/api/reset", "/api/correct-trade")
-    if request.path not in _WRITE_ENDPOINTS and _is_loopback():
+    #
+    # FIX: prima l'elenco era un allowlist di path scritta a mano
+    # (_WRITE_ENDPOINTS) — un futuro endpoint di scrittura sarebbe rimasto
+    # coperto dall'esenzione loopback finché qualcuno non si fosse ricordato
+    # di aggiungerlo alla lista. Classificare per metodo HTTP (GET/HEAD non
+    # mutano, tutto il resto sì) rende sicuro ogni nuovo endpoint per
+    # costruzione, senza bisogno di ricordarselo.
+    is_write = request.method not in ("GET", "HEAD", "OPTIONS")
+    if not is_write and _is_loopback():
         return None
     if not DASHBOARD_TOKEN:
         abort(503, "Configura DASHBOARD_TOKEN nelle variabili Railway")
@@ -83,14 +93,6 @@ def persist_dashboard_login(response):
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "database": os.path.exists(DB_PATH)})
-
-
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=10000")
-    return conn
 
 
 def _trade_pips(trade: dict) -> float:

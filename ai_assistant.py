@@ -6,17 +6,16 @@ Usa Groq per rispondere a domande libere sul mercato con contesto live.
 import os
 import re
 import logging
-import requests
 import asyncio
 from datetime import datetime, timedelta
 import pytz
+
+import groq_client
 
 logger   = logging.getLogger(__name__)
 TIMEZONE = pytz.timezone("Europe/Rome")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL   = "groq/compound-mini"
 
 # Rileva se la domanda contiene un prezzo (qualunque numero a 3-5 cifre,
 # es. "4394", "4460"). FIX: la prima versione cercava solo frasi verbali
@@ -305,27 +304,19 @@ async def ask_ai(question: str) -> str:
     })
 
     def _request():
-        response = requests.post(
-            GROQ_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": GROQ_MODEL,
-                "messages": messages,
-                "temperature": 0.4,
-                # Ridotto da 500: la regola "massimo 4-5 righe" nel prompt
-                # non bastava da sola a tenere le risposte brevi — un limite
-                # più stretto fa da argine anche quando il modello non la
-                # rispetta.
-                "max_tokens":  250,
-            },
+        return groq_client.chat(
+            GROQ_API_KEY, messages,
+            temperature=0.4,
+            # Ridotto da 500: la regola "massimo 4-5 righe" nel prompt
+            # non bastava da sola a tenere le risposte brevi — un limite
+            # più stretto fa da argine anche quando il modello non la
+            # rispetta.
+            max_tokens=250,
             timeout=20,
         )
-        response.raise_for_status()
-        return response.json()
 
     try:
-        data   = await asyncio.to_thread(_request)
-        answer = data["choices"][0]["message"]["content"].strip()
+        answer = await asyncio.to_thread(_request)
         _record_conversation_turn(question, answer)
         return answer
     except Exception as e:

@@ -22,6 +22,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import ai_assistant as aiasst
+import groq_client
 
 
 def _fake_full_analyze(**kwargs):
@@ -253,20 +254,20 @@ class TestConversationMemory(unittest.TestCase):
         self.assertIn("nuova", questions)
 
     def test_ask_ai_includes_history_as_alternating_messages(self):
+        """ai_assistant.ask_ai() ora delega la chiamata HTTP a
+        groq_client.chat() (meccanica condivisa con news_analyst.py e
+        self_learning.py) — si mocka quello, non più requests.post
+        direttamente su ai_assistant."""
         aiasst._record_conversation_turn("domanda precedente", "risposta precedente")
         captured = {}
 
-        def fake_post(url, headers=None, json=None, timeout=None):
-            captured["messages"] = json["messages"]
-            resp = mock.Mock()
-            resp.raise_for_status = lambda: None
-            resp.json = lambda: {"choices": [{"message": {"content": "nuova risposta"}}]}
-            return resp
+        def fake_chat(api_key, messages, **kwargs):
+            captured["messages"] = messages
+            return "nuova risposta"
 
         with mock.patch.object(aiasst, "GROQ_API_KEY", "fake-key"), \
-             mock.patch.object(aiasst, "requests") as mock_requests, \
+             mock.patch.object(groq_client, "chat", fake_chat), \
              mock.patch.object(aiasst, "build_context_snapshot", return_value="(contesto finto)"):
-            mock_requests.post = fake_post
             import asyncio
             asyncio.run(aiasst.ask_ai("nuova domanda"))
 
@@ -278,16 +279,12 @@ class TestConversationMemory(unittest.TestCase):
         self.assertIn("nuova domanda", messages[3]["content"])
 
     def test_ask_ai_records_the_new_turn_after_success(self):
-        def fake_post(url, headers=None, json=None, timeout=None):
-            resp = mock.Mock()
-            resp.raise_for_status = lambda: None
-            resp.json = lambda: {"choices": [{"message": {"content": "risposta generata"}}]}
-            return resp
+        def fake_chat(api_key, messages, **kwargs):
+            return "risposta generata"
 
         with mock.patch.object(aiasst, "GROQ_API_KEY", "fake-key"), \
-             mock.patch.object(aiasst, "requests") as mock_requests, \
+             mock.patch.object(groq_client, "chat", fake_chat), \
              mock.patch.object(aiasst, "build_context_snapshot", return_value="(contesto finto)"):
-            mock_requests.post = fake_post
             import asyncio
             asyncio.run(aiasst.ask_ai("una domanda"))
 
