@@ -417,6 +417,20 @@ main {
 .negative { color: var(--red) !important; }
 .protected { color: var(--amber) !important; }
 
+.equity-wrap {
+  position: relative;
+  height: 220px;
+  margin-bottom: 28px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.equity-wrap svg { width: 100%; height: 100%; display: block; }
+.equity-wrap .empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+
 .section-head {
   display: flex;
   align-items: flex-end;
@@ -628,6 +642,21 @@ main {
 
   <div class="section-head">
     <div>
+      <h2>Equity curve</h2>
+      <p>R cumulato sui trade chiusi, in ordine cronologico</p>
+    </div>
+    <div class="legend">
+      <span>Picco <strong id="equity-peak">0R</strong></span>
+      <span>Drawdown attuale <strong id="equity-dd">0R</strong></span>
+    </div>
+  </div>
+  <section class="equity-wrap" aria-label="Equity curve">
+    <svg id="equity-svg" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg>
+    <div id="equity-empty" class="empty" style="display:none;">Ancora nessun trade chiuso.</div>
+  </section>
+
+  <div class="section-head">
+    <div>
       <h2>Trade registrati</h2>
       <p>Un blocco per ogni segnale · aggiornamento automatico</p>
     </div>
@@ -803,6 +832,61 @@ function tradeCard(trade) {
     </article>`;
 }
 
+const EQUITY_SVG_W = 1000;
+const EQUITY_SVG_H = 220;
+const EQUITY_PAD = 14;
+
+function renderEquityCurve(trades) {
+  // Solo chiusi con un pnl_r reale, in ordine cronologico (l'API li da'
+  // piu' recenti-prima) — CANCELLED escluso, stesso criterio di
+  // compute_stats() lato server (mai un doppio calcolo divergente).
+  const closed = trades
+    .filter((t) => t.status === "CLOSED" && t.result && t.result !== "CANCELLED")
+    .slice()
+    .reverse();
+
+  const svg = $("equity-svg");
+  const empty = $("equity-empty");
+  if (!closed.length) {
+    svg.innerHTML = "";
+    empty.style.display = "flex";
+    $("equity-peak").textContent = "0R";
+    $("equity-dd").textContent = "0R";
+    return;
+  }
+  empty.style.display = "none";
+
+  let equity = 0, peak = 0, maxDd = 0;
+  const points = [{ x: 0, y: 0 }];
+  closed.forEach((t, i) => {
+    equity += Number(t.pnl_r || 0);
+    peak = Math.max(peak, equity);
+    maxDd = Math.max(maxDd, peak - equity);
+    points.push({ x: i + 1, y: equity });
+  });
+
+  const minY = Math.min(0, ...points.map((p) => p.y));
+  const maxY = Math.max(0, ...points.map((p) => p.y));
+  const spanY = maxY - minY || 1;
+  const toX = (i) => EQUITY_PAD + (i / (points.length - 1)) * (EQUITY_SVG_W - 2 * EQUITY_PAD);
+  const toY = (y) => EQUITY_SVG_H - EQUITY_PAD - ((y - minY) / spanY) * (EQUITY_SVG_H - 2 * EQUITY_PAD);
+
+  const zeroY = toY(0).toFixed(1);
+  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(p.y).toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L${toX(points.length - 1).toFixed(1)},${zeroY} L${toX(0).toFixed(1)},${zeroY} Z`;
+  const lineColor = equity >= 0 ? "var(--green)" : "var(--red)";
+
+  svg.innerHTML = `
+    <line x1="${EQUITY_PAD}" y1="${zeroY}" x2="${EQUITY_SVG_W - EQUITY_PAD}" y2="${zeroY}"
+          stroke="var(--border)" stroke-width="1" />
+    <path d="${areaPath}" fill="${lineColor}" opacity="0.12" stroke="none" />
+    <path d="${linePath}" fill="none" stroke="${lineColor}" stroke-width="2" />
+  `;
+
+  $("equity-peak").textContent = signed(peak, "R");
+  $("equity-dd").textContent = `-${num(maxDd, 2)}R`;
+}
+
 function render(data) {
   const stats = data.stats || {};
   const session = data.session || {};
@@ -831,6 +915,7 @@ function render(data) {
   $("session-pnl").textContent = signed(session.pnl_r || 0, "R");
 
   const trades = data.trades || [];
+  renderEquityCurve(trades);
   $("trade-list").innerHTML = trades.length
     ? trades.map(tradeCard).join("")
     : '<div class="empty">Nessun trade registrato nel database.</div>';
