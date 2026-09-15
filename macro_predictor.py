@@ -152,6 +152,24 @@ def _load_model(event_name: str) -> dict | None:
     return models.get(event_name)
 
 
+COT_MODEL_PATH = Path(__file__).resolve().parent / "cot_models.json"
+
+
+def _load_cot_model(event_name: str) -> dict | None:
+    """Modello condizionato-COT (vedi historical_cot_feature.py), solo per
+    i pochi eventi dove il condizionamento è risultato genuino SULL'ORIZZONTE
+    già deployato (historical_cot_feature.COT_CONDITIONED_EVENTS) — None per
+    tutti gli altri, nessun fallback silenzioso a un modello non validato."""
+    if not COT_MODEL_PATH.exists():
+        return None
+    try:
+        models = json.loads(COT_MODEL_PATH.read_text())
+    except Exception as e:
+        logger.warning(f"cot_models.json illeggibile: {e}")
+        return None
+    return models.get(event_name)
+
+
 _FRED_SERIES_CACHE: dict[str, tuple[float, pd.Series]] = {}
 # TTL più corto del ciclo dello scheduler (5 min, vedi check_macro_alerts in
 # gold_bot.py): serve solo a deduplicare più chiamate per la STESSA serie
@@ -472,6 +490,23 @@ def predict_reaction(event_name: str, forecast_raw: str) -> dict | None:
     z = max(-model["surprise_zscore_clip"], min(model["surprise_zscore_clip"], z))
     predicted = model["slope"] * z + model["intercept"]
 
+    # Condizionamento COT (2026-09-15, vedi historical_cot_feature.py): solo
+    # per i pochi eventi dove è risultato genuino SU QUESTO stesso orizzonte
+    # — se il modello COT manca, current_cot_zscore() non è disponibile, o
+    # l'orizzonte non coincide, resta la previsione piatta calcolata sopra
+    # (mai un crash, mai un condizionamento su un orizzonte non validato).
+    cot_conditioning = None
+    cot_model = _load_cot_model(event_name)
+    if cot_model and cot_model.get("horizon") == model["horizon"]:
+        from historical_cot_feature import current_cot_zscore
+        cot_z = current_cot_zscore()
+        if cot_z is not None:
+            crowded = abs(cot_z) >= cot_model["cot_zscore_threshold"]
+            slope = cot_model["slope_crowded"] if crowded else cot_model["slope_calm"]
+            intercept = cot_model["intercept_crowded"] if crowded else cot_model["intercept_calm"]
+            predicted = slope * z + intercept
+            cot_conditioning = {"regime": "crowded" if crowded else "calm", "cot_zscore": round(cot_z, 2)}
+
     return {
         "event_name": event_name,
         "value_type": value_type,
@@ -483,6 +518,7 @@ def predict_reaction(event_name: str, forecast_raw: str) -> dict | None:
         "predicted_reaction_usd": round(float(predicted), 2),
         "horizon": model["horizon"],
         "n_historical": model["n"],
+        "cot_conditioning": cot_conditioning,
     }
 
 
@@ -559,13 +595,22 @@ def format_prediction(pred: dict) -> str:
             "riflette soprattutto il rumore di fondo del modello, non un segnale legato a questo dato._"
         )
 
+    cot_note = ""
+    cot = pred.get("cot_conditioning")
+    if cot:
+        regime_label = "molto affollato" if cot["regime"] == "crowded" else "nella norma"
+        cot_note = (
+            f"\n📊 _Posizionamento speculativo COT {regime_label} (z={cot['cot_zscore']:+.1f}) — "
+            "reazione attesa già corretta per questo._"
+        )
+
     return (
         f"📐 *Previsione statistica — {_escape_md(pred.get('event_name', 'evento'))}* "
         f"(n={pred['n_historical']} storici, {horizon_label})\n"
         f"Actual {actual_fmt} vs Forecast {forecast_fmt} "
         f"(sorpresa z={pred['surprise_zscore']:+.1f})\n"
         f"Reazione attesa: *{pred['predicted_reaction_usd']:+.2f}$* — {direction}"
-        f"{warning}\n"
+        f"{warning}{cot_note}\n"
         f"_Stima statistica su dati storici, non una garanzia — margine d'errore reale, vedi Fase 4._\n"
         f"{note_source}"
     )

@@ -356,7 +356,13 @@ class TestPredictReactionRssSeries(unittest.TestCase):
 
     def test_end_to_end_via_rss_source(self):
         items = [_rss_item("Manufacturing PMI® at 54.6%; August 2026 ISM® Manufacturing PMI® Report")]
+        # _load_cot_model esplicitamente a None: senza questo mock il test
+        # dipenderebbe silenziosamente da un vero cot_models.json/
+        # cot_gold.json presenti su disco (esistono in questa sessione
+        # dopo historical_cot_feature.regenerate_cot_models()) — stato
+        # reale non isolato, comportamento diverso in un ambiente pulito.
         with mock.patch("macro_predictor._load_model", return_value=self.model), \
+             mock.patch("macro_predictor._load_cot_model", return_value=None), \
              mock.patch("macro_predictor._fetch_rss", return_value=items), \
              mock.patch("macro_predictor.load_rss_macro_last_seen", return_value={}), \
              mock.patch("macro_predictor.save_rss_macro_last_seen"):
@@ -366,6 +372,108 @@ class TestPredictReactionRssSeries(unittest.TestCase):
         self.assertEqual(pred["source_tier"], "rss")
         self.assertEqual(pred["actual_value"], 54.6)
         self.assertAlmostEqual(pred["surprise_raw"], -0.6, places=1)
+
+
+class TestPredictReactionCotConditioning(unittest.TestCase):
+    """Condizionamento COT (2026-09-15, historical_cot_feature.py) — solo
+    per gli eventi in COT_CONDITIONED_EVENTS, solo quando l'orizzonte del
+    modello COT coincide con quello del modello piatto, mai un crash se i
+    dati COT non sono disponibili."""
+
+    def setUp(self):
+        self.model = {
+            "event_name": "ISM Manufacturing PMI", "horizon": "reaction_30m",
+            "slope": -1.59, "intercept": -0.05,
+            "surprise_mean": 0.15, "surprise_std": 1.71,
+            "surprise_zscore_clip": 4.0, "n": 196,
+        }
+        self.cot_model = {
+            "event_name": "ISM Manufacturing PMI", "horizon": "reaction_30m",
+            "cot_zscore_threshold": 0.95,
+            "slope_crowded": -1.06, "intercept_crowded": 0.14,
+            "slope_calm": -2.24, "intercept_calm": -0.37,
+        }
+        self.release = ("2026-08-01T14:00:00", 54.6, "rss")
+
+    def _expected_z(self):
+        surprise_raw = 54.6 - 55.2
+        z = (surprise_raw - self.model["surprise_mean"]) / self.model["surprise_std"]
+        return max(-self.model["surprise_zscore_clip"], min(self.model["surprise_zscore_clip"], z))
+
+    def test_uses_crowded_slope_when_cot_zscore_above_threshold(self):
+        with mock.patch("macro_predictor._load_model", return_value=self.model), \
+             mock.patch("macro_predictor._load_cot_model", return_value=self.cot_model), \
+             mock.patch("macro_predictor._fetch_new_actual", return_value=self.release), \
+             mock.patch("historical_cot_feature.current_cot_zscore", return_value=1.5):
+            pred = mp.predict_reaction("ISM Manufacturing PMI", "55.2")
+        self.assertEqual(pred["cot_conditioning"], {"regime": "crowded", "cot_zscore": 1.5})
+        expected = self.cot_model["slope_crowded"] * self._expected_z() + self.cot_model["intercept_crowded"]
+        self.assertAlmostEqual(pred["predicted_reaction_usd"], round(expected, 2), places=2)
+
+    def test_uses_calm_slope_when_cot_zscore_below_threshold(self):
+        with mock.patch("macro_predictor._load_model", return_value=self.model), \
+             mock.patch("macro_predictor._load_cot_model", return_value=self.cot_model), \
+             mock.patch("macro_predictor._fetch_new_actual", return_value=self.release), \
+             mock.patch("historical_cot_feature.current_cot_zscore", return_value=0.2):
+            pred = mp.predict_reaction("ISM Manufacturing PMI", "55.2")
+        self.assertEqual(pred["cot_conditioning"]["regime"], "calm")
+        expected = self.cot_model["slope_calm"] * self._expected_z() + self.cot_model["intercept_calm"]
+        self.assertAlmostEqual(pred["predicted_reaction_usd"], round(expected, 2), places=2)
+
+    def test_falls_back_to_flat_model_when_cot_zscore_unavailable(self):
+        with mock.patch("macro_predictor._load_model", return_value=self.model), \
+             mock.patch("macro_predictor._load_cot_model", return_value=self.cot_model), \
+             mock.patch("macro_predictor._fetch_new_actual", return_value=self.release), \
+             mock.patch("historical_cot_feature.current_cot_zscore", return_value=None):
+            pred = mp.predict_reaction("ISM Manufacturing PMI", "55.2")
+        self.assertIsNone(pred["cot_conditioning"])
+        expected = self.model["slope"] * self._expected_z() + self.model["intercept"]
+        self.assertAlmostEqual(pred["predicted_reaction_usd"], round(expected, 2), places=2)
+
+    def test_ignores_cot_model_with_mismatched_horizon(self):
+        mismatched = dict(self.cot_model, horizon="reaction_1m")
+        with mock.patch("macro_predictor._load_model", return_value=self.model), \
+             mock.patch("macro_predictor._load_cot_model", return_value=mismatched), \
+             mock.patch("macro_predictor._fetch_new_actual", return_value=self.release), \
+             mock.patch("historical_cot_feature.current_cot_zscore", return_value=1.5):
+            pred = mp.predict_reaction("ISM Manufacturing PMI", "55.2")
+        self.assertIsNone(pred["cot_conditioning"])
+
+    def test_no_cot_model_leaves_prediction_unaffected(self):
+        with mock.patch("macro_predictor._load_model", return_value=self.model), \
+             mock.patch("macro_predictor._load_cot_model", return_value=None), \
+             mock.patch("macro_predictor._fetch_new_actual", return_value=self.release):
+            pred = mp.predict_reaction("ISM Manufacturing PMI", "55.2")
+        self.assertIsNone(pred["cot_conditioning"])
+        expected = self.model["slope"] * self._expected_z() + self.model["intercept"]
+        self.assertAlmostEqual(pred["predicted_reaction_usd"], round(expected, 2), places=2)
+
+
+class TestFormatPredictionCotNote(unittest.TestCase):
+    def _base_pred(self, **overrides):
+        pred = {
+            "event_name": "ISM Manufacturing PMI", "value_type": "index", "source_tier": "rss",
+            "actual_value": 54.6, "forecast_value": 55.2,
+            "surprise_zscore": -0.4, "predicted_reaction_usd": 0.6,
+            "horizon": "reaction_30m", "n_historical": 196, "cot_conditioning": None,
+        }
+        pred.update(overrides)
+        return pred
+
+    def test_no_conditioning_no_note(self):
+        text = mp.format_prediction(self._base_pred())
+        self.assertNotIn("Posizionamento speculativo COT", text)
+
+    def test_crowded_conditioning_shows_note(self):
+        pred = self._base_pred(cot_conditioning={"regime": "crowded", "cot_zscore": 1.5})
+        text = mp.format_prediction(pred)
+        self.assertIn("Posizionamento speculativo COT", text)
+        self.assertIn("molto affollato", text)
+
+    def test_calm_conditioning_shows_note(self):
+        pred = self._base_pred(cot_conditioning={"regime": "calm", "cot_zscore": 0.2})
+        text = mp.format_prediction(pred)
+        self.assertIn("nella norma", text)
 
 
 class TestFormatPredictionNewTypes(unittest.TestCase):

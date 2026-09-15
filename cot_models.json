@@ -1,0 +1,32 @@
+{
+  "CB Consumer Confidence": {
+    "event_name": "CB Consumer Confidence",
+    "horizon": "reaction_30m",
+    "cot_zscore_threshold": 0.9348654545209742,
+    "slope_crowded": -0.15988894236116422,
+    "intercept_crowded": 0.919249963809361,
+    "slope_calm": -0.630755177858583,
+    "intercept_calm": 0.04704093060660858,
+    "surprise_mean": 0.11888888888888934,
+    "surprise_std": 5.193085098161531,
+    "surprise_zscore_clip": 4.0,
+    "n_crowded": 90,
+    "n_calm": 90,
+    "fitted_at": "2026-09-15T05:53:37.579127+00:00"
+  },
+  "ISM Manufacturing PMI": {
+    "event_name": "ISM Manufacturing PMI",
+    "horizon": "reaction_30m",
+    "cot_zscore_threshold": 0.9495197091638722,
+    "slope_crowded": -1.062761648873461,
+    "intercept_crowded": 0.1445323336775611,
+    "slope_calm": -2.2448937006483307,
+    "intercept_calm": -0.3715618849903951,
+    "surprise_mean": 0.14591836734693864,
+    "surprise_std": 1.7079703574769338,
+    "surprise_zscore_clip": 4.0,
+    "n_crowded": 98,
+    "n_calm": 98,
+    "fitted_at": "2026-09-15T05:53:37.708046+00:00"
+  }
+}
