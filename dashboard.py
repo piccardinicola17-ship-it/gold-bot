@@ -25,7 +25,7 @@ from flask import Flask, abort, g, jsonify, redirect, render_template_string, re
 # trade_manager applica scrivendo le stesse tabelle.
 from trade_manager import (
     is_decisive_win, amend_closed_trade, RESULT_PNL, DB_PATH, _connect,
-    load_broker_orders_pending, ack_broker_order,
+    load_broker_orders_pending, ack_broker_order, get_broker_fills,
 )
 
 app = Flask(__name__)
@@ -237,13 +237,24 @@ def api_ea_pending():
 def api_ea_ack():
     """L'EA chiama questo endpoint subito dopo aver aperto (o tentato di
     aprire) l'ordine sul broker, cosi da non riceverlo di nuovo al prossimo
-    polling."""
+    polling. fill_price (opzionale, solo ordini a mercato): prezzo di
+    esecuzione reale riportato da CTrade.ResultPrice() — usato per
+    registrare lo slippage vs l'entry teorica (vedi trade_manager.
+    ack_broker_order)."""
     payload = request.get_json(silent=True) or {}
     trade_id = str(payload.get("trade_id", "")).strip()
     if not trade_id:
         return jsonify({"error": "trade_id mancante"}), 400
-    ack_broker_order(trade_id)
+    fill_price = payload.get("fill_price")
+    ack_broker_order(trade_id, float(fill_price) if fill_price else None)
     return jsonify({"ok": True})
+
+
+@app.route("/api/ea/fills")
+def api_ea_fills():
+    """Storico slippage reale (entry teorica vs fill vero sul conto demo
+    MT5) — vedi trade_manager.get_broker_fills."""
+    return jsonify(get_broker_fills())
 
 
 @app.route("/api/correct-trade", methods=["POST"])

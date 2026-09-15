@@ -259,24 +259,35 @@ void ProcessOneOrder(string obj)
       return;
    }
 
+   double fillPrice = 0.0;
    if(sent)
    {
+      // ResultPrice() e' il prezzo di esecuzione REALE solo per un
+      // ordine a mercato appena eseguito - per un LIMIT/STOP appena
+      // piazzato (non ancora attivato) ritornerebbe il prezzo richiesto,
+      // non un vero fill, quindi non lo inviamo (slippage tracking,
+      // 2026-09-15 — solo ordini a mercato per ora).
+      if(ot == "BUY" || ot == "SELL")
+         fillPrice = trade.ResultPrice();
       Print("Copiato: ", ot, " ", SymbolToTrade, " lotto=", DoubleToString(lot, 2),
-            " entry=", entry, " sl=", sl, " tp=", tp1, " (", tradeId, ")");
+            " entry=", entry, " sl=", sl, " tp=", tp1,
+            (fillPrice > 0 ? " fill=" + DoubleToString(fillPrice, 2) : ""), " (", tradeId, ")");
       GlobalVariableSet(seenVar, 1);
    }
    else
    {
       Print("Errore apertura ", ot, " per ", tradeId, ": ", trade.ResultRetcodeDescription());
    }
-   AckOrder(tradeId);
+   AckOrder(tradeId, fillPrice);
 }
 
 //+------------------------------------------------------------------+
-void AckOrder(string tradeId)
+void AckOrder(string tradeId, double fillPrice = 0.0)
 {
    string url  = ServerUrl + "/api/ea/ack?token=" + ApiToken;
-   string json = "{\"trade_id\":\"" + tradeId + "\"}";
+   string json = fillPrice > 0
+      ? "{\"trade_id\":\"" + tradeId + "\",\"fill_price\":" + DoubleToString(fillPrice, 2) + "}"
+      : "{\"trade_id\":\"" + tradeId + "\"}";
 
    char post[];
    int len = StringToCharArray(json, post) - 1; // esclude lo zero terminatore

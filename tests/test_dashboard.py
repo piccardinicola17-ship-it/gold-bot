@@ -192,5 +192,67 @@ class TestApiCorrectTrade(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestApiEaAckAndFills(unittest.TestCase):
+    """/api/ea/ack (con fill_price opzionale) e /api/ea/fills — tracking
+    slippage aggiunto il 2026-09-15."""
+
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+        db.DB_PATH = self.tmpdb
+        self._orig_token = db.DASHBOARD_TOKEN
+        db.DASHBOARD_TOKEN = "test-token-123"
+        self._orig_bridge = tm.EA_BRIDGE_ENABLED
+        tm.EA_BRIDGE_ENABLED = True
+        self.client = db.app.test_client()
+
+    def tearDown(self):
+        db.DASHBOARD_TOKEN = self._orig_token
+        tm.EA_BRIDGE_ENABLED = self._orig_bridge
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+    def _open_pending_trade(self, entry=4300.0) -> str:
+        data = {
+            "signal": "BUY", "order_type": "BUY", "entry": entry, "sl": 4270.0,
+            "tp1": 4340.0, "tp2": 4360.0, "tp3": 4390.0, "prob": 70, "regime": "NORMAL",
+            "timeframe": "1h", "price": entry, "risk_pct": 1.0, "strategies": {},
+            "data_timestamp": "2026-09-15T09:00:00", "price_basis": 0.0, "early_be_level": 0,
+        }
+        data["setup_key"] = tm.build_setup_key(data)
+        return tm.open_trade(data)
+
+    def test_ack_without_token_is_rejected(self):
+        trade_id = self._open_pending_trade()
+        resp = self.client.post("/api/ea/ack", json={"trade_id": trade_id})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_ack_with_fill_price_is_visible_via_fills_endpoint(self):
+        trade_id = self._open_pending_trade(entry=4300.0)
+        resp = self.client.post(
+            "/api/ea/ack?token=test-token-123",
+            json={"trade_id": trade_id, "fill_price": 4300.4},
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        fills = self.client.get("/api/ea/fills").get_json()
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0]["trade_id"], trade_id)
+        self.assertAlmostEqual(fills[0]["slippage"], 0.4, places=2)
+
+    def test_ack_without_fill_price_leaves_fills_empty(self):
+        trade_id = self._open_pending_trade()
+        resp = self.client.post("/api/ea/ack?token=test-token-123", json={"trade_id": trade_id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.client.get("/api/ea/fills").get_json(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

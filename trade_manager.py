@@ -357,6 +357,17 @@ def init_db() -> None:
                 decision  TEXT NOT NULL,
                 reason    TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS broker_fills (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id       TEXT NOT NULL,
+                signal         TEXT,
+                timeframe      TEXT,
+                intended_entry REAL,
+                fill_price     REAL,
+                slippage       REAL,
+                recorded_at    TEXT NOT NULL
+            );
             """
         )
         _ensure_trade_columns(conn)
@@ -375,6 +386,9 @@ def init_db() -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_broker_fills_trade_id ON broker_fills(trade_id)"
         )
 
         if not _migration_done(conn, "setup_key_ignore_cancelled_v1"):
@@ -1641,13 +1655,61 @@ def load_broker_orders_pending() -> dict:
     return _load_state_json("broker_orders_pending")
 
 
-def ack_broker_order(trade_id: str) -> None:
+def ack_broker_order(trade_id: str, fill_price: float | None = None) -> None:
     """Rimuove l'ordine dalla coda — l'EA lo chiama dopo averlo aperto sul
-    broker (con successo o con un errore che non ha senso ritentare)."""
+    broker (con successo o con un errore che non ha senso ritentare).
+
+    fill_price: prezzo di esecuzione REALE riportato dall'EA (solo per
+    ordini a mercato — CTrade.ResultPrice() dopo Buy()/Sell(), MAI per
+    LIMIT/STOP dove a questo punto l'ordine non è ancora stato eseguito).
+    Se presente, registra lo scarto rispetto all'entry teorica (tracking
+    slippage, 2026-09-15) prima di rimuovere l'ordine — serve l'entry
+    teorica e la direzione, che esistono solo finché l'ordine è ancora in
+    coda, quindi va fatto qui, non dopo il pop."""
     pending = _load_state_json("broker_orders_pending")
     if trade_id in pending:
+        order = pending[trade_id]
+        if fill_price:
+            _log_broker_fill(
+                trade_id, order.get("signal"), order.get("timeframe"),
+                float(order.get("entry", 0)), float(fill_price),
+            )
         pending.pop(trade_id, None)
         _save_state_json("broker_orders_pending", pending)
+
+
+def _log_broker_fill(trade_id: str, signal: str | None, timeframe: str | None,
+                      intended_entry: float, fill_price: float) -> None:
+    if intended_entry <= 0 or fill_price <= 0:
+        return
+    # Convenzione: positivo = peggio per noi, a prescindere dalla
+    # direzione — un BUY eseguito più in alto del previsto o un SELL
+    # eseguito più in basso sono entrambi slippage sfavorevole.
+    slippage = (
+        (fill_price - intended_entry) if str(signal).upper() == "BUY"
+        else (intended_entry - fill_price)
+    )
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO broker_fills(trade_id, signal, timeframe, intended_entry,
+                                      fill_price, slippage, recorded_at)
+            VALUES (?,?,?,?,?,?,?)
+            """,
+            (trade_id, signal, timeframe, intended_entry, fill_price,
+             round(slippage, 4), datetime.now(TIMEZONE).isoformat()),
+        )
+
+
+def get_broker_fills(limit: int = 200) -> list[dict]:
+    """Storico slippage reale (entry teorica vs fill vero sul conto demo
+    MT5), più recenti prima — usato dalla dashboard per giudicare quanto
+    l'esecuzione reale si discosta dalla simulazione paper."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM broker_fills ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def load_fred_last_seen() -> dict:

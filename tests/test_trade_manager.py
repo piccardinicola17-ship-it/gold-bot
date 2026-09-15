@@ -709,6 +709,62 @@ class TestEaBridgeQueue(TradeManagerTestCase):
         self.assertEqual(order["risk_pct"], 0.75)
         self.assertNotIn("lot_size", order)
 
+
+class TestBrokerFillSlippage(TradeManagerTestCase):
+    """Tracking slippage (2026-09-15): entry teorica (dalla coda pending)
+    vs fill reale riportato dall'EA su un ordine a mercato."""
+
+    def setUp(self):
+        super().setUp()
+        self._orig_enabled = tm.EA_BRIDGE_ENABLED
+        tm.EA_BRIDGE_ENABLED = True
+
+    def tearDown(self):
+        tm.EA_BRIDGE_ENABLED = self._orig_enabled
+        super().tearDown()
+
+    def test_ack_with_fill_price_logs_slippage_for_buy(self):
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4300.00)
+        trade_id = tm.open_trade(data)
+
+        tm.ack_broker_order(trade_id, fill_price=4300.30)
+
+        fills = tm.get_broker_fills()
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0]["trade_id"], trade_id)
+        self.assertEqual(fills[0]["intended_entry"], 4300.00)
+        self.assertEqual(fills[0]["fill_price"], 4300.30)
+        # BUY eseguito piu' in alto del previsto = slippage sfavorevole positivo
+        self.assertAlmostEqual(fills[0]["slippage"], 0.30, places=2)
+
+    def test_ack_with_fill_price_logs_slippage_for_sell_inverted_sign(self):
+        data = _base_trade_data(signal="SELL", order_type="SELL", entry=4300.00)
+        trade_id = tm.open_trade(data)
+
+        tm.ack_broker_order(trade_id, fill_price=4299.70)
+
+        fills = tm.get_broker_fills()
+        # SELL eseguito piu' in basso del previsto = sfavorevole anche qui,
+        # stesso segno positivo nonostante il prezzo sia SCESO (convenzione
+        # "positivo = peggio", non "positivo = prezzo piu' alto").
+        self.assertAlmostEqual(fills[0]["slippage"], 0.30, places=2)
+
+    def test_ack_without_fill_price_logs_nothing(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+
+        tm.ack_broker_order(trade_id)  # ordine LIMIT/STOP tipico, nessun fill_price
+
+        self.assertEqual(tm.get_broker_fills(), [])
+
+    def test_ack_removes_order_from_pending_even_with_fill_price(self):
+        data = _base_trade_data()
+        trade_id = tm.open_trade(data)
+
+        tm.ack_broker_order(trade_id, fill_price=4300.00)
+
+        self.assertNotIn(trade_id, tm.load_broker_orders_pending())
+
     def test_disabled_bridge_enqueues_nothing(self):
         tm.EA_BRIDGE_ENABLED = False
         tm.open_trade(_base_trade_data())
