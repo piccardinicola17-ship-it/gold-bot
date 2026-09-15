@@ -352,6 +352,20 @@ def regenerate_cot_models(db_path: str = HIST_DB_PATH) -> None:
     logger.info(f"Modelli COT deployati rigenerati: {list(models)} -> {COT_MODELS_PATH}")
 
 
+def check_cot_conditioned_events_health(db_path: str = HIST_DB_PATH) -> dict:
+    """Come historical_model.check_deployed_events_health, per i modelli
+    condizionati-COT — sola lettura, mai rigenera cot_models.json."""
+    from historical_model import DEPLOYED_EVENTS
+
+    report = {}
+    for name in COT_CONDITIONED_EVENTS:
+        horizon = DEPLOYED_EVENTS[name]
+        result = validate_cot_conditioning(name, db_path=db_path)
+        healthy = horizon in result.get("genuine_horizons", [])
+        report[name] = {"horizon": horizon, "healthy": healthy, "n": result.get("n")}
+    return report
+
+
 if __name__ == "__main__":
     import sys
     event_name = sys.argv[1] if len(sys.argv) > 1 else "Unemployment Rate"

@@ -156,5 +156,52 @@ class TestRegenerateDeployedModelsValidatesHorizon(unittest.TestCase):
             mock_write.assert_called_once()
 
 
+class TestCheckDeployedEventsHealth(unittest.TestCase):
+    """check_deployed_events_health() (2026-09-15, monitoraggio walk-forward
+    locale): stessa logica di regenerate_deployed_models() ma di sola
+    lettura — mai un'eccezione, mai riscrive macro_models.json."""
+
+    def test_healthy_when_beats_naive_on_every_split(self):
+        fake_results = pd.DataFrame([
+            _split_row("Core CPI m/m", "reaction_30m", 0.5, 50, 50, beats_naive=True),
+            _split_row("Core CPI m/m", "reaction_30m", 0.7, 70, 30, beats_naive=True),
+        ])
+        with mock.patch("historical_model.DEPLOYED_EVENTS", {"Core CPI m/m": "reaction_30m"}), \
+             mock.patch("historical_model.run_all", return_value=fake_results):
+            report = hm.check_deployed_events_health()
+        self.assertTrue(report["Core CPI m/m"]["healthy"])
+        self.assertEqual(report["Core CPI m/m"]["n"], 100)
+
+    def test_unhealthy_when_a_split_fails(self):
+        fake_results = pd.DataFrame([
+            _split_row("Core CPI m/m", "reaction_30m", 0.5, 50, 50, beats_naive=True),
+            _split_row("Core CPI m/m", "reaction_30m", 0.7, 70, 30, beats_naive=False),
+        ])
+        with mock.patch("historical_model.DEPLOYED_EVENTS", {"Core CPI m/m": "reaction_30m"}), \
+             mock.patch("historical_model.run_all", return_value=fake_results):
+            report = hm.check_deployed_events_health()
+        self.assertFalse(report["Core CPI m/m"]["healthy"])
+
+    def test_unhealthy_when_no_data_at_all_for_the_horizon(self):
+        fake_results = pd.DataFrame([
+            _split_row("Core CPI m/m", "reaction_5m", 0.5, 50, 50, beats_naive=True),
+        ])
+        with mock.patch("historical_model.DEPLOYED_EVENTS", {"Core CPI m/m": "reaction_30m"}), \
+             mock.patch("historical_model.run_all", return_value=fake_results):
+            report = hm.check_deployed_events_health()
+        self.assertFalse(report["Core CPI m/m"]["healthy"])
+        self.assertIn("reason", report["Core CPI m/m"])
+
+    def test_never_raises_and_never_writes_a_file(self):
+        fake_results = pd.DataFrame([
+            _split_row("Core CPI m/m", "reaction_30m", 0.5, 50, 50, beats_naive=False),
+        ])
+        with mock.patch("historical_model.DEPLOYED_EVENTS", {"Core CPI m/m": "reaction_30m"}), \
+             mock.patch("historical_model.run_all", return_value=fake_results), \
+             mock.patch("pathlib.Path.write_text") as mock_write:
+            hm.check_deployed_events_health()  # non deve sollevare
+            mock_write.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

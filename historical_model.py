@@ -374,6 +374,33 @@ def regenerate_deployed_models(db_path: str = HIST_DB_PATH) -> None:
     logger.info(f"Modelli deployati rigenerati: {list(models)} -> {out_path}")
 
 
+def check_deployed_events_health(db_path: str = HIST_DB_PATH) -> dict:
+    """Monitoraggio walk-forward (2026-09-15): ricontrolla ogni serie di
+    DEPLOYED_EVENTS sul suo orizzonte deployato, con TUTTI i dati oggi
+    disponibili in event_features (non solo quelli che c'erano al momento
+    del deploy) — stesso identico gate di regenerate_deployed_models(), ma
+    di sola lettura (mai rigenera macro_models.json né solleva eccezioni):
+    serve a scoprire un eventuale decadimento dell'edge nel tempo, non a
+    ripubblicare un modello. Va richiamato periodicamente (vedi
+    gold_bot._monthly_health_check); il verdetto di ciascuna serie qui non
+    cambia mai automaticamente cosa il bot mostra dal vivo."""
+    results = run_all(db_path=db_path)
+    report = {}
+    for name, horizon in DEPLOYED_EVENTS.items():
+        subset = results[(results["event_name"] == name) & (results["horizon"] == horizon)]
+        if subset.empty:
+            report[name] = {"horizon": horizon, "healthy": False, "reason": "nessun dato disponibile"}
+            continue
+        healthy = bool(subset["beats_naive"].all())
+        report[name] = {
+            "horizon": horizon,
+            "healthy": healthy,
+            "n": int(subset["n_train"].iloc[-1] + subset["n_test"].iloc[-1]),
+            "mean_direction_accuracy": round(float(subset["direction_accuracy"].mean()), 3),
+        }
+    return report
+
+
 if __name__ == "__main__":
     import sys
 

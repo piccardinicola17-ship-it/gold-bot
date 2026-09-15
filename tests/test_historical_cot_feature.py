@@ -149,5 +149,26 @@ class TestValidateCotConditioning(unittest.TestCase):
         self.assertIn("DATI INSUFFICIENTI", result["verdict"])
 
 
+class TestCheckCotConditionedEventsHealth(unittest.TestCase):
+    """check_cot_conditioned_events_health() (2026-09-15, monitoraggio
+    walk-forward locale) — sola lettura, mai rigenera cot_models.json."""
+
+    def test_healthy_when_horizon_still_genuine(self):
+        fake_result = {"n": 200, "genuine_horizons": ["reaction_30m", "reaction_60m"]}
+        with mock.patch("historical_cot_feature.COT_CONDITIONED_EVENTS", ("CB Consumer Confidence",)), \
+             mock.patch("historical_model.DEPLOYED_EVENTS", {"CB Consumer Confidence": "reaction_30m"}), \
+             mock.patch("historical_cot_feature.validate_cot_conditioning", return_value=fake_result):
+            report = cf.check_cot_conditioned_events_health()
+        self.assertTrue(report["CB Consumer Confidence"]["healthy"])
+
+    def test_unhealthy_when_horizon_no_longer_genuine(self):
+        fake_result = {"n": 200, "genuine_horizons": ["reaction_60m"]}  # non più reaction_30m
+        with mock.patch("historical_cot_feature.COT_CONDITIONED_EVENTS", ("CB Consumer Confidence",)), \
+             mock.patch("historical_model.DEPLOYED_EVENTS", {"CB Consumer Confidence": "reaction_30m"}), \
+             mock.patch("historical_cot_feature.validate_cot_conditioning", return_value=fake_result):
+            report = cf.check_cot_conditioned_events_health()
+        self.assertFalse(report["CB Consumer Confidence"]["healthy"])
+
+
 if __name__ == "__main__":
     unittest.main()
