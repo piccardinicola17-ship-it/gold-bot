@@ -60,28 +60,52 @@ class TestSimulatedBudget(unittest.TestCase):
     entry/exit_price REALI già salvati per ogni trade, per vedere quanto
     avrebbe fruttato/perso ogni segnale senza bisogno di un conto demo
     MT5. Formula verificata contro risk_manager.calculate_lot_size:
-    $ = distanza_prezzo × 100 once/lotto × lotto."""
+    $ = (movimento_prezzo_a_favore - spread) × 100 once/lotto × lotto.
+    spread_usd=0 esplicito nei test che isolano solo lotto/direzione, per
+    non far dipendere quelle asserzioni dal valore di SIM_SPREAD_USD."""
 
     def test_pnl_usd_buy_winning(self):
         trade = _trade(signal="BUY", entry=4300.0, exit_price=4310.0)  # +$10
         # 10 * 100 * 0.02 = 20.0
-        self.assertEqual(db._trade_pnl_usd(trade, lot_size=0.02), 20.0)
+        self.assertEqual(db._trade_pnl_usd(trade, lot_size=0.02, spread_usd=0.0), 20.0)
 
     def test_pnl_usd_sell_losing(self):
         """Prezzo sale ma il segnale è SELL -> perdita, non guadagno."""
         trade = _trade(signal="SELL", entry=4300.0, exit_price=4310.0)
-        self.assertEqual(db._trade_pnl_usd(trade, lot_size=0.02), -20.0)
+        self.assertEqual(db._trade_pnl_usd(trade, lot_size=0.02, spread_usd=0.0), -20.0)
 
     def test_pnl_usd_matches_10_pips_per_001_lot_reference(self):
         """Il caso concreto usato per verificare la formula con l'utente:
         10 pip (= $1.00 di movimento, XAUUSD_PIP_SIZE=0.10) su 0.01 lotto
-        deve fare $1.00 esatto."""
+        deve fare $1.00 esatto, senza spread."""
         trade = _trade(signal="BUY", entry=4300.00, exit_price=4301.00)
-        self.assertAlmostEqual(db._trade_pnl_usd(trade, lot_size=0.01), 1.00, places=6)
+        self.assertAlmostEqual(db._trade_pnl_usd(trade, lot_size=0.01, spread_usd=0.0), 1.00, places=6)
 
-    def test_default_lot_size_is_module_constant(self):
+    def test_default_lot_size_and_spread_are_module_constants(self):
         trade = _trade(signal="BUY", entry=4300.0, exit_price=4310.0)
-        self.assertEqual(db._trade_pnl_usd(trade), 10.0 * 100 * db.SIM_LOT_SIZE)
+        expected = (10.0 - db.SIM_SPREAD_USD) * 100 * db.SIM_LOT_SIZE
+        self.assertAlmostEqual(db._trade_pnl_usd(trade), expected, places=6)
+
+    def test_spread_reduces_both_wins_and_losses(self):
+        """Lo spread si paga sempre, indipendentemente dall'esito — un
+        round-trip attraversa bid/ask una volta sola sia che chiuda in
+        utile sia in perdita."""
+        win = _trade(signal="BUY", entry=4300.0, exit_price=4310.0)
+        loss = _trade(signal="BUY", entry=4300.0, exit_price=4290.0)
+        pnl_win = db._trade_pnl_usd(win, lot_size=0.02, spread_usd=0.30)
+        pnl_loss = db._trade_pnl_usd(loss, lot_size=0.02, spread_usd=0.30)
+        # senza spread sarebbero +20.0 e -20.0; con spread (0.30*100*0.02=0.60)
+        # diventano +19.40 e -20.60 — ridotto di 0.60 in ENTRAMBI i casi.
+        self.assertAlmostEqual(pnl_win, 19.40, places=6)
+        self.assertAlmostEqual(pnl_loss, -20.60, places=6)
+
+    def test_spread_can_flip_a_marginal_win_into_a_loss(self):
+        """Caso realistico: un movimento più piccolo dello spread stesso
+        deve risultare in una perdita netta anche se la direzione era
+        quella giusta — esattamente quello che succede in un conto reale."""
+        trade = _trade(signal="BUY", entry=4300.0, exit_price=4300.20)  # +$0.20 lordo
+        pnl = db._trade_pnl_usd(trade, lot_size=0.02, spread_usd=0.30)
+        self.assertLess(pnl, 0)
 
     def test_compute_stats_exposes_sim_budget(self):
         trades = [
@@ -89,13 +113,14 @@ class TestSimulatedBudget(unittest.TestCase):
             _trade(signal="SELL", entry=4300.0, exit_price=4290.0),  # +$10 move (SELL wins)
         ]
         stats = db.compute_stats(trades)
-        expected_total = 2 * 10.0 * 100 * db.SIM_LOT_SIZE
+        expected_total = 2 * (10.0 - db.SIM_SPREAD_USD) * 100 * db.SIM_LOT_SIZE
         self.assertAlmostEqual(stats["total_usd"], expected_total, places=6)
         self.assertAlmostEqual(
             stats["sim_budget_usd"], db.SIM_STARTING_BUDGET_USD + expected_total, places=6
         )
         self.assertEqual(stats["sim_starting_budget_usd"], db.SIM_STARTING_BUDGET_USD)
         self.assertEqual(stats["sim_lot_size"], db.SIM_LOT_SIZE)
+        self.assertEqual(stats["sim_spread_usd"], db.SIM_SPREAD_USD)
 
     def test_cancelled_trade_contributes_zero_to_sim_budget(self):
         trades = [_trade(result="CANCELLED", entry=4300.0, exit_price=4400.0)]

@@ -56,6 +56,22 @@ ALLOW_RESET = os.environ.get("ALLOW_DASHBOARD_RESET", "false").lower() == "true"
 SIM_STARTING_BUDGET_USD = float(os.environ.get("SIM_STARTING_BUDGET_USD", "500"))
 SIM_LOT_SIZE = float(os.environ.get("SIM_LOT_SIZE", "0.02"))
 
+# Spread fisso simulato (2026-09-16, richiesta esplicita dell'utente): una
+# media onesta tra broker MT5 reali per XAUUSD, non il minimo teorico di un
+# conto ECN con commissione a parte. Ricerca fatta su piu' fonti: i conti
+# ECN "raw" (Exness Zero, IC Markets Raw, Pepperstone Razor) mostrano
+# spread quasi a zero ma caricano una commissione fissa per lotto (~$7)
+# che nei fatti riporta il costo reale nella stessa fascia; i conti
+# standard senza commissione (il tipo più comune per chi copia segnali,
+# come in questo bot) mostrano tipicamente 0.20-0.50$ (2-5 pip in questa
+# convenzione, XAUUSD_PIP_SIZE=0.10) durante le sessioni Londra/New York,
+# più larghi in sessione asiatica o su news. 0.30$ (3 pip) è il valore
+# citato più spesso come "spread standard tipico" ed è il centro onesto
+# di quella fascia — non il best-case di un solo broker specifico.
+# Sottratto UNA volta per trade (non due): lo spread è già la differenza
+# bid/ask pagata una sola volta nel round-trip apertura+chiusura.
+SIM_SPREAD_USD = float(os.environ.get("SIM_SPREAD_USD", "0.30"))
+
 
 def _is_loopback() -> bool:
     return request.remote_addr in ("127.0.0.1", "::1")
@@ -137,21 +153,26 @@ def _trade_pips(trade: dict) -> float:
     return round(((exit_price - entry) * direction) / XAUUSD_PIP_SIZE, 1)
 
 
-def _trade_pnl_usd(trade: dict, lot_size: float = SIM_LOT_SIZE) -> float:
+def _trade_pnl_usd(trade: dict, lot_size: float = SIM_LOT_SIZE,
+                    spread_usd: float = SIM_SPREAD_USD) -> float:
     """Profitto/perdita in $ che il segnale REALE (entry/exit_price già
-    salvati) avrebbe fatto con un lotto fisso di riferimento — vedi
-    commento sopra SIM_STARTING_BUDGET_USD. Calcolato dal prezzo grezzo,
-    non dai pip già arrotondati a 1 decimale (_trade_pips), per non
-    accumulare un doppio arrotondamento sulla conversione in dollari.
-    Formula invariata rispetto a calculate_lot_size (risk_manager.py):
-    $ = distanza_prezzo × once_per_lotto × lotto."""
+    salvati) avrebbe fatto con un lotto fisso di riferimento, al netto
+    dello spread simulato — vedi i commenti sopra SIM_STARTING_BUDGET_USD
+    e SIM_SPREAD_USD. Calcolato dal prezzo grezzo, non dai pip già
+    arrotondati a 1 decimale (_trade_pips), per non accumulare un doppio
+    arrotondamento sulla conversione in dollari.
+    Formula: $ = (movimento_prezzo_a_favore - spread) × once_per_lotto ×
+    lotto — lo spread si paga una sola volta a round-trip (non due),
+    sottratto qui direttamente in unità di prezzo prima di convertire in $
+    così il segno funziona per BUY e SELL senza doverlo duplicare."""
     try:
         entry = float(trade.get("entry"))
         exit_price = float(trade.get("exit_price"))
     except (TypeError, ValueError):
         return 0.0
     direction = 1.0 if trade.get("signal") == "BUY" else -1.0
-    return round((exit_price - entry) * direction * XAUUSD_OZ_PER_LOT * lot_size, 2)
+    net_move = (exit_price - entry) * direction - spread_usd
+    return round(net_move * XAUUSD_OZ_PER_LOT * lot_size, 2)
 
 
 def _get_trades() -> list[dict]:
@@ -232,6 +253,7 @@ def compute_stats(trades: list[dict]) -> dict:
         ),
         "sim_starting_budget_usd": SIM_STARTING_BUDGET_USD,
         "sim_lot_size": SIM_LOT_SIZE,
+        "sim_spread_usd": SIM_SPREAD_USD,
         "tp1_total": sum(
             1 for trade in valid
             if bool(trade.get("tp1_hit")) or trade.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3")
@@ -962,12 +984,13 @@ function render(data) {
   const simBudget = Number(stats.sim_budget_usd || 0);
   const simStart = Number(stats.sim_starting_budget_usd || 0);
   const simLot = Number(stats.sim_lot_size || 0);
+  const simSpread = Number(stats.sim_spread_usd || 0);
   $("sim-budget").textContent = `$${num(simBudget, 2)}`;
   $("sim-budget").className = `metric-value ${
     simBudget > simStart ? "positive" : simBudget < simStart ? "negative" : ""
   }`;
   $("sim-budget-note").textContent =
-    `$${num(simStart, 0)} iniziali · lotto ${num(simLot, 2)} · ${signedUsd(stats.total_usd)}`;
+    `$${num(simStart, 0)} iniziali · lotto ${num(simLot, 2)} · spread $${num(simSpread, 2)} · ${signedUsd(stats.total_usd)}`;
 
   $("total-pips").textContent = signed(stats.total_pips || 0);
   $("total-pips").className = `metric-value ${
