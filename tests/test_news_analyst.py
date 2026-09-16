@@ -54,6 +54,28 @@ class TestFindMacroDbInfo(unittest.TestCase):
     def test_unknown_event_returns_empty_dict(self):
         self.assertEqual(na._find_macro_db_info("Some Random Low-Impact Event"), {})
 
+    def test_no_currency_arg_keeps_old_behavior(self):
+        """Retrocompatibilità: i chiamanti esistenti non passano currency,
+        il match a substring resta invariato (comportamento pre-2026-09-16)."""
+        info = na._find_macro_db_info("CPI y/y")
+        self.assertTrue(info)
+
+    def test_usd_currency_still_matches(self):
+        info = na._find_macro_db_info("CPI y/y", currency="USD")
+        self.assertTrue(info)
+
+    def test_non_usd_currency_never_matches(self):
+        """Bug reale trovato il 2026-09-16 aggiungendo il supporto per
+        valute non-USD (GBP/EUR/JPY/...): MACRO_DB contiene solo logiche
+        Fed-specifiche, ma il match era una semplice substring sul titolo
+        senza controllare la valuta — "GBP CPI y/y" avrebbe agganciato la
+        logica USD ("CPI alto -> Fed hawkish -> oro giù"), sbagliata (quella
+        è la Bank of England, non la Fed). currency non-USD deve sempre
+        tornare {} anche se il titolo contiene una chiave nota di MACRO_DB."""
+        for currency in ("GBP", "EUR", "JPY", "gbp"):
+            self.assertEqual(na._find_macro_db_info("CPI y/y", currency=currency), {})
+            self.assertEqual(na._find_macro_db_info("NFP report tonight", currency=currency), {})
+
 
 class TestFormatNewsMessageHeadlineSanitization(unittest.TestCase):
     """FIX: la sanificazione manuale delle headline in format_news_message
@@ -144,6 +166,101 @@ class TestAnalyzeBreakingNewsHonesty(unittest.TestCase):
 
         self.assertNotIn("NON DISPONIBILE", captured["user"])
         self.assertIn("Estratto:", captured["user"])
+
+
+class TestAnalyzeMacroEventCurrencyAware(unittest.TestCase):
+    """2026-09-16: gli alert macro coprono anche eventi non-USD (GBP, EUR,
+    JPY, ...) — l'LLM deve sapere esplicitamente di quale valuta si tratta,
+    altrimenti assumerebbe implicitamente che sia sempre la Fed/USD (il
+    titolo grezzo del calendario, es. "CPI y/y", non lo dice da solo)."""
+
+    def test_usd_event_no_currency_note_needed(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=80):
+            captured["user"] = user
+            return "Bias: NEUTRO\nMotivo: test"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_macro_event("CPI y/y", "0.3%", "0.2%", current_price=4400, currency="USD")
+
+        self.assertNotIn("Valuta:", captured["user"])
+
+    def test_non_usd_event_states_currency_explicitly(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=80):
+            captured["user"] = user
+            return "Bias: NEUTRO\nMotivo: test"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_macro_event("CPI y/y", "0.3%", "0.2%", current_price=4400, currency="GBP")
+
+        self.assertIn("Valuta: GBP", captured["user"])
+        self.assertIn("non sulla Fed", captured["user"])
+
+    def test_no_currency_arg_backward_compatible(self):
+        """Chiamanti esistenti che non passano currency (default "") non
+        devono rompersi né aggiungere una riga Valuta fuorviante."""
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=80):
+            captured["user"] = user
+            return "Bias: NEUTRO\nMotivo: test"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_macro_event("Core CPI m/m", "0.3%", "0.2%", current_price=4400)
+
+        self.assertNotIn("Valuta:", captured["user"])
+
+
+class TestAnalyzeCombinedMacroEventCurrency(unittest.TestCase):
+    def test_single_event_forwards_currency(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=80):
+            captured["user"] = user
+            return "Bias: NEUTRO\nMotivo: test"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_combined_macro_event(
+                [{"title": "GDP q/q", "forecast": "0.5%", "previous": "0.4%", "currency": "NZD"}],
+                current_price=4400,
+            )
+
+        self.assertIn("Valuta: NZD", captured["user"])
+
+    def test_multi_event_group_states_shared_currency(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=90):
+            captured["user"] = user
+            return "Bias: NEUTRO\nMotivo: test"
+
+        events = [
+            {"title": "Official Bank Rate", "forecast": "4.25%", "previous": "4.00%", "currency": "GBP"},
+            {"title": "MPC Official Bank Rate Votes", "forecast": "N/A", "previous": "N/A", "currency": "GBP"},
+        ]
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_combined_macro_event(events, current_price=4400)
+
+        self.assertIn("Valuta: GBP", captured["user"])
+
+    def test_usd_group_has_no_currency_note(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=90):
+            captured["user"] = user
+            return "Bias: NEUTRO\nMotivo: test"
+
+        events = [
+            {"title": "Core Retail Sales m/m", "forecast": "0.3%", "previous": "0.2%", "currency": "USD"},
+            {"title": "Retail Sales m/m", "forecast": "0.4%", "previous": "0.3%", "currency": "USD"},
+        ]
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_combined_macro_event(events, current_price=4400)
+
+        self.assertNotIn("Valuta:", captured["user"])
 
 
 if __name__ == "__main__":

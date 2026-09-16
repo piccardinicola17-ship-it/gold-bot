@@ -218,10 +218,13 @@ class TestCheckMacroAlertsResilience(GoldBotTestCase):
 
     async def _scenario_send_fails_then_succeeds(self, title):
         event = self._make_event(30, title)
-        # group_key raggruppa per data+ora (senza titolo): eventi con lo
-        # stesso orario condividono un solo alert combinato — vedi
-        # check_macro_alerts (fix 2026-09-13, bias combinato).
-        ev_key = f"{event['date']}_{event['time']}"
+        # group_key raggruppa per data+ora+valuta (senza titolo): eventi con
+        # lo stesso orario E la stessa valuta condividono un solo alert
+        # combinato — vedi check_macro_alerts (fix 2026-09-13, bias
+        # combinato; valuta aggiunta 2026-09-16 per non mescolare rilasci di
+        # valute diverse capitati alla stessa ora IT). L'evento di test non
+        # imposta "currency", il codice usa il default "USD".
+        ev_key = f"{event['date']}_{event['time']}_USD"
 
         # Primo giro: il send fallisce (es. Markdown non valido) -> il
         # dedup NON deve essere marcato, deve poter ritentare.
@@ -723,7 +726,7 @@ class TestBiasEventoVsPostEvento(GoldBotTestCase):
         alcun messaggio (silenzioso, solo aggiornamento di stato)."""
         import asyncio
         event = self._make_event(-3)  # 3 minuti dopo il rilascio: dentro -7/-1
-        group_key = f"{event['date']}_{event['time']}"
+        group_key = f"{event['date']}_{event['time']}_USD"  # valuta di default dell'evento di test
         gb._pre_event_bias[group_key] = {"bias": "BUY", "price": 4378.90, "price_immediate": None}
 
         bot = asyncio.run(self._run(event, 4388.60))
@@ -744,7 +747,7 @@ class TestBiasEventoVsPostEvento(GoldBotTestCase):
         fasi. Ora deve mostrare ENTRAMBI i verdetti separatamente."""
         import asyncio
         post_event = self._make_event(-10)
-        group_key = f"{post_event['date']}_{post_event['time']}"
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"  # valuta di default dell'evento di test
         # Stato pre-evento + snapshot immediata già catturati in cicli
         # precedenti dello scheduler (esattamente come accadrebbe in
         # produzione: -30min alert, poi -3min snapshot, poi -10min post).

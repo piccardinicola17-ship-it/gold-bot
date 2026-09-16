@@ -29,7 +29,23 @@ MACRO_DB = {
 }
 
 
-def _find_macro_db_info(event_title: str) -> dict:
+def _find_macro_db_info(event_title: str, currency: str = "") -> dict:
+    """
+    MACRO_DB contiene solo logiche USD-specifiche (Fed, NFP, ecc.) — il
+    match era una semplice substring sul titolo, senza controllare la
+    valuta. Fino a quando gli alert erano filtrati a solo USD (vedi
+    analyzer._passes_news_filter) andava bene per costruzione, ma dal
+    2026-09-16 il bot include anche eventi di altre valute major (EUR,
+    GBP, JPY, ecc.) — un titolo come "GBP CPI y/y" contiene comunque la
+    substring "CPI" e avrebbe agganciato la logica "CPI alto -> Fed
+    hawkish -> oro giù", sbagliata (quella è la Bank of England, non la
+    Fed). currency vuota = comportamento invariato (retrocompatibile, i
+    chiamanti esistenti non passano valuta); currency non-USD = nessun
+    lookup, l'LLM ragiona senza l'indizio precompilato invece di riceverne
+    uno sbagliato.
+    """
+    if currency and currency.upper() not in ("USD", "US"):
+        return {}
     title_upper = event_title.upper()
     for key, info in MACRO_DB.items():
         if key in title_upper:
@@ -154,7 +170,7 @@ def get_bias_briefing(news: list, current_price: float = 0) -> str:
     )
 
 
-def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str = "N/A", actual: str = "N/A", current_price: float = 0) -> str:
+def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str = "N/A", actual: str = "N/A", current_price: float = 0, currency: str = "") -> str:
     """
     Bias direzionale corto pre-evento — niente pip/livelli/TP/SL inventati.
 
@@ -165,10 +181,20 @@ def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str =
     grandezza rispetto al movimento reale. Ora si chiede solo un bias
     direzionale (BUY/SELL/NEUTRO) con una riga di motivazione qualitativa,
     esplicitamente senza cifre precise.
+
+    currency: valuta dell'evento (USD/EUR/GBP/JPY/...) — dal 2026-09-16 il
+    bot copre anche eventi non-USD (vedi analyzer._passes_news_filter),
+    quindi va detto esplicitamente all'LLM di quale banca centrale/valuta
+    si tratta invece di lasciargli assumere che sia sempre la Fed/USD
+    (l'evento non lo indica da solo: il titolo grezzo del calendario è
+    "CPI y/y", non "GBP CPI y/y").
     """
-    db_info   = _find_macro_db_info(event_title)
+    db_info   = _find_macro_db_info(event_title, currency)
     price_txt = f"${current_price}" if current_price > 0 else "N/D"
-    context   = [f"Evento: {event_title}", f"Previsione: {forecast} | Precedente: {previous}"]
+    context   = [f"Evento: {event_title}"]
+    if currency and currency.upper() not in ("USD", "US"):
+        context.append(f"Valuta: {currency.upper()} (non USD — ragiona sulla banca centrale/economia di questa valuta, non sulla Fed, e su come si riflette sul dollaro/DXY e quindi sull'oro)")
+    context.append(f"Previsione: {forecast} | Precedente: {previous}")
     if actual and actual not in ("N/A", "uscito — vedi notizie"):
         context.append(f"Uscito: {actual}")
     if db_info:
@@ -201,22 +227,32 @@ def analyze_combined_macro_event(events: list, current_price: float = 0) -> str:
     SELL/SELL tutti per le 14:30). Ora una SOLA chiamata ragiona su tutti
     gli indicatori insieme e produce un solo bias coerente.
 
-    events: lista di dict con almeno "title", "forecast", "previous".
+    events: lista di dict con almeno "title", "forecast", "previous",
+    "currency" — il chiamante (gold_bot.check_macro_alerts) raggruppa per
+    data+ora+valuta, quindi tutti gli eventi qui dentro condividono la
+    stessa valuta per costruzione (un evento USD e uno GBP alla stessa ora
+    non sono lo stesso rilascio, non vanno mai nello stesso gruppo).
     Con un solo elemento delega a analyze_macro_event() — stesso output di
     prima, nessun cambio di comportamento nel caso comune (1 evento).
     """
     if len(events) == 1:
         ev = events[0]
         return analyze_macro_event(
-            ev["title"], ev.get("forecast", "N/A"), ev.get("previous", "N/A"), "N/A", current_price
+            ev["title"], ev.get("forecast", "N/A"), ev.get("previous", "N/A"), "N/A", current_price,
+            currency=ev.get("currency", ""),
         )
 
+    currency  = events[0].get("currency", "")
     price_txt = f"${current_price}" if current_price > 0 else "N/D"
     righe = [
         f"- {e['title']}: Previsione {e.get('forecast','N/A')} | Precedente {e.get('previous','N/A')}"
         for e in events
     ]
-    context = f"Prezzo XAU/USD: {price_txt}\nIndicatori in uscita insieme (stesso orario):\n" + "\n".join(righe)
+    context_lines = [f"Prezzo XAU/USD: {price_txt}"]
+    if currency and currency.upper() not in ("USD", "US"):
+        context_lines.append(f"Valuta: {currency.upper()} (non USD — ragiona sulla banca centrale/economia di questa valuta e su come si riflette sul dollaro/DXY e quindi sull'oro)")
+    context_lines.append("Indicatori in uscita insieme (stesso orario, stesso rilascio):")
+    context = "\n".join(context_lines) + "\n" + "\n".join(righe)
     return _call_groq(
         system=(
             "Sei un analista macro XAU/USD. Più indicatori escono ALLA STESSA ORA, fanno parte dello "
@@ -302,11 +338,13 @@ def get_macro_briefing(events: list, current_price: float = 0) -> str:
     )
     header = "*EVENTI MACRO OGGI*\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
     for ev in events[:5]:
-        db_info = _find_macro_db_info(ev.get("title",""))
+        currency = ev.get("currency", "")
+        db_info = _find_macro_db_info(ev.get("title",""), currency)
         impatto = db_info.get("impatto","MEDIO") if db_info else "MEDIO"
         # Escape il titolo evento (può contenere caratteri speciali)
         safe_title = _escape_md(ev.get("title","?"))
-        header += f"\u2022 {safe_title} \u2014 {ev.get('time','?')} IT [{impatto}]\n  Prev: {ev.get('forecast','N/A')} | Prec: {ev.get('previous','N/A')}\n"
+        cur_tag = f" [{currency}]" if currency and currency.upper() not in ("USD", "US") else ""
+        header += f"\u2022 {safe_title}{cur_tag} \u2014 {ev.get('time','?')} IT [{impatto}]\n  Prev: {ev.get('forecast','N/A')} | Prec: {ev.get('previous','N/A')}\n"
     result = header + f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\nAnalisi AI:\n{briefing}"
     return result[:4000] if len(result) > 4000 else result
 

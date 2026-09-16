@@ -530,13 +530,13 @@ async def cmd_macro(update, context: ContextTypes.DEFAULT_TYPE):
         price = await get_current_price_async()
         args  = context.args if context.args else []
         if not args:
-            cal    = await asyncio.to_thread(get_economic_events)
+            cal    = await asyncio.to_thread(get_economic_events, broad=True)
             events = cal.get("events", [])
             msg    = await asyncio.to_thread(get_macro_briefing, events, price)
         else:
             event_name = args[0].upper()
             actual     = args[1] if len(args) > 1 else "N/A"
-            cal        = await asyncio.to_thread(get_economic_events)
+            cal        = await asyncio.to_thread(get_economic_events, broad=True)
             events     = cal.get("events", [])
             event_data = next(
                 (e for e in events if event_name.lower() in e.get("title","").lower()), {}
@@ -552,6 +552,7 @@ async def cmd_macro(update, context: ContextTypes.DEFAULT_TYPE):
                 event_data.get("previous", "N/A"),
                 actual,
                 price,
+                event_data.get("currency", ""),
             ))
         if len(msg) > 4000:
             msg = msg[:3950] + "\n_[Troncato]_"
@@ -1257,7 +1258,10 @@ async def _build_weekend_outlook() -> tuple:
         events = await asyncio.to_thread(get_upcoming_events, 7)
         if events:
             ev_lines = [
-                f"• {ev.get('date','')} {ev.get('time','')} — {ev.get('title','')}"
+                f"• {ev.get('date','')} {ev.get('time','')} — "
+                f"{'🔴' if ev.get('impact','HIGH')=='HIGH' else '🟠'} "
+                f"{ev.get('title','')}"
+                f"{' [' + ev.get('currency','') + ']' if ev.get('currency','USD') not in ('USD','US') else ''}"
                 for ev in events[:8]
             ]
             events_txt = "\n\n📅 *Eventi macro della settimana:*\n" + "\n".join(ev_lines)
@@ -1543,9 +1547,15 @@ async def check_macro_alerts(bot):
         # bias NEUTRO/BUY/SELL/SELL tutti per le 14:30, screenshot Telegram).
         # get_upcoming_events() ordina già per date+time, il raggruppamento
         # preserva l'ordine.
+        # Raggruppa anche per valuta, non solo data+ora: dal 2026-09-16 gli
+        # eventi non sono più tutti USD (vedi analyzer._passes_news_filter)
+        # — un evento USD e uno GBP che cadono nello stesso minuto IT non
+        # sono lo stesso rilascio e non vanno mai combinati in un solo bias
+        # (analyze_combined_macro_event assume esplicitamente che il gruppo
+        # sia "lo stesso rilascio", vero solo se è anche la stessa valuta).
         groups: dict = {}
         for ev in events:
-            gk = f"{ev['date']}_{ev['time']}"
+            gk = f"{ev['date']}_{ev['time']}_{ev.get('currency', 'USD')}"
             groups.setdefault(gk, []).append(ev)
 
         for group_key, group_events in groups.items():
@@ -1669,10 +1679,16 @@ async def check_macro_alerts(bot):
                         f"📊 *{_escape_md(e['title'])}*: Prev `{e.get('forecast','N/A')}` | Prec `{e.get('previous','N/A')}`\n"
                         for e in group_events
                     )
+                # Emoji impatto + valuta: dal 2026-09-16 il gruppo non è più
+                # sempre "USD rosso" (vedi analyzer._passes_news_filter), va
+                # detto esplicitamente cosa si sta guardando.
+                impact_emoji = "🔴" if ev.get("impact", "HIGH") == "HIGH" else "🟠"
+                currency_tag = ev.get("currency", "USD")
                 msg = (
                     f"⚠️ *ALERT MACRO — TRA 30 MINUTI*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"📅 *{_escape_md(combined_title)}*\n"
+                    f"{impact_emoji} Impatto: *{ev.get('impact','HIGH')}* | Valuta: *{currency_tag}*\n"
                     f"🕐 Orario: *{ev['time']} IT*\n"
                     f"{dettagli}"
                     f"💰 XAU/USD: *${_fmt(price)}*\n"
@@ -1904,7 +1920,7 @@ async def send_morning_report(bot: Bot):
             get_current_price_async(),
             asyncio.to_thread(get_extended_news),
             asyncio.to_thread(get_news_sentiment),
-            asyncio.to_thread(get_economic_events),
+            asyncio.to_thread(get_economic_events, broad=True),
         )
         s_label = sentiment.get("label","NEUTRAL")
         s_emoji = "🟢" if s_label == "BULLISH" else "🔴" if s_label == "BEARISH" else "⚪"
@@ -1912,7 +1928,10 @@ async def send_morning_report(bot: Bot):
 
         if events:
             events_txt = "📅 *EVENTI MACRO OGGI:*\n" + "\n".join(
-                f"• {_escape_md(ev.get('title','?'))} — {ev.get('time','?')} IT"
+                f"• {'🔴' if ev.get('impact','HIGH')=='HIGH' else '🟠'} "
+                f"{_escape_md(ev.get('title','?'))}"
+                f"{' [' + ev.get('currency','') + ']' if ev.get('currency','USD') not in ('USD','US') else ''}"
+                f" — {ev.get('time','?')} IT"
                 for ev in events[:8]
             )
         else:

@@ -1035,6 +1035,48 @@ def _parse_calendar_datetime(raw_date: str) -> datetime:
     return parsed.astimezone(TIMEZONE)
 
 
+# Valute "major" — quelle il cui impatto ad alto/medio livello si riflette
+# storicamente sul dollaro/DXY (e quindi sull'oro) in modo diretto e
+# consolidato, non solo USD. Estensione richiesta esplicitamente
+# dall'utente il 2026-09-16 dopo aver perso un movimento reale di ~80 pip
+# su un dato USD arancione (Retail Sales m/m, ore 14:30 IT / 8:30 ET) che
+# il vecchio filtro (solo rosso+USD) escludeva del tutto — vedi
+# _passes_news_filter sotto per il criterio esatto.
+MAJOR_CURRENCIES = {"usd", "us", "eur", "gbp", "jpy", "chf", "aud", "cad", "nzd"}
+
+
+def _passes_news_filter(impact: str, currency: str) -> bool:
+    """
+    Criterio UNICO di inclusione per alert/blackout macro, condiviso da
+    get_upcoming_events() e get_economic_events() — prima le due funzioni
+    avevano ciascuna la propria copia dello stesso `if` (stesso pattern di
+    bug già visto altre volte in questo codebase, vedi
+    feedback_dual_mechanism_drift_pattern in memoria): un fix fatto su una
+    sola delle due sarebbe silenziosamente rimasto fuori dall'altra.
+
+    - Rosso (High): incluso per USD e le altre valute major (MAJOR_CURRENCIES)
+      — un rialzo BOE, una CPI tedesca sorprendente, una decisione BOJ, ecc.
+      possono muovere il dollaro su base ponderata (DXY) e quindi l'oro
+      quanto un dato USD, anche se l'oro non li quota direttamente.
+    - Arancione (Medium): incluso SOLO per USD — l'oro reagisce in modo
+      diretto e affidabile ai dati USD anche di impatto medio (vedi
+      Retail Sales sopra); per le altre valute un Medium è normalmente
+      troppo debole/indiretto per giustificare un blackout trading, e
+      includerle tutte creerebbe più rumore che segnale (decine di eventi
+      Medium/giorno su valute minori rispetto all'oro).
+    - Tutto il resto (Low, valute non major) è escluso.
+    """
+    impact = (impact or "").lower()
+    currency = (currency or "").lower()
+    if currency not in MAJOR_CURRENCIES:
+        return False
+    if impact == "high":
+        return True
+    if impact == "medium" and currency in ("usd", "us"):
+        return True
+    return False
+
+
 def get_upcoming_events(days_ahead: int = 7, hours_lookback: float = 0.0) -> list:
     """
     Ritorna tutti gli eventi USD ad alto impatto per i prossimi N giorni.
@@ -1061,7 +1103,7 @@ def get_upcoming_events(days_ahead: int = 7, hours_lookback: float = 0.0) -> lis
             currency = ev.get("country", "").lower()
             title    = ev.get("title", "")
 
-            if impact != "high" or currency not in ["usd", "us"]:
+            if not _passes_news_filter(impact, currency):
                 continue
             if len(raw_date) < 16:
                 continue
@@ -1079,7 +1121,8 @@ def get_upcoming_events(days_ahead: int = 7, hours_lookback: float = 0.0) -> lis
                 "date":       ev_it.strftime("%Y-%m-%d"),
                 "time":       ev_it.strftime("%H:%M"),   # orario IT corretto
                 "datetime":   ev_it.isoformat(),
-                "impact":     "HIGH",
+                "impact":     impact.upper(),
+                "currency":   currency.upper(),
                 "forecast":   ev.get("forecast", "N/A"),
                 "previous":   ev.get("previous", "N/A"),
                 "actual":     ev.get("actual", "N/A"),
@@ -1125,7 +1168,7 @@ def _fetch_calendar_raw() -> list:
     raise ValueError(f"Calendario status {r.status_code}")
 
 
-def get_economic_events() -> dict:
+def get_economic_events(broad: bool = False) -> dict:
     """
     Calendario economico — eventi ad alto impatto oggi.
 
@@ -1133,6 +1176,25 @@ def get_economic_events() -> dict:
     La versione precedente confrontava ev_hour (ET) con now_hour (IT) direttamente,
     causando blackout nelle ore sbagliate (6h di offset in estate, 6h in inverno).
     Ora convertiamo correttamente ET → Europe/Rome con pytz.
+
+    broad: se True, usa lo stesso filtro allargato di get_upcoming_events()
+    (rosso per USD e le altre valute major, arancione anche per il solo
+    USD — vedi _passes_news_filter) invece del filtro originale (solo
+    rosso USD). Di proposito NON è il default: questa funzione alimenta
+    anche "high_impact_today"/"imminent", usati dentro full_analyze()
+    (econ_risk) e event_driven_strategy() per abbassare la confidenza o
+    bloccare nuovi segnali — allargare quel gate cambierebbe il
+    comportamento di trading quasi tutti i giorni (eventi Medio/USD e Alto
+    su altre valute sono molto più frequenti del solo Alto/USD) senza
+    alcuna validazione statistica alle spalle, il tipo di cambiamento che
+    lo standard del progetto vieta di fare alla cieca (vedi
+    feedback_conservative_validation_standard). broad=True va passato solo
+    dalle superfici puramente informative (/macro, report mattutino) che
+    non decidono se aprire/bloccare trade — l'alert 30-minuti-prima con
+    blackout (check_macro_alerts, via get_upcoming_events) usa già di suo
+    il filtro allargato perché quello È la richiesta esplicita dell'utente
+    (2026-09-16): non farsi sorprendere da una notizia, non ricalibrare il
+    resto della pipeline di scoring.
     """
     try:
         events_raw = _fetch_calendar_raw()
@@ -1155,7 +1217,8 @@ def get_economic_events() -> dict:
             impact   = ev.get("impact", "").lower()
             currency = ev.get("country", "").lower()
 
-            if impact != "high" or currency not in ["usd", "us"]:
+            passes = _passes_news_filter(impact, currency) if broad else (impact == "high" and currency in ("usd", "us"))
+            if not passes:
                 continue
             if len(raw_date) < 16:
                 continue
@@ -1180,7 +1243,8 @@ def get_economic_events() -> dict:
                 "hour":     ev_hour_it,   # ora IT (per confronti)
                 "date":     ev_date_it,
                 "datetime": ev_it.isoformat(),
-                "impact":   "HIGH",
+                "impact":   impact.upper(),
+                "currency": currency.upper(),
             }
             high_imp.append(ev_data)
             if ev_it > now_it:
