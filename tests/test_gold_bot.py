@@ -19,6 +19,7 @@ Ogni test usa un DB SQLite temporaneo isolato (mai il goldbot.db reale).
 """
 
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -770,6 +771,42 @@ class TestBiasEventoVsPostEvento(GoldBotTestCase):
         self.assertIn("❌ *NON CONFERMATO*", text)       # blocco post-evento: -49.70$, BUY smentito
         self.assertIn("+9.70$", text)
         self.assertIn("-49.70$", text)
+
+    def test_post_event_still_fires_after_a_deploy_restart_delay(self):
+        """Bug reale del 2026-09-16: un deploy Railway (riavvio del processo)
+        alle 20:11:56 per un evento FOMC delle 20:00 ha fatto scattare il
+        primo giro di check_macro_alerts dopo il riavvio solo alle 20:16:56
+        (l'intervallo dello scheduler è di 5 minuti) — a quel punto
+        mins_away era -16.9, appena fuori dalla vecchia finestra stretta
+        (-15/-8), e il resoconto POST-EVENTO non è mai stato inviato.
+        Qui si simula lo stesso identico ritardo (-17 minuti, prima esclusa,
+        ora inclusa nella finestra allargata a 30 minuti) e si verifica che
+        il messaggio scatti comunque, con i minuti reali riportati nel testo
+        invece del fisso "10-15 min" (che sarebbe fuorviante in ritardo)."""
+        import asyncio
+        post_event = self._make_event(-17)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {
+            "bias": "SELL", "price": 4347.10, "price_immediate": 4340.00,
+        }
+
+        bot = asyncio.run(self._run(post_event, 4330.00))
+
+        post_calls = [
+            c for c in bot.send_message.call_args_list
+            if "POST-EVENTO" in c.kwargs.get("text", "")
+        ]
+        self.assertEqual(len(post_calls), 1, "il resoconto post-evento deve scattare anche con 17 minuti di ritardo")
+        text = post_calls[0].kwargs["text"]
+        # I minuti reali variano di qualche unità per l'overhead di
+        # esecuzione del test (datetime.now() ricalcolato dentro
+        # check_macro_alerts, non lo stesso istante di _make_event) — si
+        # verifica che sia un numero vicino a 17, non un valore esatto, e
+        # soprattutto che NON sia più il vecchio testo fisso fuorviante.
+        match = re.search(r"~(\d+) min", text)
+        self.assertIsNotNone(match, "il testo deve riportare i minuti reali trascorsi")
+        self.assertTrue(15 <= int(match.group(1)) <= 20, f"minuti fuori range plausibile: {match.group(1)}")
+        self.assertNotIn("10-15 min", text)
 
 
 if __name__ == "__main__":

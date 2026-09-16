@@ -1715,10 +1715,36 @@ async def check_macro_alerts(bot):
                     and -7 <= mins_away <= -1):
                 pre_for_snapshot["price_immediate"] = await get_current_price_async()
 
-            # POST-EVENTO (8-15 min dopo)
+            # POST-EVENTO (8-15 min dopo, tollerante fino a 60 min)
+            #
+            # BUG REALE TROVATO IL 2026-09-16: la finestra stretta originale
+            # (-15/-8, larga solo 7 minuti) è stata saltata del tutto per un
+            # FOMC delle 20:00 — un deploy (il bot gira su Railway, un
+            # riavvio ricarica lo stato ma azzera anche il timer dello
+            # scheduler APScheduler a intervalli fissi) è avvenuto alle
+            # 20:11:56, e il primo giro di check_macro_alerts dopo il
+            # riavvio è scattato solo alle 20:16:56 (l'intervallo è di 5
+            # minuti) — a quel punto mins_away era già -16.9, fuori dalla
+            # finestra per soli ~2 minuti. Nessuna eccezione, nessun bug di
+            # calcolo: solo una finestra troppo stretta per sopravvivere a
+            # un riavvio proprio nel mezzo. Stesso identico pattern già
+            # risolto il 2026-09-06 per la previsione statistica sotto
+            # (allargata da 7 minuti a 3 ore per lo stesso motivo) — qui non
+            # era mai stato applicato. Allargata a 60 minuti (via
+            # POST_EVENT_MAX_DELAY_MIN sotto): stesso post_key quindi invia
+            # comunque una sola volta, il testo del resoconto ora riporta i
+            # minuti trascorsi REALI invece di "10-15 min" fisso (che
+            # sarebbe stato fuorviante se il messaggio arriva in ritardo).
+            # 30 minuti (non di più): abbondante contro il gap di 5 minuti
+            # dello scheduler dopo un riavvio, ma abbastanza corto da restare
+            # ben distinto dalla finestra di 3 ore della previsione
+            # statistica sotto (le due finestre si sovrappongono di
+            # proposito solo per un margine ridotto, non del tutto).
+            POST_EVENT_MAX_DELAY_MIN = 30
             post_key = f"POST_{group_key}"
-            if -15 <= mins_away <= -8 and post_key not in _sent_post_event_alerts:
+            if -POST_EVENT_MAX_DELAY_MIN <= mins_away <= -8 and post_key not in _sent_post_event_alerts:
                 price = await get_current_price_async()
+                minutes_elapsed = round(-mins_away)
                 # Resoconto oggettivo: bias previsto pre-evento vs movimento
                 # di prezzo reale — confronto aritmetico sui prezzi, non una
                 # seconda opinione dell'AI. Due blocchi separati (bias
@@ -1754,7 +1780,7 @@ async def check_macro_alerts(bot):
                     blocco_post = (
                         f"🕒 Bias post-evento: *{pre_bias}* (era ${pre['price']})\n"
                         f"{esito_post}\n"
-                        f"📐 Variazione a 10-15 min: *{segno_post}{change_post:.2f}$*"
+                        f"📐 Variazione a ~{minutes_elapsed} min: *{segno_post}{change_post:.2f}$*"
                     )
 
                     resoconto = f"{blocco_evento}\n\n{blocco_post}"
