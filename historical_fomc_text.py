@@ -323,6 +323,23 @@ def _evaluate_score_split(df, horizon: str, train_fraction: float) -> dict | Non
     direction_correct = np.sign(pred_test) == np.sign(test[horizon].to_numpy(dtype=float))
     direction_acc = float(direction_correct.mean())
 
+    # Terzo bug di rigore, trovato il 2026-09-16 confrontando BOJ Statement
+    # e FOMC Meeting Minutes con dati appena allargati: una direction_accuracy
+    # sopra la soglia fissa (0.55) puo' essere interamente spiegata dal fatto
+    # che l'oro e' salito piu' spesso che sceso in QUEL sotto-periodo di test
+    # (drift secolare), non da un vero contenuto informativo del punteggio
+    # hawkish/dovish — un modello che "predice sempre positivo" per via
+    # dell'intercetta del fit ottiene la stessa accuratezza senza usare lo
+    # score affatto. Verificato concretamente: su 3 dei 4 split di BOJ
+    # Statement e 2 dei 4 di FOMC Meeting Minutes, la direction_accuracy del
+    # modello NON superava (a volte era sotto) la baseline banale "indovina
+    # sempre il segno maggioritario del set di test" — un confronto che il
+    # solo controllo r2_test>r2_naive non intercetta perche' quel confronto
+    # riguarda l'errore quadratico medio, non il segno. trivial_direction_accuracy
+    # e direction_accuracy_excess sono il confronto esplicito mancante.
+    base_rate_positive = float((test[horizon].to_numpy(dtype=float) > 0).mean())
+    trivial_direction_accuracy = max(base_rate_positive, 1 - base_rate_positive)
+
     return {
         "train_fraction": train_fraction, "n_train": len(train), "n_test": len(test),
         "r2_test": round(r2_test, 3), "r2_naive_test": round(r2_naive, 3),
@@ -336,6 +353,8 @@ def _evaluate_score_split(df, horizon: str, train_fraction: float) -> dict | Non
         # essere scoperto confrontando i numeri con le serie deployate.
         "beats_naive": bool(r2_test > r2_naive and r2_test > 0),
         "direction_accuracy": round(direction_acc, 3),
+        "trivial_direction_accuracy": round(trivial_direction_accuracy, 3),
+        "direction_accuracy_excess": round(direction_acc - trivial_direction_accuracy, 3),
     }
 
 
@@ -429,9 +448,28 @@ def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = N
     # sfruttabile prima di costruirci sopra qualunque automazione live.
     DIRECTION_ACCURACY_FLOOR = 0.55
     mean_dir_acc_by_horizon = res_df.groupby("horizon")["direction_accuracy"].mean()
+
+    # Quarto controllo, aggiunto il 2026-09-16 (terzo bug di rigore trovato
+    # nello stesso giorno, dopo aver allargato BOJ Statement e FOMC Meeting
+    # Minutes a n>100 e visto entrambi passare DIRECTION_ACCURACY_FLOOR "sulla
+    # carta"): una direction_accuracy sopra 0.55 puo' essere interamente un
+    # riflesso del drift secolare dell'oro nel sotto-periodo di test (l'oro e'
+    # salito piu' spesso che sceso in quella finestra), non del contenuto
+    # informativo dello score — vedi il commento su direction_accuracy_excess
+    # in _evaluate_score_split. Richiediamo che il modello batta la baseline
+    # banale "indovina sempre il segno maggioritario" su OGNI split passante,
+    # stessa filosofia gia' usata per beats_naive (mai una media che nasconde
+    # split negativi). Concretamente: BOJ Statement e FOMC Meeting Minutes,
+    # dopo il backfill 2026-09-16, avevano ENTRAMBI almeno uno split con
+    # direction_accuracy_excess <= 0 (a volte -0.018) nonostante passassero
+    # il floor assoluto — declassati da "genuino" a "non genuino" da questo
+    # controllo.
+    excess_positive_all_by_horizon = res_df.groupby("horizon")["direction_accuracy_excess"].agg(lambda s: (s > 0).all())
+
     genuine_horizons = [
         h for h in beats_all_by_horizon.index
         if beats_all_by_horizon[h] and mean_dir_acc_by_horizon[h] >= DIRECTION_ACCURACY_FLOOR
+        and excess_positive_all_by_horizon[h]
     ]
     n_genuine = len(genuine_horizons)
 
@@ -442,9 +480,11 @@ def validate_fomc_scores(db_path: str = HIST_DB_PATH, event_name: str | None = N
     elif n_horizons_ok > 0:
         verdict = (
             f"EDGE STATISTICO SU {n_horizons_ok}/{len(_PRICE_HORIZONS)} ORIZZONTI MA NON GENUINO "
-            f"(n={n}) — batte il naive sulla carta ma direction_accuracy media sotto "
-            f"{DIRECTION_ACCURACY_FLOOR:.0%} su tutti gli orizzonti: R² positivo marginale, "
-            f"nessuna vera capacità predittiva della direzione. NON deployare."
+            f"(n={n}) — batte il naive sulla carta ma o la direction_accuracy media resta sotto "
+            f"{DIRECTION_ACCURACY_FLOOR:.0%}, o (anche se sopra) non supera in modo consistente la "
+            f"baseline banale 'indovina sempre il segno maggioritario nel periodo di test' su ogni "
+            f"split — spesso solo drift secolare del prezzo, non contenuto informativo dello score. "
+            f"NON deployare."
         )
     else:
         verdict = f"NESSUN EDGE — risultato pulito (n={n})"

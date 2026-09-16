@@ -157,6 +157,27 @@ CENTRAL_BANK_EVENT_NAMES = (
 KAGGLE_US_CSV_NAME = "kaggle_iscorod92_economic_calendar_us.csv"
 KAGGLE_US_SOURCE_NAME = "kaggle_iscorod92_us"
 
+# Fonte 4 (2026-09-16): dataset Kaggle youneseloiarm/global-economic-calendar
+# ("Global Economic Calendar", aggiornato 2025-10-26, stile Investing.com
+# identico a iscorod92 ma copertura 2020-01 -> 2025-09, quindi ~9 mesi PIU'
+# recente sul fronte che conta di piu': "PCE Price Index m/m" (headline) ha
+# il forecast/consensus valorizzato con continuita' quasi perfetta da fine
+# 2022 in poi (stesso pattern gia' visto in iscorod92), quindi ogni mese in
+# piu' verso il 2025 e' quasi sempre un punto usabile in piu' per il modello
+# a sorpresa - a differenza di iscorod92 che si fermava a dicembre 2024.
+# SOLO PCE Price Index m/m qui (non Core CPI y/y / PPI y/y: quelle due sono
+# gia' validate e deployate con n=104-114 da iscorod92, non serve altro).
+# Fuso orario: verificato riga per riga contro iscorod92 sulle date in
+# comune (stesso valore actual/forecast, stesso evento reale) - il campo
+# "time" di QUESTA fonte e' gia' UTC vero (offset 0), a differenza di
+# iscorod92 che richiede -1h: confermato su 8 date comuni in inverno/estate
+# USA (es. 20/12/2024 13:30 qui == 14:30 iscorod92 -1h, entrambi 13:30 UTC).
+KAGGLE_GLOBAL_CSV_NAME = "kaggle_youneseloiarm_global_calendar.csv"
+KAGGLE_GLOBAL_SOURCE_NAME = "kaggle_youneseloiarm_global"
+KAGGLE_GLOBAL_UTC_OFFSET_HOURS = 0
+KAGGLE_GLOBAL_EVENT_NAME = "PCE Price Index m/m"
+KAGGLE_GLOBAL_RAW_EVENT_NAME = "PCE price index (MoM)"
+
 # Nome grezzo nella fonte (con suffisso mese, es. "  (Dec)", rimosso da
 # _strip_month_suffix) -> nome canonico usato nel resto del DB, stessa
 # convenzione ForexFactory di HF/github_ff ("Core CPI m/m", "PPI m/m" ecc.
@@ -775,6 +796,129 @@ def ingest_kaggle_us_source(db_path: str = HIST_DB_PATH) -> int:
         )
 
     logger.info(f"kaggle_iscorod92: inserite {inserted:,} righe nuove (le altre erano già presenti, idempotente)")
+    return inserted
+
+
+def _load_kaggle_global_dataframe() -> pd.DataFrame:
+    path = RAW_DIR / KAGGLE_GLOBAL_CSV_NAME
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} non trovato — scaricare una volta con "
+            "'kaggle datasets download -d youneseloiarm/global-economic-calendar --unzip' "
+            f"e salvare il CSV in {RAW_DIR} col nome {KAGGLE_GLOBAL_CSV_NAME}"
+        )
+    df = pd.read_csv(path, low_memory=False)
+    expected_cols = {"date", "time", "currency", "event", "actual", "forecast", "previous"}
+    missing = expected_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Schema kaggle_youneseloiarm cambiato, colonne mancanti: {missing}")
+    logger.info(f"kaggle_youneseloiarm: {len(df):,} righe grezze lette")
+    return df
+
+
+def _normalize_kaggle_global(df: pd.DataFrame, existing_dates: dict[str, set] | None = None) -> pd.DataFrame:
+    """Stesso schema di _normalize_kaggle_us, ma solo per PCE Price Index
+    m/m (vedi commento sopra KAGGLE_GLOBAL_* per il motivo) e senza offset
+    orario (questa fonte e' gia' UTC, verificato)."""
+    out = df[df["currency"] == "USD"].copy()
+    out["base_event"] = out["event"].apply(_strip_month_suffix)
+    out = out[out["base_event"] == KAGGLE_GLOBAL_RAW_EVENT_NAME].copy()
+    logger.info(f"kaggle_youneseloiarm: {len(out):,} righe USD PCE Price Index m/m dopo il filtro")
+
+    naive_utc = pd.to_datetime(
+        out["date"] + " " + out["time"], format="%d/%m/%Y %H:%M", errors="coerce"
+    )
+    bad_time = naive_utc.isna()
+    if bad_time.any():
+        logger.info(f"kaggle_youneseloiarm: {bad_time.sum():,} righe con data/ora non parsabile scartate")
+    out = out[~bad_time]
+    naive_utc = naive_utc[~bad_time]
+    out["datetime_utc"] = (naive_utc - pd.Timedelta(hours=KAGGLE_GLOBAL_UTC_OFFSET_HOURS)).dt.tz_localize("UTC")
+
+    out["date_utc"] = out["datetime_utc"].dt.strftime("%Y-%m-%d")
+    out["datetime_utc"] = out["datetime_utc"].apply(lambda ts: ts.isoformat())
+    out["event_name"] = KAGGLE_GLOBAL_EVENT_NAME
+
+    parsed = out["actual"].apply(_parse_number)
+    out["actual_num"], out["unit_actual"] = zip(*parsed) if len(parsed) else ([], [])
+    parsed = out["forecast"].apply(_parse_number)
+    out["forecast_num"], out["unit_forecast"] = zip(*parsed) if len(parsed) else ([], [])
+    parsed = out["previous"].apply(_parse_number)
+    out["previous_num"], out["unit_previous"] = zip(*parsed) if len(parsed) else ([], [])
+    out["unit"] = out["unit_actual"].combine_first(out["unit_forecast"]).combine_first(out["unit_previous"])
+
+    out["macro_category"] = out["event_name"].apply(_tag_category)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    out["event_uid"] = out.apply(
+        lambda r: _event_uid("USD", r["event_name"], r["datetime_utc"], KAGGLE_GLOBAL_SOURCE_NAME), axis=1
+    )
+    out["ingested_at"] = now_iso
+    out["source"] = KAGGLE_GLOBAL_SOURCE_NAME
+    out["source_detail"] = None
+    out["impact"] = "HIGH"
+
+    out = out.rename(columns={
+        "actual": "actual_raw", "forecast": "forecast_raw", "previous": "previous_raw",
+    })[[
+        "event_uid", "datetime_utc", "date_utc", "impact", "event_name", "macro_category",
+        "actual_raw", "forecast_raw", "previous_raw", "actual_num", "forecast_num", "previous_num",
+        "unit", "source", "source_detail", "ingested_at",
+    ]].assign(currency="USD")
+
+    if existing_dates is not None:
+        before = len(out)
+        keep = out.apply(
+            lambda r: r["date_utc"] not in existing_dates.get(r["event_name"], set()), axis=1
+        )
+        out = out[keep]
+        logger.info(
+            f"kaggle_youneseloiarm: {before - len(out):,} righe scartate perché la data era già coperta "
+            f"da un'altra fonte per lo stesso evento (gap-filling, mai duplicati)"
+        )
+
+    return out
+
+
+def ingest_kaggle_global_source(db_path: str = HIST_DB_PATH) -> int:
+    existing_dates = _existing_dates_by_event((KAGGLE_GLOBAL_EVENT_NAME,), db_path)
+    df = _load_kaggle_global_dataframe()
+    norm = _normalize_kaggle_global(df, existing_dates=existing_dates)
+
+    init_historical_db(db_path)
+    inserted = 0
+    with _connect(db_path) as conn:
+        for row in norm.itertuples(index=False):
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO macro_events (
+                    event_uid, datetime_utc, date_utc, currency, impact, event_name,
+                    macro_category, actual_raw, forecast_raw, previous_raw,
+                    actual_num, forecast_num, previous_num, unit, source, source_detail, ingested_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    row.event_uid, row.datetime_utc, row.date_utc, row.currency, row.impact,
+                    row.event_name, row.macro_category, row.actual_raw, row.forecast_raw, row.previous_raw,
+                    row.actual_num, row.forecast_num, row.previous_num, row.unit,
+                    row.source, row.source_detail, row.ingested_at,
+                ),
+            )
+            inserted += cur.rowcount
+
+        if len(norm):
+            now_iso = datetime.now(timezone.utc).isoformat()
+            date_min, date_max = norm["date_utc"].min(), norm["date_utc"].max()
+            conn.execute(
+                "INSERT OR IGNORE INTO macro_events_coverage "
+                "(source, range_start_utc, range_end_utc, row_count, ingested_at, notes) VALUES (?,?,?,?,?,?)",
+                (
+                    KAGGLE_GLOBAL_SOURCE_NAME, date_min, date_max, len(norm), now_iso,
+                    "Kaggle youneseloiarm/global-economic-calendar, solo PCE Price Index m/m "
+                    "(gap-filling oltre dicembre 2024, dove si fermava kaggle_iscorod92_us)",
+                ),
+            )
+
+    logger.info(f"kaggle_youneseloiarm: inserite {inserted:,} righe nuove (le altre erano già presenti, idempotente)")
     return inserted
 
 
