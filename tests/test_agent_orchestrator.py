@@ -168,6 +168,37 @@ def _full_analyze_result(**overrides) -> dict:
     return base
 
 
+class TestOrderTypeNotTruncated(unittest.IsolatedAsyncioTestCase):
+    """Bug reale trovato in produzione il 2026-09-16: agent_structure_analyst
+    troncava "BUY LIMIT"/"SELL STOP" a solo "LIMIT"/"STOP" (per comodo dei
+    messaggi Telegram) e quel valore troncato finiva anche nel trade salvato
+    per l'EA (gold_bot.py) — GoldMindCopier.mq5 confronta la stringa esatta
+    "BUY LIMIT"/"SELL STOP" e scartava ogni ordine pending, mai copiandolo
+    su MT5. state.order_type deve restare la forma COMPLETA esattamente
+    come restituita da full_analyze()."""
+
+    async def test_pending_order_type_stays_full_form(self):
+        state = TradingState(timeframe="4h")
+        with patch("analyzer.full_analyze",
+                   return_value=_full_analyze_result(signal="BUY", order_type="BUY LIMIT", regime="NORMAL")):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.order_type, "BUY LIMIT")
+
+    async def test_sell_stop_order_type_stays_full_form(self):
+        state = TradingState(timeframe="4h")
+        with patch("analyzer.full_analyze",
+                   return_value=_full_analyze_result(signal="SELL", order_type="SELL STOP", regime="NORMAL")):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.order_type, "SELL STOP")
+
+    async def test_market_order_type_unaffected(self):
+        state = TradingState(timeframe="4h")
+        with patch("analyzer.full_analyze",
+                   return_value=_full_analyze_result(signal="BUY", order_type="BUY", regime="NORMAL")):
+            await agent_structure_analyst(state)
+        self.assertEqual(state.order_type, "BUY")
+
+
 class TestBlockedDirectionByRegime(unittest.IsolatedAsyncioTestCase):
     """Copre il blocco direzionale aggiunto in agent_structure_analyst:
     su 1day, SELL in regime NORMAL è strutturalmente debole/in perdita su

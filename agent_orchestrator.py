@@ -357,13 +357,14 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
         )
 
         state.signal     = data.get("signal", "NEUTRAL")
-        raw_order = data.get("order_type", state.signal)
-        if raw_order.startswith(state.signal + " "):
-            state.order_type = raw_order[len(state.signal):].strip()
-        elif raw_order == state.signal:
-            state.order_type = state.signal
-        else:
-            state.order_type = raw_order
+        # Forma COMPLETA ("BUY LIMIT", "SELL STOP", "BUY", "SELL"), mai
+        # troncata: l'EA (GoldMindCopier.mq5) confronta questa stringa
+        # esatta e scarta l'ordine se non la riconosce — un bug qui aveva
+        # tolto il prefisso BUY/SELL lasciando solo "LIMIT"/"STOP" perché
+        # comodo per i messaggi Telegram, ma quello stesso valore troncato
+        # finiva anche nel trade salvato per l'EA (vedi gold_bot.py). Per il
+        # solo scopo display, usare _order_label() sulla forma completa.
+        state.order_type = data.get("order_type", state.signal)
         state.entry      = float(data.get("entry", 0))
         state.sl         = float(data.get("sl", 0))
         state.tp1        = float(data.get("tp1", 0))
@@ -454,7 +455,7 @@ async def agent_structure_analyst(state: TradingState) -> AgentResult:
         state.add_log(
             "🔍 StructureAnalyst",
             f"{'✅' if state.structure_ok else '⏭️'} "
-            f"{state.signal} {state.order_type} @ {state.entry} | "
+            f"{state.signal} {_order_label(state.order_type, state.signal)} @ {state.entry} | "
             f"Prob: {state.prob}% | Regime: {state.regime} | R:R {state.rr}"
         )
         return AgentResult(success=True, data={"signal": state.signal, "prob": state.prob})
@@ -705,7 +706,7 @@ async def agent_decision_maker(state: TradingState) -> AgentResult:
     # Regola 5 — tutto OK: esegui
     state.final_decision  = "EXECUTE"
     state.decision_reason = (
-        f"{state.signal} {state.order_type} @ {state.entry} | "
+        f"{state.signal} {_order_label(state.order_type, state.signal)} @ {state.entry} | "
         f"Prob: {state.prob}% | R:R: {state.rr} | "
         f"Risk: {state.risk_pct}% | Regime: {state.regime}"
     )
