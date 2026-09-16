@@ -54,6 +54,56 @@ class TestComputeStats(unittest.TestCase):
         self.assertEqual(stats["win_rate"], 0)
 
 
+class TestSimulatedBudget(unittest.TestCase):
+    """2026-09-16: budget simulato $ in dashboard (richiesta esplicita
+    dell'utente) — un lotto FISSO di riferimento applicato ai prezzi
+    entry/exit_price REALI già salvati per ogni trade, per vedere quanto
+    avrebbe fruttato/perso ogni segnale senza bisogno di un conto demo
+    MT5. Formula verificata contro risk_manager.calculate_lot_size:
+    $ = distanza_prezzo × 100 once/lotto × lotto."""
+
+    def test_pnl_usd_buy_winning(self):
+        trade = _trade(signal="BUY", entry=4300.0, exit_price=4310.0)  # +$10
+        # 10 * 100 * 0.02 = 20.0
+        self.assertEqual(db._trade_pnl_usd(trade, lot_size=0.02), 20.0)
+
+    def test_pnl_usd_sell_losing(self):
+        """Prezzo sale ma il segnale è SELL -> perdita, non guadagno."""
+        trade = _trade(signal="SELL", entry=4300.0, exit_price=4310.0)
+        self.assertEqual(db._trade_pnl_usd(trade, lot_size=0.02), -20.0)
+
+    def test_pnl_usd_matches_10_pips_per_001_lot_reference(self):
+        """Il caso concreto usato per verificare la formula con l'utente:
+        10 pip (= $1.00 di movimento, XAUUSD_PIP_SIZE=0.10) su 0.01 lotto
+        deve fare $1.00 esatto."""
+        trade = _trade(signal="BUY", entry=4300.00, exit_price=4301.00)
+        self.assertAlmostEqual(db._trade_pnl_usd(trade, lot_size=0.01), 1.00, places=6)
+
+    def test_default_lot_size_is_module_constant(self):
+        trade = _trade(signal="BUY", entry=4300.0, exit_price=4310.0)
+        self.assertEqual(db._trade_pnl_usd(trade), 10.0 * 100 * db.SIM_LOT_SIZE)
+
+    def test_compute_stats_exposes_sim_budget(self):
+        trades = [
+            _trade(signal="BUY", entry=4300.0, exit_price=4310.0),   # +$10 move
+            _trade(signal="SELL", entry=4300.0, exit_price=4290.0),  # +$10 move (SELL wins)
+        ]
+        stats = db.compute_stats(trades)
+        expected_total = 2 * 10.0 * 100 * db.SIM_LOT_SIZE
+        self.assertAlmostEqual(stats["total_usd"], expected_total, places=6)
+        self.assertAlmostEqual(
+            stats["sim_budget_usd"], db.SIM_STARTING_BUDGET_USD + expected_total, places=6
+        )
+        self.assertEqual(stats["sim_starting_budget_usd"], db.SIM_STARTING_BUDGET_USD)
+        self.assertEqual(stats["sim_lot_size"], db.SIM_LOT_SIZE)
+
+    def test_cancelled_trade_contributes_zero_to_sim_budget(self):
+        trades = [_trade(result="CANCELLED", entry=4300.0, exit_price=4400.0)]
+        stats = db.compute_stats(trades)
+        self.assertEqual(stats["total_usd"], 0.0)
+        self.assertEqual(stats["sim_budget_usd"], db.SIM_STARTING_BUDGET_USD)
+
+
 class TestCancelledTradeRemovedFromDashboard(unittest.TestCase):
     """FIX (2026-09-07): un CANCELLED (nessun rischio reale, 0R fisso) non
     deve più restare per sempre in dashboard/DB — close_trade() lo elimina

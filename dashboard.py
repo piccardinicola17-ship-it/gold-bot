@@ -26,7 +26,14 @@ from flask import Flask, abort, g, jsonify, redirect, render_template_string, re
 from trade_manager import (
     is_decisive_win, amend_closed_trade, RESULT_PNL, DB_PATH, _connect,
     load_broker_orders_pending, ack_broker_order, get_broker_fills,
+    XAUUSD_PIP_SIZE,
 )
+# XAUUSD_OZ_PER_LOT vive in risk_manager (unica fonte di verità già usata
+# per il sizing reale, vedi calculate_lot_size) — importata qui invece di
+# ridefinirla per non aggiungere una terza copia della stessa costante
+# (XAUUSD_PIP_SIZE sopra era già duplicata in due file, stesso pattern:
+# vedi feedback_dual_mechanism_drift_pattern in memoria).
+from risk_manager import XAUUSD_OZ_PER_LOT
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -34,7 +41,20 @@ TIMEZONE = pytz.timezone("Europe/Rome")
 
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
 ALLOW_RESET = os.environ.get("ALLOW_DASHBOARD_RESET", "false").lower() == "true"
-XAUUSD_PIP_SIZE = float(os.environ.get("XAUUSD_PIP_SIZE", "0.10"))
+
+# Budget simulato in $ (2026-09-16, richiesta esplicita dell'utente): la
+# dashboard mostra quanto avrebbe fruttato/perso ogni segnale REALE del
+# bot con un lotto FISSO di riferimento su un conto da SIM_STARTING_BUDGET_USD
+# — non serve un conto demo MT5 per "vedere i soldi", i prezzi entry/exit
+# sono già quelli reali salvati per ogni trade. Lotto fisso (non calcolato
+# dinamicamente sull'1% di rischio come fa calculate_lot_size) per scelta
+# esplicita dell'utente: con un budget piccolo il sizing dinamico
+# risulterebbe spesso "non tradabile" (lotto arrotondato a 0) su stop loss
+# larghi, mentre l'utente vuole vedere un numero per OGNI segnale.
+# Mostrato in $ (non convertito in €) perché l'oro è comunque quotato in
+# dollari — evita un secondo tasso di cambio da tenere aggiornato.
+SIM_STARTING_BUDGET_USD = float(os.environ.get("SIM_STARTING_BUDGET_USD", "500"))
+SIM_LOT_SIZE = float(os.environ.get("SIM_LOT_SIZE", "0.02"))
 
 
 def _is_loopback() -> bool:
@@ -117,6 +137,23 @@ def _trade_pips(trade: dict) -> float:
     return round(((exit_price - entry) * direction) / XAUUSD_PIP_SIZE, 1)
 
 
+def _trade_pnl_usd(trade: dict, lot_size: float = SIM_LOT_SIZE) -> float:
+    """Profitto/perdita in $ che il segnale REALE (entry/exit_price già
+    salvati) avrebbe fatto con un lotto fisso di riferimento — vedi
+    commento sopra SIM_STARTING_BUDGET_USD. Calcolato dal prezzo grezzo,
+    non dai pip già arrotondati a 1 decimale (_trade_pips), per non
+    accumulare un doppio arrotondamento sulla conversione in dollari.
+    Formula invariata rispetto a calculate_lot_size (risk_manager.py):
+    $ = distanza_prezzo × once_per_lotto × lotto."""
+    try:
+        entry = float(trade.get("entry"))
+        exit_price = float(trade.get("exit_price"))
+    except (TypeError, ValueError):
+        return 0.0
+    direction = 1.0 if trade.get("signal") == "BUY" else -1.0
+    return round((exit_price - entry) * direction * XAUUSD_OZ_PER_LOT * lot_size, 2)
+
+
 def _get_trades() -> list[dict]:
     if not os.path.exists(DB_PATH):
         return []
@@ -131,12 +168,16 @@ def _get_trades() -> list[dict]:
             ).fetchall()
         trades = [dict(row) for row in rows]
         for trade in trades:
+            trade["sim_lot_size"] = SIM_LOT_SIZE
             if trade.get("status") == "CLOSED":
                 # Un CANCELLED non ha un P&L reale (sempre 0R) — i pip salvati
                 # sono solo la distanza ipotetica fino al prezzo di
                 # cancellazione e confondono in dashboard. Solo visivo: il
-                # dato salvato in DB resta intatto.
-                trade["pips"] = 0.0 if trade.get("result") == "CANCELLED" else _trade_pips(trade)
+                # dato salvato in DB resta intatto. Stesso principio per
+                # sim_pnl_usd, aggiunto il 2026-09-16.
+                is_cancelled = trade.get("result") == "CANCELLED"
+                trade["pips"] = 0.0 if is_cancelled else _trade_pips(trade)
+                trade["sim_pnl_usd"] = 0.0 if is_cancelled else _trade_pnl_usd(trade)
         return trades
     except sqlite3.Error:
         logger.exception("Lettura trade dashboard fallita")
@@ -185,6 +226,12 @@ def compute_stats(trades: list[dict]) -> dict:
         "total_r": round(
             sum(float(trade.get("pnl_r") or 0) for trade in closed), 2
         ),
+        "total_usd": round(sum(_trade_pnl_usd(trade) for trade in closed), 2),
+        "sim_budget_usd": round(
+            SIM_STARTING_BUDGET_USD + sum(_trade_pnl_usd(trade) for trade in closed), 2
+        ),
+        "sim_starting_budget_usd": SIM_STARTING_BUDGET_USD,
+        "sim_lot_size": SIM_LOT_SIZE,
         "tp1_total": sum(
             1 for trade in valid
             if bool(trade.get("tp1_hit")) or trade.get("result") in ("WIN_TP1","WIN_TP2","WIN_TP3")
@@ -614,6 +661,11 @@ main {
 
   <section class="metrics" aria-label="Statistiche generali">
     <div class="metric">
+      <span class="metric-label">BUDGET SIMULATO</span>
+      <strong id="sim-budget" class="metric-value">$0.00</strong>
+      <span id="sim-budget-note" class="metric-note">$0 iniziali · lotto 0.00</span>
+    </div>
+    <div class="metric">
       <span class="metric-label">PIPS TOTALI</span>
       <strong id="total-pips" class="metric-value">0</strong>
       <span class="metric-note">Trade virtuali chiusi</span>
@@ -697,6 +749,12 @@ function signed(value, suffix = "") {
   const parsed = Number(value || 0);
   const sign = parsed > 0 ? "+" : "";
   return `${sign}${num(parsed, parsed % 1 === 0 ? 0 : 1)}${suffix}`;
+}
+
+function signedUsd(value) {
+  const parsed = Number(value || 0);
+  const sign = parsed > 0 ? "+" : parsed < 0 ? "-" : "";
+  return `${sign}$${num(Math.abs(parsed), 2)}`;
 }
 
 function formatTime(value) {
@@ -785,6 +843,12 @@ function tradeCard(trade) {
   const pipsClass = Number(trade.pips || 0) > 0
     ? "positive"
     : Number(trade.pips || 0) < 0 ? "negative" : "";
+  const simUsd = trade.status === "CLOSED"
+    ? signedUsd(trade.sim_pnl_usd || 0)
+    : "—";
+  const simUsdClass = Number(trade.sim_pnl_usd || 0) > 0
+    ? "positive"
+    : Number(trade.sim_pnl_usd || 0) < 0 ? "negative" : "";
   const identifier = String(trade.trade_id || "—");
   const shortId = identifier.length > 12
     ? `${identifier.slice(0, 6)}…${identifier.slice(-4)}`
@@ -808,6 +872,8 @@ function tradeCard(trade) {
           <div class="fact"><span>Risk</span><strong>${num(trade.risk_pct)}%</strong></div>
           <div class="fact"><span>Risultato</span><strong>${esc(trade.result || "APERTO")}</strong></div>
           <div class="fact"><span>Pips</span><strong class="${pipsClass}">${pips}</strong></div>
+          <div class="fact"><span>Lotto sim.</span><strong>${num(trade.sim_lot_size || 0, 2)}</strong></div>
+          <div class="fact"><span>P&amp;L sim. $</span><strong class="${simUsdClass}">${simUsd}</strong></div>
         </div>
 
         <div class="levels">
@@ -892,6 +958,17 @@ function render(data) {
   const session = data.session || {};
 
   $("updated").textContent = data.updated || "--:--:--";
+
+  const simBudget = Number(stats.sim_budget_usd || 0);
+  const simStart = Number(stats.sim_starting_budget_usd || 0);
+  const simLot = Number(stats.sim_lot_size || 0);
+  $("sim-budget").textContent = `$${num(simBudget, 2)}`;
+  $("sim-budget").className = `metric-value ${
+    simBudget > simStart ? "positive" : simBudget < simStart ? "negative" : ""
+  }`;
+  $("sim-budget-note").textContent =
+    `$${num(simStart, 0)} iniziali · lotto ${num(simLot, 2)} · ${signedUsd(stats.total_usd)}`;
+
   $("total-pips").textContent = signed(stats.total_pips || 0);
   $("total-pips").className = `metric-value ${
     Number(stats.total_pips || 0) > 0
