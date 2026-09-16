@@ -318,11 +318,34 @@ def run_pilot(categories=None, event_names: tuple | None = None,
         filter_params = categories
         filter_desc = f"categorie: {categories}"
 
+    # Bug trovato il 2026-09-16, aggirato a mano allora, corretto qui: un
+    # evento con event_uid già presente in event_price_reactions veniva
+    # considerato "fatto" anche se la riga era PARZIALE — quasi tutte le
+    # colonne prezzo NULL perché il rate limit di Dukascopy aveva bloccato
+    # il download di alcune delle ore .bi5 necessarie, mentre altre (es.
+    # quella per price_t+60m) erano comunque riuscite. Il NOT IN originale
+    # guardava solo l'ESISTENZA della riga, mai la sua completezza, quindi
+    # quella riga parziale non veniva mai più ritentata automaticamente.
+    #
+    # Fix sicuro perché non rischia un retry infinito sprecato: il livello
+    # sotto (_download_hour) mette in cache solo le ore CONFERMATE vuote
+    # (404 reale, mercato chiuso — weekend/festivo) scrivendo un file cache
+    # vuoto; un'ora fallita per rate limit/timeout NON viene mai messa in
+    # cache, quindi un nuovo tentativo la ri-scarica per davvero, mentre le
+    # ore già confermate vuote restano vuote all'istante (nessuna nuova
+    # richiesta di rete) — un evento con un buco PERMANENTE (es. +60 minuti
+    # cade oltre la chiusura del venerdì) resta ricalcolato ogni volta ma a
+    # costo quasi nullo (solo cache locale), mai un nuovo giro di rate
+    # limit sprecato per qualcosa che non potrà mai arrivare.
+    price_cols = [f'"price_t{m:+d}m"' for m in REACTION_OFFSETS_MIN]
+    complete_clause = " AND ".join(f"{c} IS NOT NULL" for c in price_cols)
+
     with _connect(db_path) as conn:
         query = (
             f"SELECT event_uid, datetime_utc, event_name FROM macro_events "
             f"WHERE {filter_clause} "
-            f"AND event_uid NOT IN (SELECT event_uid FROM event_price_reactions) "
+            f"AND event_uid NOT IN "
+            f"(SELECT event_uid FROM event_price_reactions WHERE {complete_clause}) "
             f"ORDER BY datetime_utc"
         )
         if limit:
