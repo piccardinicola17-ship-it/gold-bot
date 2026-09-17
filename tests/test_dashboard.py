@@ -329,5 +329,104 @@ class TestApiEaAckAndFills(unittest.TestCase):
         self.assertEqual(self.client.get("/api/ea/fills").get_json(), [])
 
 
+class TestMacroEventOutcomes(unittest.TestCase):
+    """Tracciamento eventi macro in dashboard (2026-09-16, richiesta
+    esplicita: "aggiungi nella dashboard gli eventi che si verificano a
+    mercato e se il bot li prende... deve pure dare confermato o non
+    confermato nel messaggio bias post evento come fa per quello bias
+    evento") — /api/macro-event/manual per il caso non-automatico (bot
+    riavviato durante la finestra), /api/data per l'esposizione in lettura."""
+
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+        db.DB_PATH = self.tmpdb
+        self._orig_token = db.DASHBOARD_TOKEN
+        db.DASHBOARD_TOKEN = "test-token-123"
+        self.client = db.app.test_client()
+
+    def tearDown(self):
+        db.DASHBOARD_TOKEN = self._orig_token
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+    def test_requires_token_even_from_loopback(self):
+        resp = self.client.post("/api/macro-event/manual", json={
+            "group_key": "2026-09-16_20:00_USD", "title": "FOMC Statement",
+            "event_time": "2026-09-16T20:00:00+02:00", "bias": "SELL",
+            "price_pre_event": 4347.10,
+        })
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(tm.get_macro_event_outcomes(), [])
+
+    def test_manual_pre_only_seed_shows_as_pending(self):
+        resp = self.client.post(
+            "/api/macro-event/manual?token=test-token-123",
+            json={
+                "group_key": "2026-09-16_20:00_USD", "title": "FOMC Statement",
+                "currency": "USD", "impact": "HIGH",
+                "event_time": "2026-09-16T20:00:00+02:00", "bias": "SELL",
+                "price_pre_event": 4347.10,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        rows = tm.get_macro_event_outcomes()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["bias"], "SELL")
+        self.assertIsNone(rows[0]["esito_post"])
+
+    def test_manual_full_seed_with_confirmed_outcome(self):
+        resp = self.client.post(
+            "/api/macro-event/manual?token=test-token-123",
+            json={
+                "group_key": "2026-09-16_20:00_USD",
+                "title": "Federal Funds Rate + FOMC Economic Projections + FOMC Statement",
+                "currency": "USD", "impact": "HIGH",
+                "event_time": "2026-09-16T20:00:00+02:00", "bias": "SELL",
+                "price_pre_event": 4347.10,
+                "price_immediate": 4318.40, "change_immediate": -28.70,
+                "esito_immediate": "CONFERMATO",
+                "price_post": 4318.40, "change_post": -28.70,
+                "esito_post": "CONFERMATO", "minutes_post": 2,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        rows = tm.get_macro_event_outcomes()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["esito_immediate"], "CONFERMATO")
+        self.assertEqual(row["esito_post"], "CONFERMATO")
+        self.assertAlmostEqual(row["change_post"], -28.70, places=2)
+        self.assertEqual(row["minutes_post"], 2)
+
+    def test_missing_required_field_returns_400(self):
+        resp = self.client.post(
+            "/api/macro-event/manual?token=test-token-123",
+            json={"group_key": "", "title": "FOMC Statement",
+                  "event_time": "2026-09-16T20:00:00+02:00", "bias": "SELL",
+                  "price_pre_event": 4347.10},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_api_data_exposes_macro_events(self):
+        tm.save_macro_event_pre(
+            "2026-09-16_20:00_USD", "FOMC Statement", "USD", "HIGH",
+            "2026-09-16T20:00:00+02:00", 4347.10, "SELL",
+        )
+        resp = self.client.get("/api/data")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        self.assertIn("macro_events", payload)
+        self.assertEqual(len(payload["macro_events"]), 1)
+        self.assertEqual(payload["macro_events"][0]["title"], "FOMC Statement")
+
+
 if __name__ == "__main__":
     unittest.main()

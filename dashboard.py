@@ -26,7 +26,8 @@ from flask import Flask, abort, g, jsonify, redirect, render_template_string, re
 from trade_manager import (
     is_decisive_win, amend_closed_trade, RESULT_PNL, DB_PATH, _connect,
     load_broker_orders_pending, ack_broker_order, get_broker_fills,
-    XAUUSD_PIP_SIZE,
+    XAUUSD_PIP_SIZE, get_macro_event_outcomes, save_macro_event_pre,
+    save_macro_event_post,
 )
 # XAUUSD_OZ_PER_LOT vive in risk_manager (unica fonte di verità già usata
 # per il sizing reale, vedi calculate_lot_size) — importata qui invece di
@@ -283,6 +284,7 @@ def api_data():
             "stats": compute_stats(trades),
             "trades": trades,
             "session": _get_session(),
+            "macro_events": get_macro_event_outcomes(20),
             "updated": datetime.now(TIMEZONE).strftime("%H:%M:%S"),
         }
     )
@@ -352,6 +354,61 @@ def api_correct_trade():
         return jsonify({"status": "error", "message": str(exc)}), 500
     if not ok:
         return jsonify({"status": "error", "message": "Trade non trovato o non ancora chiuso"}), 404
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/macro-event/manual", methods=["POST"])
+def api_macro_event_manual():
+    """Inserimento/correzione amministrativa di un evento macro nel
+    tracciamento dashboard (2026-09-16, richiesta esplicita: "aggiungi
+    nella dashboard gli eventi che si verificano a mercato e se il bot li
+    prende... per ora il FOMC il bot l'ha preso in pieno... da segnare
+    manualmente"). Serve per il caso in cui il resoconto automatico non è
+    partito (bot riavviato durante la finestra, vedi save_macro_event_pre/
+    post in gold_bot.py) ma l'utente ha comunque i dati reali a
+    disposizione (es. da screenshot Telegram) — stesso principio di
+    /api/correct-trade: niente si cancella, resta sempre tracciabile.
+    Protetto dallo stesso token di tutta la dashboard (before_request)."""
+    payload = request.get_json(silent=True) or {}
+    group_key = str(payload.get("group_key", "")).strip()
+    title = str(payload.get("title", "")).strip()
+    currency = str(payload.get("currency", "USD")).strip().upper()
+    impact = str(payload.get("impact", "HIGH")).strip().upper()
+    event_time = str(payload.get("event_time", "")).strip()
+    bias = str(payload.get("bias", "")).strip().upper()
+    try:
+        price_pre_event = float(payload.get("price_pre_event"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "price_pre_event mancante o non numerico"}), 400
+    if not group_key or not title or not event_time or not bias:
+        return jsonify({"status": "error", "message": "group_key, title, event_time e bias sono obbligatori"}), 400
+
+    try:
+        save_macro_event_pre(group_key, title, currency, impact, event_time, price_pre_event, bias)
+
+        # I campi post-evento sono opzionali: un evento può essere seminato
+        # solo con il bias pre-evento (in attesa dell'esito reale) oppure
+        # con l'intero esito già noto, come nel caso del FOMC del
+        # 2026-09-16 recuperato manualmente da screenshot Telegram.
+        if payload.get("price_post") is not None:
+            price_immediate = payload.get("price_immediate")
+            change_immediate = payload.get("change_immediate")
+            price_post = float(payload.get("price_post"))
+            change_post = float(payload.get("change_post"))
+            minutes_post = int(payload.get("minutes_post", 0))
+            save_macro_event_post(
+                group_key,
+                float(price_immediate) if price_immediate is not None else None,
+                float(change_immediate) if change_immediate is not None else None,
+                (str(payload.get("esito_immediate")).strip().upper() or None)
+                    if payload.get("esito_immediate") is not None else None,
+                price_post, change_post,
+                str(payload.get("esito_post", "")).strip().upper(),
+                minutes_post,
+            )
+    except Exception as exc:
+        logger.exception("Inserimento manuale evento macro fallito")
+        return jsonify({"status": "error", "message": str(exc)}), 500
     return jsonify({"status": "ok"})
 
 
@@ -620,6 +677,57 @@ main {
 .mark.waiting { color: var(--muted); }
 .mark.armed { color: var(--amber); }
 
+.macro-list {
+  display: grid;
+  gap: 10px;
+}
+.macro-card {
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.macro-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+}
+.macro-head strong { font-size: 14px; }
+.macro-time {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+.macro-rows {
+  display: grid;
+  gap: 6px;
+}
+.macro-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.badge.confermato { color: var(--green); border-color: var(--green); }
+.badge.non-confermato { color: var(--red); border-color: var(--red); }
+.badge.neutro,
+.badge.non-significativo { color: var(--muted); }
+.badge.pending { color: var(--amber); border-color: var(--amber); }
+
 .empty {
   padding: 70px 20px;
   border: 1px solid var(--border);
@@ -743,6 +851,19 @@ main {
   </div>
 
   <section id="trade-list" class="trade-list" aria-live="polite"></section>
+
+  <div class="section-head">
+    <div>
+      <h2>Eventi macro</h2>
+      <p>Bias del bot pre-evento confrontato col movimento di prezzo reale</p>
+    </div>
+    <div class="legend">
+      <span class="positive">✓ confermato</span>
+      <span class="negative">× non confermato</span>
+      <span>○ in attesa dell'esito</span>
+    </div>
+  </div>
+  <section id="macro-event-list" class="macro-list" aria-live="polite"></section>
 </main>
 
 <script>
@@ -920,6 +1041,40 @@ function tradeCard(trade) {
     </article>`;
 }
 
+const MACRO_STATUS_LABELS = {
+  CONFERMATO: ["badge confermato", "✓ CONFERMATO"],
+  NON_CONFERMATO: ["badge non-confermato", "× NON CONFERMATO"],
+  NEUTRO: ["badge neutro", "— NEUTRO"],
+  NON_SIGNIFICATIVO: ["badge non-significativo", "— NON SIGNIFICATIVO"],
+};
+
+function macroStatusBadge(status) {
+  if (!status) return '<span class="badge pending">○ IN ATTESA</span>';
+  const [cls, label] = MACRO_STATUS_LABELS[status] || ["badge", esc(status)];
+  return `<span class="${cls}">${label}</span>`;
+}
+
+function macroEventCard(ev) {
+  const currencyTag = ev.currency && ev.currency !== "USD" ? ` [${esc(ev.currency)}]` : "";
+  return `
+    <article class="macro-card">
+      <div class="macro-head">
+        <strong>${esc(ev.title)}${currencyTag}</strong>
+        <span class="macro-time">${formatTime(ev.event_time)}</span>
+      </div>
+      <div class="macro-rows">
+        <div class="macro-row">
+          <span>Bias evento: ${esc(ev.bias || "?")} (reazione ~1-7 min)</span>
+          ${macroStatusBadge(ev.esito_immediate)}
+        </div>
+        <div class="macro-row">
+          <span>Bias post-evento: ${esc(ev.bias || "?")} (assestamento)</span>
+          ${macroStatusBadge(ev.esito_post)}
+        </div>
+      </div>
+    </article>`;
+}
+
 const EQUITY_SVG_W = 1000;
 const EQUITY_SVG_H = 220;
 const EQUITY_PAD = 14;
@@ -1019,6 +1174,11 @@ function render(data) {
   $("trade-list").innerHTML = trades.length
     ? trades.map(tradeCard).join("")
     : '<div class="empty">Nessun trade registrato nel database.</div>';
+
+  const macroEvents = data.macro_events || [];
+  $("macro-event-list").innerHTML = macroEvents.length
+    ? macroEvents.map(macroEventCard).join("")
+    : '<div class="empty">Nessun evento macro registrato.</div>';
 }
 
 async function refresh() {

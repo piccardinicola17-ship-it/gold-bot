@@ -214,6 +214,65 @@ class TestAnalyzeMacroEventCurrencyAware(unittest.TestCase):
         self.assertNotIn("Valuta:", captured["user"])
 
 
+class TestAnalyzeMacroEventRelatedContext(unittest.TestCase):
+    """2026-09-16: quando un evento è la continuazione di una decisione
+    macro già uscita poco prima (stessa valuta) — es. FOMC Press Conference
+    dopo Federal Funds Rate della stessa riunione — il chiamante
+    (gold_bot._find_related_macro_context) passa una riga di contesto che
+    deve arrivare intatta nel prompt, con l'istruzione esplicita di non
+    trattare l'evento come un esito ancora incerto."""
+
+    def test_related_context_included_in_prompt(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=80):
+            captured["system"] = system
+            captured["user"] = user
+            return "Bias: SELL\nMotivo: test"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_macro_event(
+                "FOMC Press Conference", "N/A", "N/A", current_price=4318.40,
+                currency="USD",
+                related_context="Contesto correlato: 30 minuti fa è già uscito "
+                                 "\"Federal Funds Rate\" (bias SELL, prezzo oro -28.70$).",
+            )
+
+        self.assertIn("Contesto correlato", captured["user"])
+        self.assertIn("Federal Funds Rate", captured["user"])
+        self.assertIn("Contesto correlato", captured["system"])
+
+    def test_no_related_context_by_default(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=80):
+            captured["user"] = user
+            return "Bias: NEUTRO\nMotivo: test"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_macro_event("Core CPI m/m", "0.3%", "0.2%", current_price=4400)
+
+        self.assertNotIn("Contesto correlato", captured["user"])
+
+    def test_combined_event_forwards_related_context(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=90):
+            captured["user"] = user
+            return "Bias: SELL\nMotivo: test"
+
+        events = [
+            {"title": "FOMC Press Conference", "forecast": "N/A", "previous": "N/A", "currency": "USD"},
+        ]
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.analyze_combined_macro_event(
+                events, current_price=4318.40,
+                related_context="Contesto correlato: già uscito Federal Funds Rate.",
+            )
+
+        self.assertIn("Contesto correlato", captured["user"])
+
+
 class TestAnalyzeCombinedMacroEventCurrency(unittest.TestCase):
     def test_single_event_forwards_currency(self):
         captured = {}

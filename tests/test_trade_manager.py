@@ -787,5 +787,85 @@ class TestCalculateTradePips(unittest.TestCase):
         )
 
 
+class TestMacroEventOutcomes(TradeManagerTestCase):
+    """macro_event_outcomes (2026-09-16): storico permanente per la
+    dashboard, separato da _pre_event_bias (in-memory, pruned) in
+    gold_bot.py — save_macro_event_pre apre la riga al momento
+    dell'alert, save_macro_event_post la completa quando arriva
+    l'esito reale."""
+
+    def test_save_pre_creates_row_with_pending_outcome(self):
+        tm.save_macro_event_pre(
+            "2026-09-16_20:00_USD", "FOMC Statement", "USD", "HIGH",
+            "2026-09-16T20:00:00+02:00", 4347.10, "SELL",
+        )
+        rows = tm.get_macro_event_outcomes()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["group_key"], "2026-09-16_20:00_USD")
+        self.assertEqual(row["bias"], "SELL")
+        self.assertEqual(row["price_pre_event"], 4347.10)
+        self.assertIsNone(row["esito_immediate"])
+        self.assertIsNone(row["esito_post"])
+
+    def test_save_post_completes_existing_row(self):
+        tm.save_macro_event_pre(
+            "2026-09-16_20:00_USD", "FOMC Statement", "USD", "HIGH",
+            "2026-09-16T20:00:00+02:00", 4347.10, "SELL",
+        )
+        ok = tm.save_macro_event_post(
+            "2026-09-16_20:00_USD", 4318.40, -28.70, "CONFERMATO",
+            4318.40, -28.70, "CONFERMATO", 2,
+        )
+        self.assertTrue(ok)
+        row = tm.get_macro_event_outcomes()[0]
+        self.assertEqual(row["esito_immediate"], "CONFERMATO")
+        self.assertEqual(row["esito_post"], "CONFERMATO")
+        self.assertAlmostEqual(row["change_post"], -28.70, places=2)
+        self.assertEqual(row["minutes_post"], 2)
+
+    def test_save_post_without_matching_pre_row_returns_false(self):
+        ok = tm.save_macro_event_post(
+            "inesistente", None, None, None, 4300.0, -10.0, "CONFERMATO", 10,
+        )
+        self.assertFalse(ok)
+        self.assertEqual(tm.get_macro_event_outcomes(), [])
+
+    def test_pre_upsert_on_duplicate_group_key_updates_instead_of_duplicating(self):
+        tm.save_macro_event_pre(
+            "2026-09-16_20:00_USD", "FOMC Statement", "USD", "HIGH",
+            "2026-09-16T20:00:00+02:00", 4347.10, "SELL",
+        )
+        tm.save_macro_event_pre(
+            "2026-09-16_20:00_USD", "FOMC Statement", "USD", "HIGH",
+            "2026-09-16T20:00:00+02:00", 4350.00, "BUY",
+        )
+        rows = tm.get_macro_event_outcomes()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["bias"], "BUY")
+        self.assertEqual(rows[0]["price_pre_event"], 4350.00)
+
+    def test_get_macro_event_outcomes_orders_most_recent_first(self):
+        tm.save_macro_event_pre(
+            "2026-09-15_14:30_USD", "Core CPI m/m", "USD", "HIGH",
+            "2026-09-15T14:30:00+02:00", 4300.0, "BUY",
+        )
+        tm.save_macro_event_pre(
+            "2026-09-16_20:00_USD", "FOMC Statement", "USD", "HIGH",
+            "2026-09-16T20:00:00+02:00", 4347.10, "SELL",
+        )
+        rows = tm.get_macro_event_outcomes()
+        self.assertEqual(rows[0]["group_key"], "2026-09-16_20:00_USD")
+        self.assertEqual(rows[1]["group_key"], "2026-09-15_14:30_USD")
+
+    def test_get_macro_event_outcomes_respects_limit(self):
+        for i in range(3):
+            tm.save_macro_event_pre(
+                f"2026-09-1{i}_10:00_USD", "Test Event", "USD", "MEDIUM",
+                f"2026-09-1{i}T10:00:00+02:00", 4300.0, "NEUTRO",
+            )
+        self.assertEqual(len(tm.get_macro_event_outcomes(limit=2)), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

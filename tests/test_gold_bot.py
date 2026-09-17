@@ -808,6 +808,151 @@ class TestBiasEventoVsPostEvento(GoldBotTestCase):
         self.assertTrue(15 <= int(match.group(1)) <= 20, f"minuti fuori range plausibile: {match.group(1)}")
         self.assertNotIn("10-15 min", text)
 
+    def test_post_event_saves_outcome_status_for_dashboard(self):
+        """2026-09-16: il messaggio POST-EVENTO ora scrive anche su
+        macro_event_outcomes (per la nuova sezione dashboard), con lo
+        stesso status CONFERMATO/NON_CONFERMATO calcolato per il testo
+        Telegram — niente doppio calcolo divergente."""
+        import asyncio
+        post_event = self._make_event(-10)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {
+            "bias": "BUY", "price": 4378.90, "price_immediate": 4388.60,
+        }
+
+        with mock.patch("gold_bot.save_macro_event_post", return_value=True) as mock_save:
+            asyncio.run(self._run(post_event, 4329.20))
+
+        mock_save.assert_called_once()
+        args = mock_save.call_args.args
+        self.assertEqual(args[0], group_key)
+        self.assertAlmostEqual(args[1], 4388.60)      # price_immediate
+        self.assertAlmostEqual(args[2], 9.70, places=1)  # change_evento
+        self.assertEqual(args[3], "CONFERMATO")       # status_evento
+        self.assertAlmostEqual(args[4], 4329.20)      # price post
+        self.assertAlmostEqual(args[5], -49.70, places=1)  # change_post
+        self.assertEqual(args[6], "NON_CONFERMATO")   # status_post
+
+    def test_post_event_skips_save_when_no_pre_event_state(self):
+        """Se _pre_event_bias non ha nulla per il gruppo (bot riavviato tra
+        pre-evento e post-evento), non c'è alcun bias di partenza da
+        salvare — save_macro_event_post non deve essere chiamato."""
+        import asyncio
+        post_event = self._make_event(-10)
+
+        with mock.patch("gold_bot.save_macro_event_post", return_value=True) as mock_save:
+            asyncio.run(self._run(post_event, 4329.20))
+
+        mock_save.assert_not_called()
+
+
+class TestRelatedMacroContext(GoldBotTestCase):
+    """Bug reale del 2026-09-16: la FOMC Press Conference delle 20:30 ha
+    ricevuto bias NEUTRO con motivazione "in attesa della decisione della
+    Fed", nonostante Federal Funds Rate/FOMC Statement della STESSA
+    riunione fossero già usciti 30 minuti prima con bias SELL confermato —
+    ogni gruppo (data+ora+valuta) veniva analizzato in isolamento, senza
+    memoria di eventi appena successi. _find_related_macro_context cerca
+    l'evento più recente della stessa valuta uscito di recente."""
+
+    def _now_utc_iso(self, minutes_ago: float) -> str:
+        return (datetime.now(gb.TIMEZONE) - timedelta(minutes=minutes_ago)).isoformat()
+
+    def test_no_prior_event_returns_empty(self):
+        ctx = gb._find_related_macro_context("USD", datetime.now(gb.TIMEZONE), "some_key")
+        self.assertEqual(ctx, "")
+
+    def test_finds_recent_same_currency_event(self):
+        now = datetime.now(gb.TIMEZONE)
+        gb._pre_event_bias["2026-09-16_20:00_USD"] = {
+            "bias": "SELL", "price": 4347.10, "price_immediate": 4318.40,
+            "title": "Federal Funds Rate + FOMC Statement",
+            "currency": "USD", "event_dt": (now - timedelta(minutes=30)).isoformat(),
+        }
+        ctx = gb._find_related_macro_context("USD", now, "2026-09-16_20:30_USD")
+        self.assertIn("Federal Funds Rate", ctx)
+        self.assertIn("SELL", ctx)
+        self.assertIn("30 minuti fa", ctx)
+        self.assertIn("-28.70", ctx)
+
+    def test_ignores_different_currency(self):
+        now = datetime.now(gb.TIMEZONE)
+        gb._pre_event_bias["2026-09-16_20:00_GBP"] = {
+            "bias": "BUY", "price": 1.30, "price_immediate": 1.31,
+            "title": "BOE Official Bank Rate", "currency": "GBP",
+            "event_dt": (now - timedelta(minutes=10)).isoformat(),
+        }
+        ctx = gb._find_related_macro_context("USD", now, "2026-09-16_20:30_USD")
+        self.assertEqual(ctx, "")
+
+    def test_ignores_event_outside_window(self):
+        now = datetime.now(gb.TIMEZONE)
+        gb._pre_event_bias["2026-09-16_earlier_USD"] = {
+            "bias": "BUY", "price": 4300.0, "price_immediate": None,
+            "title": "Retail Sales m/m", "currency": "USD",
+            "event_dt": (now - timedelta(minutes=200)).isoformat(),
+        }
+        ctx = gb._find_related_macro_context("USD", now, "2026-09-16_20:30_USD")
+        self.assertEqual(ctx, "")
+
+    def test_ignores_future_event(self):
+        """Un evento con event_dt successivo a quello analizzato non è mai
+        'correlato nel passato' — non deve mai comparire come contesto."""
+        now = datetime.now(gb.TIMEZONE)
+        gb._pre_event_bias["2026-09-16_later_USD"] = {
+            "bias": "BUY", "price": 4300.0, "price_immediate": None,
+            "title": "FOMC Press Conference", "currency": "USD",
+            "event_dt": (now + timedelta(minutes=30)).isoformat(),
+        }
+        ctx = gb._find_related_macro_context("USD", now, "2026-09-16_20:00_USD")
+        self.assertEqual(ctx, "")
+
+    def test_excludes_its_own_group_key(self):
+        now = datetime.now(gb.TIMEZONE)
+        gb._pre_event_bias["same_key"] = {
+            "bias": "SELL", "price": 4300.0, "price_immediate": None,
+            "title": "Self", "currency": "USD", "event_dt": (now - timedelta(minutes=5)).isoformat(),
+        }
+        ctx = gb._find_related_macro_context("USD", now, "same_key")
+        self.assertEqual(ctx, "")
+
+    def test_pre_event_alert_passes_context_to_llm_call(self):
+        """Test end-to-end: un secondo evento FOMC che arriva 30 minuti dopo
+        un primo già processato deve ricevere un related_context non vuoto
+        nella chiamata ad analyze_combined_macro_event."""
+        import asyncio
+        now = datetime.now(gb.TIMEZONE)
+        earlier_dt = now - timedelta(minutes=30)
+        gb._pre_event_bias["2026-09-16_prior_USD"] = {
+            "bias": "SELL", "price": 4347.10, "price_immediate": 4318.40,
+            "title": "Federal Funds Rate + FOMC Statement", "currency": "USD",
+            "event_dt": earlier_dt.isoformat(),
+        }
+        ev_dt = now + timedelta(minutes=30)
+        event = {
+            "date": ev_dt.strftime("%Y-%m-%d"), "time": ev_dt.strftime("%H:%M"),
+            "title": "FOMC Press Conference", "forecast": "N/A", "previous": "N/A",
+            "currency": "USD",
+        }
+        captured = {}
+
+        def fake_analyze(events, price, related_context=""):
+            captured["related_context"] = related_context
+            return "Bias: SELL\nMotivo: continuazione della decisione già nota"
+
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4318.40), \
+             mock.patch("gold_bot.analyze_combined_macro_event", side_effect=fake_analyze), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            asyncio.run(gb.check_macro_alerts(bot))
+
+        self.assertIn("related_context", captured)
+        self.assertNotEqual(captured["related_context"], "", "il contesto correlato non deve essere vuoto")
+        self.assertIn("Federal Funds Rate", captured["related_context"])
+
 
 if __name__ == "__main__":
     unittest.main()

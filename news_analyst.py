@@ -170,7 +170,7 @@ def get_bias_briefing(news: list, current_price: float = 0) -> str:
     )
 
 
-def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str = "N/A", actual: str = "N/A", current_price: float = 0, currency: str = "") -> str:
+def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str = "N/A", actual: str = "N/A", current_price: float = 0, currency: str = "", related_context: str = "") -> str:
     """
     Bias direzionale corto pre-evento — niente pip/livelli/TP/SL inventati.
 
@@ -188,6 +188,18 @@ def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str =
     si tratta invece di lasciargli assumere che sia sempre la Fed/USD
     (l'evento non lo indica da solo: il titolo grezzo del calendario è
     "CPI y/y", non "GBP CPI y/y").
+
+    related_context: bug reale trovato il 2026-09-16 — la FOMC Press
+    Conference delle 20:30 ha ricevuto bias NEUTRO con motivazione "in
+    attesa della decisione della Fed", nonostante Federal Funds Rate/FOMC
+    Statement fossero già usciti 30 minuti prima (stessa riunione, stessa
+    valuta, stesso giorno) con bias SELL confermato. L'LLM non aveva alcun
+    modo di saperlo: ogni gruppo (raggruppato per data+ora+valuta) viene
+    analizzato in isolamento, senza memoria di eventi correlati usciti
+    poco prima. Questo parametro (costruito da
+    gold_bot._find_related_macro_context) porta quel contesto quando
+    esiste, invece di lasciare che l'LLM ragioni alla cieca su una
+    conferenza stampa che segue un annuncio già noto.
     """
     db_info   = _find_macro_db_info(event_title, currency)
     price_txt = f"${current_price}" if current_price > 0 else "N/D"
@@ -199,13 +211,19 @@ def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str =
         context.append(f"Uscito: {actual}")
     if db_info:
         context.append(f"Logica: {db_info.get('logica','')}")
+    if related_context:
+        context.append(related_context)
     context.append(f"Prezzo XAU/USD: {price_txt}")
     analysis = _call_groq(
         system=(
             "Sei un analista macro XAU/USD. Dai solo un bias direzionale sintetico, "
             "MAI cifre precise (niente pip, niente livelli di prezzo, niente entry/SL/TP): "
             "non hai un modello statistico per generarle in modo affidabile e inventarle è "
-            "fuorviante. Rispondi in italiano con ESATTAMENTE questo formato, 2 righe:\n"
+            "fuorviante. Se è presente una riga 'Contesto correlato', questo evento è la "
+            "continuazione/spiegazione di una decisione GIÀ NOTA (es. una conferenza stampa "
+            "dopo l'annuncio scritto della stessa riunione) — non trattarlo come un esito "
+            "ancora incerto, ragiona a partire da quella decisione già uscita. Rispondi in "
+            "italiano con ESATTAMENTE questo formato, 2 righe:\n"
             "Bias: BUY|SELL|NEUTRO\n"
             "Motivo: <una frase, massimo 20 parole, solo logica qualitativa>"
         ),
@@ -215,7 +233,7 @@ def analyze_macro_event(event_title: str, forecast: str = "N/A", previous: str =
     return analysis
 
 
-def analyze_combined_macro_event(events: list, current_price: float = 0) -> str:
+def analyze_combined_macro_event(events: list, current_price: float = 0, related_context: str = "") -> str:
     """
     Bias UNICO per più indicatori macro che escono ALLA STESSA ORA (es. CPI
     m/m + CPI y/y + Core CPI m/m + Core CPI y/y, tutti alle 14:30 — stesso
@@ -239,7 +257,7 @@ def analyze_combined_macro_event(events: list, current_price: float = 0) -> str:
         ev = events[0]
         return analyze_macro_event(
             ev["title"], ev.get("forecast", "N/A"), ev.get("previous", "N/A"), "N/A", current_price,
-            currency=ev.get("currency", ""),
+            currency=ev.get("currency", ""), related_context=related_context,
         )
 
     currency  = events[0].get("currency", "")
@@ -251,6 +269,8 @@ def analyze_combined_macro_event(events: list, current_price: float = 0) -> str:
     context_lines = [f"Prezzo XAU/USD: {price_txt}"]
     if currency and currency.upper() not in ("USD", "US"):
         context_lines.append(f"Valuta: {currency.upper()} (non USD — ragiona sulla banca centrale/economia di questa valuta e su come si riflette sul dollaro/DXY e quindi sull'oro)")
+    if related_context:
+        context_lines.append(related_context)
     context_lines.append("Indicatori in uscita insieme (stesso orario, stesso rilascio):")
     context = "\n".join(context_lines) + "\n" + "\n".join(righe)
     return _call_groq(
@@ -259,6 +279,8 @@ def analyze_combined_macro_event(events: list, current_price: float = 0) -> str:
             "stesso rilascio (es. dato mensile+annuale, headline+core dello stesso report) — dai UN "
             "SOLO bias direzionale complessivo che li consideri TUTTI insieme, mai un bias per "
             "indicatore preso isolatamente. MAI cifre precise (niente pip, livelli, entry/SL/TP). "
+            "Se è presente una riga 'Contesto correlato', questi indicatori sono la continuazione/"
+            "spiegazione di una decisione GIÀ NOTA — non trattarli come un esito ancora incerto. "
             "Rispondi in italiano con ESATTAMENTE questo formato, 2 righe:\n"
             "Bias: BUY|SELL|NEUTRO\n"
             "Motivo: <una frase, massimo 25 parole, che spieghi il ragionamento complessivo>"

@@ -368,7 +368,31 @@ def init_db() -> None:
                 slippage       REAL,
                 recorded_at    TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS macro_event_outcomes (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_key         TEXT UNIQUE NOT NULL,
+                title             TEXT NOT NULL,
+                currency          TEXT NOT NULL,
+                impact            TEXT,
+                event_time        TEXT NOT NULL,
+                price_pre_event   REAL,
+                bias              TEXT,
+                price_immediate   REAL,
+                change_immediate  REAL,
+                esito_immediate   TEXT,
+                price_post        REAL,
+                change_post       REAL,
+                esito_post        TEXT,
+                minutes_post      INTEGER,
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT
+            );
             """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_macro_event_outcomes_time "
+            "ON macro_event_outcomes(event_time)"
         )
         _ensure_trade_columns(conn)
         _ensure_session_columns(conn)
@@ -1708,6 +1732,72 @@ def get_broker_fills(limit: int = 200) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM broker_fills ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_macro_event_pre(group_key: str, title: str, currency: str, impact: str,
+                          event_time: str, price_pre_event: float, bias: str) -> None:
+    """Registra un evento macro appena alertato (30 min prima) nel
+    tracciamento persistente per la dashboard (2026-09-16, richiesta
+    esplicita dell'utente: "aggiungi nella dashboard gli eventi che si
+    verificano a mercato e se il bot li prende"). Separato da
+    _pre_event_bias (che vive solo in memoria/bot_state per il confronto
+    a breve termine dentro check_macro_alerts) perché questo deve
+    sopravvivere anche dopo che _pre_event_bias viene ripulito (pop/
+    pruning a 50 voci) — è uno storico permanente, non uno stato di
+    lavoro temporaneo. INSERT OR REPLACE: se lo stesso group_key viene
+    già visto (non dovrebbe succedere, group_key è univoco per
+    costruzione), aggiorna invece di duplicare."""
+    now_iso = datetime.now(TIMEZONE).isoformat()
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO macro_event_outcomes
+                (group_key, title, currency, impact, event_time, price_pre_event, bias, created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(group_key) DO UPDATE SET
+                title=excluded.title, currency=excluded.currency, impact=excluded.impact,
+                event_time=excluded.event_time, price_pre_event=excluded.price_pre_event,
+                bias=excluded.bias
+            """,
+            (group_key, title, currency, impact, event_time, price_pre_event, bias, now_iso),
+        )
+
+
+def save_macro_event_post(group_key: str, price_immediate: float | None, change_immediate: float | None,
+                           esito_immediate: str | None, price_post: float, change_post: float,
+                           esito_post: str, minutes_post: int) -> bool:
+    """Completa la riga aperta da save_macro_event_pre con l'esito reale
+    (bias evento + bias post-evento, ciascuno con il proprio CONFERMATO/
+    NON_CONFERMATO/NEUTRO/NON_SIGNIFICATIVO — stessa distinzione già usata
+    nel messaggio Telegram, vedi _confirm_bias in gold_bot.py). Se la riga
+    pre-evento non esiste (bot riavviato tra i due — stesso caso già
+    gestito nel messaggio Telegram con "bias pre-evento non disponibile"),
+    non scrive nulla: non ha senso un esito senza un bias di partenza
+    salvato."""
+    with _write_lock, _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE macro_event_outcomes SET
+                price_immediate=?, change_immediate=?, esito_immediate=?,
+                price_post=?, change_post=?, esito_post=?, minutes_post=?,
+                updated_at=?
+            WHERE group_key=?
+            """,
+            (price_immediate, change_immediate, esito_immediate,
+             price_post, change_post, esito_post, minutes_post,
+             datetime.now(TIMEZONE).isoformat(), group_key),
+        )
+        return cur.rowcount > 0
+
+
+def get_macro_event_outcomes(limit: int = 50) -> list[dict]:
+    """Storico macro-eventi con l'esito reale del bias del bot (per la
+    nuova sezione dashboard) — più recenti prima."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM macro_event_outcomes ORDER BY event_time DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(row) for row in rows]
 

@@ -45,6 +45,7 @@ from trade_manager import (
     _fmt,
     is_bot_paused, set_bot_paused,
     load_macro_alert_state, save_macro_alert_state,
+    save_macro_event_pre, save_macro_event_post,
     DB_PATH as CORE_DB_PATH, BOT_DIR as CORE_BOT_DIR,
 )
 from ai_assistant import ask_ai
@@ -77,17 +78,88 @@ def _confirm_bias(bias: str, change: float) -> tuple:
     NEUTRO) e non per il post-breaking-news, dove non serve perché quella
     chiamata scarta già a monte le risposte non direzionali (vedi
     check_breaking_news_job) — qui resta comunque gestito per sicurezza,
-    così le 3 chiamate condividono la stessa unica implementazione."""
+    così le 3 chiamate condividono la stessa unica implementazione.
+
+    Terzo valore (status): stessa classificazione ma come codice semplice
+    (CONFERMATO/NON_CONFERMATO/NEUTRO/NON_SIGNIFICATIVO), aggiunto il
+    2026-09-16 per popolare il tracciamento macro_event_outcomes in
+    dashboard senza dover ri-derivare lo stato dal testo con emoji/markdown
+    già pensato per Telegram — stessa soglia, nessuna logica duplicata."""
     if abs(change) < CONFIRM_THRESHOLD_USD:
         esito = "➖ *Movimento non significativo* — prezzo praticamente invariato"
+        status = "NON_SIGNIFICATIVO"
     elif bias == "BUY":
-        esito = "✅ *CONFERMATO*" if change > 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+        confirmed = change > 0
+        esito = "✅ *CONFERMATO*" if confirmed else "❌ *NON CONFERMATO* — mosso al contrario"
+        status = "CONFERMATO" if confirmed else "NON_CONFERMATO"
     elif bias == "SELL":
-        esito = "✅ *CONFERMATO*" if change < 0 else "❌ *NON CONFERMATO* — mosso al contrario"
+        confirmed = change < 0
+        esito = "✅ *CONFERMATO*" if confirmed else "❌ *NON CONFERMATO* — mosso al contrario"
+        status = "CONFERMATO" if confirmed else "NON_CONFERMATO"
     else:
         esito = "➖ Bias pre-evento era NEUTRO — nessuna previsione da verificare"
+        status = "NEUTRO"
     segno = "+" if change >= 0 else ""
-    return esito, segno
+    return esito, segno, status
+
+
+# Finestra entro cui un evento macro precedente (stessa valuta) viene
+# considerato "correlato" — bug reale trovato il 2026-09-16: la FOMC Press
+# Conference delle 20:30 ha ricevuto bias NEUTRO con motivazione "in attesa
+# della decisione della Fed", nonostante Federal Funds Rate/FOMC Statement
+# della STESSA riunione fossero già usciti 30 minuti prima con bias SELL
+# confermato — ogni gruppo (raggruppato per data+ora+valuta) veniva
+# analizzato in totale isolamento, senza memoria di eventi appena successi.
+# 90 minuti copre comodamente lo schema FOMC (Statement/Rate/Projections
+# alle 14:00 ET, Press Conference 30 min dopo) e analoghi per BCE/BOJ,
+# senza risalire a eventi macro del tutto slegati di prima mattina.
+_RELATED_MACRO_WINDOW_MIN = 90
+
+
+def _find_related_macro_context(currency: str, ev_dt: datetime, exclude_group_key: str) -> str:
+    """Cerca l'evento macro più recente della STESSA valuta, uscito nelle
+    ultime _RELATED_MACRO_WINDOW_MIN minuti (mai nel futuro rispetto a
+    ev_dt), tra quelli già processati in _pre_event_bias. Ritorna una riga
+    di contesto pronta per il prompt LLM, o stringa vuota se non trova
+    nulla — vedi analyze_macro_event/analyze_combined_macro_event in
+    news_analyst.py per come viene usata."""
+    best_info = None
+    best_dt = None
+    for gk, info in _pre_event_bias.items():
+        if gk == exclude_group_key:
+            continue
+        if info.get("currency") != currency:
+            continue
+        other_dt_str = info.get("event_dt")
+        if not other_dt_str:
+            continue
+        try:
+            other_dt = datetime.fromisoformat(other_dt_str)
+        except (ValueError, TypeError):
+            continue
+        if other_dt >= ev_dt:
+            continue  # solo eventi già usciti PRIMA di questo, mai dopo
+        delta_min = (ev_dt - other_dt).total_seconds() / 60
+        if delta_min > _RELATED_MACRO_WINDOW_MIN:
+            continue
+        if best_dt is None or other_dt > best_dt:
+            best_info, best_dt = info, other_dt
+
+    if best_info is None:
+        return ""
+
+    minutes_ago = round((ev_dt - best_dt).total_seconds() / 60)
+    change = None
+    if best_info.get("price_immediate") is not None:
+        change = best_info["price_immediate"] - best_info["price"]
+    change_txt = f", prezzo oro {change:+.2f}$" if change is not None else ""
+    title = best_info.get("title", "un evento correlato")
+    bias = best_info.get("bias", "NEUTRO")
+    return (
+        f"Contesto correlato: {minutes_ago} minuti fa è già uscito \"{title}\" "
+        f"per la stessa valuta (bias {bias}{change_txt}) — non è più un esito incerto, "
+        f"è la STESSA riunione/decisione vista da un angolo diverso."
+    )
 
 
 def _live_min_prob_for_tf(interval: str) -> int:
@@ -1493,7 +1565,7 @@ async def check_breaking_news_job(bot):
 
             change = price_now - info["price"]
             bias = info["bias"]
-            esito, segno = _confirm_bias(bias, change)
+            esito, segno, _status = _confirm_bias(bias, change)
 
             msg_post = (
                 f"📊 *POST-BREAKING NEWS — {_escape_md(info['title'])}*\n"
@@ -1572,8 +1644,10 @@ async def check_macro_alerts(bot):
             # PRE-EVENTO (30 min prima)
             if 25 <= mins_away <= 35 and group_key not in _sent_event_alerts:
                 price = await get_current_price_async()
+                event_currency = ev.get("currency", "USD")
+                related_context = _find_related_macro_context(event_currency, ev_dt, group_key)
                 analysis = await asyncio.to_thread(
-                    analyze_combined_macro_event, group_events, price
+                    analyze_combined_macro_event, group_events, price, related_context
                 )
                 # analyze_combined_macro_event ora ritorna solo "Bias: X\nMotivo: Y"
                 # (niente più pip/livelli/TP/SL inventati — vedi news_analyst.py),
@@ -1601,7 +1675,28 @@ async def check_macro_alerts(bot):
                     bias_line += f"\n_{_escape_md(motivo)}_"
                 bias_line += f"\n🕒 Bias post-evento (assestamento ~10-15 min): *{bias}*"
 
-                _pre_event_bias[group_key] = {"bias": bias, "price": price, "price_immediate": None}
+                _pre_event_bias[group_key] = {
+                    "bias": bias, "price": price, "price_immediate": None,
+                    "title": combined_title, "currency": event_currency,
+                    "event_dt": ev_dt.isoformat(),
+                }
+
+                # Tracciamento permanente per la dashboard (2026-09-16,
+                # richiesta esplicita: "aggiungi nella dashboard gli eventi
+                # che si verificano a mercato e se il bot li prende") —
+                # separato da _pre_event_bias sopra, che è solo stato di
+                # lavoro temporaneo (pruned a 50 voci, vive in bot_state).
+                # Fuori dal try/except principale non serve: un fallimento
+                # qui non deve mai bloccare l'invio dell'alert Telegram,
+                # che è la parte che conta davvero per l'utente in tempo
+                # reale — l'evento indicizzato in dashboard è un di più.
+                try:
+                    await asyncio.to_thread(
+                        save_macro_event_pre, group_key, combined_title, event_currency,
+                        ev.get("impact", "HIGH"), ev_dt.isoformat(), price, bias,
+                    )
+                except Exception as e:
+                    logger.warning(f"save_macro_event_pre fallita per {group_key}: {e}")
 
                 # Chiusura protettiva dei trade aperti in direzione opposta
                 # al bias dell'evento in arrivo. Trovato in diretta il
@@ -1760,6 +1855,8 @@ async def check_macro_alerts(bot):
                 if pre:
                     pre_bias        = pre["bias"]
                     price_immediate = pre.get("price_immediate")
+                    change_evento   = None
+                    status_evento   = None
 
                     if price_immediate is None:
                         blocco_evento = (
@@ -1768,7 +1865,7 @@ async def check_macro_alerts(bot):
                         )
                     else:
                         change_evento = price_immediate - pre["price"]
-                        esito_evento, segno_ev = _confirm_bias(pre_bias, change_evento)
+                        esito_evento, segno_ev, status_evento = _confirm_bias(pre_bias, change_evento)
                         blocco_evento = (
                             f"⚡ Bias evento: *{pre_bias}* (era ${pre['price']})\n"
                             f"{esito_evento}\n"
@@ -1776,7 +1873,7 @@ async def check_macro_alerts(bot):
                         )
 
                     change_post = price - pre["price"]
-                    esito_post, segno_post = _confirm_bias(pre_bias, change_post)
+                    esito_post, segno_post, status_post = _confirm_bias(pre_bias, change_post)
                     blocco_post = (
                         f"🕒 Bias post-evento: *{pre_bias}* (era ${pre['price']})\n"
                         f"{esito_post}\n"
@@ -1802,6 +1899,21 @@ async def check_macro_alerts(bot):
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"
                 await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
                 _sent_post_event_alerts[post_key] = True
+
+                # Tracciamento permanente per la dashboard, simmetrico al
+                # save_macro_event_pre nel blocco pre-evento sopra — anche
+                # qui fuori da qualsiasi percorso che condiziona l'invio
+                # Telegram: un fallimento di scrittura sul DB non deve mai
+                # far perdere o ritardare il resoconto già inviato.
+                if pre:
+                    try:
+                        await asyncio.to_thread(
+                            save_macro_event_post, group_key, price_immediate, change_evento,
+                            status_evento, price, change_post, status_post, minutes_elapsed,
+                        )
+                    except Exception as e:
+                        logger.warning(f"save_macro_event_post fallita per {group_key}: {e}")
+
                 _pre_event_bias.pop(group_key, None)
                 post_event_fired = True
 
