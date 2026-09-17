@@ -191,6 +191,74 @@ class TestStatisticalArbitrageStrategyWrapper(unittest.TestCase):
         self.assertEqual(result["signal"], "SELL")
 
 
+class TestDxyTltHistoryUsesYfinance(unittest.TestCase):
+    """Bug reale trovato il 2026-09-17 indagando "perché il cecchino 5min
+    non spara mai": get_dxy_history/get_tlt_history usavano Twelve Data
+    (get_data_generic, ora rimossa) con symbol="DXY" — verificato con la
+    vera chiave di produzione che Twelve Data risponde 404 "symbol or
+    figi parameter is missing or invalid" per quel simbolo. dxy_ma era
+    quindi SEMPRE None in produzione, e la metà del segnale stat-arb
+    basata sulla deviazione DXY non poteva mai attivarsi — un divario
+    reale rispetto al backtest che aveva validato la strategia con dati
+    yfinance. Ora entrambe usano yfinance (stesso ticker "DX-Y.NYB" già
+    usato con successo da get_dxy_price per il prezzo corrente)."""
+
+    def _fake_yf_ticker(self, closes: list):
+        import pandas as pd
+        history_df = pd.DataFrame({
+            "Close": closes,
+            "Open": closes, "High": closes, "Low": closes,
+        }, index=pd.date_range("2026-08-01", periods=len(closes), freq="1D"))
+
+        class _FakeTicker:
+            def history(self, period, interval):
+                return history_df
+
+        return _FakeTicker()
+
+    def test_get_dxy_history_uses_the_correct_yfinance_ticker(self):
+        with patch("yfinance.Ticker") as mock_ticker_cls:
+            mock_ticker_cls.return_value = self._fake_yf_ticker([100.0] * 30)
+            result = analyzer.get_dxy_history(20)
+        mock_ticker_cls.assert_called_once_with("DX-Y.NYB")
+        self.assertEqual(len(result), 20)
+        self.assertIn("close", result.columns)
+
+    def test_get_tlt_history_uses_the_correct_yfinance_ticker(self):
+        with patch("yfinance.Ticker") as mock_ticker_cls:
+            mock_ticker_cls.return_value = self._fake_yf_ticker([90.0] * 30)
+            result = analyzer.get_tlt_history(20)
+        mock_ticker_cls.assert_called_once_with("TLT")
+        self.assertEqual(len(result), 20)
+
+    def test_empty_yfinance_response_returns_empty_dataframe_not_none(self):
+        import pandas as pd
+
+        class _EmptyTicker:
+            def history(self, period, interval):
+                return pd.DataFrame()
+
+        with patch("yfinance.Ticker", return_value=_EmptyTicker()):
+            result = analyzer.get_dxy_history(20)
+        self.assertTrue(result.empty)
+
+    def test_yfinance_exception_returns_empty_dataframe_not_raise(self):
+        with patch("yfinance.Ticker", side_effect=RuntimeError("network down")):
+            result = analyzer.get_dxy_history(20)
+        self.assertTrue(result.empty)
+
+    def test_full_stat_arb_pipeline_gets_a_real_dxy_ma_not_none(self):
+        """Test end-to-end del vero bug: prima della correzione, questo
+        percorso lasciava dxy_ma a None anche con dati DXY realistici,
+        perché get_dxy_history falliva sempre a monte."""
+        with patch("yfinance.Ticker") as mock_ticker_cls:
+            mock_ticker_cls.return_value = self._fake_yf_ticker([100.0] * 30)
+            dxy_hist = analyzer.get_dxy_history(20)
+        self.assertFalse(dxy_hist.empty)
+        dxy_ma = float(dxy_hist["close"].mean())
+        self.assertEqual(dxy_ma, 100.0)
+
+
 class TestSmcV3StrategyUsesEvaluationTime(unittest.TestCase):
     """FIX (2026-09-06): smc_v3_strategy() usava datetime.now(TIMEZONE) —
     l'ora REALE del computer — per il filtro di sessione 14-19 IT, invece

@@ -1300,10 +1300,41 @@ def event_driven_strategy(calendar: dict, sentiment: dict) -> dict:
 # LIVELLO 09 — STATISTICAL ARBITRAGE (XAU vs DXY, XAU vs US10Y)
 # ═══════════════════════════════════════════════════════════════
 
+def _fetch_yfinance_daily_history(ticker: str, outputsize: int) -> pd.DataFrame:
+    """Storico daily via yfinance per un ticker generico (DXY/TLT).
+
+    BUG REALE trovato il 2026-09-17 (indagine "perché il cecchino 5min
+    non spara mai"): questa funzione usava Twelve Data (get_data_generic,
+    ora rimossa) con symbol="DXY" — un ticker che Twelve Data non
+    riconosce affatto (risposta reale verificata: 404 "symbol or figi
+    parameter is missing or invalid"). get_tlt_history funzionava (TLT è
+    un ticker valido su Twelve Data), ma get_dxy_history falliva SEMPRE
+    in produzione, quindi dxy_ma era SEMPRE None e la metà del segnale
+    stat-arb basata sulla deviazione DXY non ha mai potuto attivarsi —
+    un divario reale rispetto al backtest che ha validato la strategia
+    (quel backtest usava dati storici yfinance per le medie, vedi
+    commento su _stat_arb_score_from_means, quindi non aveva questo
+    problema). yfinance non ha questo limite di simbolo (usa "DX-Y.NYB",
+    lo stesso ticker già usato con successo da get_dxy_price per il
+    prezzo corrente) e non ha nemmeno la quota "molto scarsa" di Twelve
+    Data — usarlo anche per TLT elimina una fonte in più senza motivo.
+    """
+    import yfinance as yf
+    # period abbondante rispetto a outputsize: yfinance conta i giorni di
+    # calendario, non le barre di trading — i weekend "mangerebbero"
+    # altrimenti parte della finestra richiesta.
+    period_days = max(outputsize * 2, 40)
+    df = yf.Ticker(ticker).history(period=f"{period_days}d", interval="1d")
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.rename(columns={"Close": "close"})
+    return df[["close"]].tail(outputsize)
+
+
 def get_dxy_history(outputsize: int = 30) -> pd.DataFrame:
     """Storico DXY per calcolare la media mobile di riferimento."""
     try:
-        return get_data_generic("DXY", interval="1day", outputsize=outputsize)
+        return _fetch_yfinance_daily_history("DX-Y.NYB", outputsize)
     except Exception as e:
         logger.warning(f"Errore storico DXY: {e}")
         return pd.DataFrame()
@@ -1312,37 +1343,10 @@ def get_dxy_history(outputsize: int = 30) -> pd.DataFrame:
 def get_tlt_history(outputsize: int = 30) -> pd.DataFrame:
     """Storico TLT (proxy tassi) per calcolare la media mobile di riferimento."""
     try:
-        return get_data_generic("TLT", interval="1day", outputsize=outputsize)
+        return _fetch_yfinance_daily_history("TLT", outputsize)
     except Exception as e:
         logger.warning(f"Errore storico TLT: {e}")
         return pd.DataFrame()
-
-
-def get_data_generic(symbol: str, interval: str = "1day", outputsize: int = 30) -> pd.DataFrame:
-    """Scarica dati generici per un simbolo qualsiasi (per correlazioni).
-
-    FIX: chiamava Twelve Data senza rispettare il blocco quota condiviso
-    (_twelvedata_available/_mark_twelvedata_blocked) — durante un blackout
-    quota, statistical_arbitrage_strategy() la richiama comunque a ogni giro
-    di full_analyze() (ogni ~5 min per timeframe), continuando a bruciare
-    crediti già esauriti invece di rispettare lo stesso blocco che get_data()
-    e _twelvedata_price() già rispettano. Stesso pattern di bug già corretto
-    altrove in questo file (vedi _twelvedata_price)."""
-    if not _twelvedata_available():
-        return pd.DataFrame()
-    url = "https://api.twelvedata.com/time_series"
-    params = {"symbol": symbol, "interval": interval, "outputsize": outputsize, "apikey": TWELVE_API_KEY}
-    r    = requests.get(url, params=params, timeout=10)
-    data = r.json()
-    if "values" not in data:
-        if _twelvedata_quota_exceeded(str(data.get("message", ""))):
-            _mark_twelvedata_blocked()
-        return pd.DataFrame()
-    df = pd.DataFrame(data["values"])
-    df.index = pd.to_datetime(df["datetime"])
-    df["close"] = df["close"].astype(float)
-    df.sort_index(inplace=True)
-    return df
 
 
 def _stat_arb_score_from_means(dxy: float, us10y: float, dxy_ma, tlt_ma) -> dict:
