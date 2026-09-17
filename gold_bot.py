@@ -28,6 +28,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_data_success, SNIPER_CONFIGS
 from agent_orchestrator import run_pipeline, format_pipeline_report
 from news_analyst import format_news_message, analyze_macro_event, analyze_combined_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
+from market_structure import get_market_structure_snapshot
 # ORB rimosso — gestito manualmente dall'utente
 from self_learning import analyze_last_trade, weekly_review, optimize_strategy_weights, format_learning_report
 from risk_manager import format_risk_report, calculate_lot_size, resume_session_manual, min_prob_for_timeframe
@@ -1629,7 +1630,6 @@ async def check_macro_alerts(bot):
         # finestre pre/post-evento più strette restano invariate, sono
         # condizioni indipendenti più a valle nello stesso ciclo.
         events = await asyncio.to_thread(get_upcoming_events, 1, 3.5)
-        post_event_fired = False
 
         # Raggruppa gli eventi con stesso giorno+ora (es. CPI m/m + CPI y/y +
         # Core CPI m/m + Core CPI y/y, tutti alle 14:30 — stesso rilascio,
@@ -1799,6 +1799,17 @@ async def check_macro_alerts(bot):
                 # detto esplicitamente cosa si sta guardando.
                 impact_emoji = "🔴" if ev.get("impact", "HIGH") == "HIGH" else "🟠"
                 currency_tag = ev.get("currency", "USD")
+                # Struttura di mercato (liquidità/FVG/order block, 2026-09-17,
+                # richiesta esplicita dell'utente): SOLO testo informativo in
+                # più, calcolato in modo deterministico su dati OHLC reali —
+                # vedi market_structure.py. Non entra nel prompt che genera
+                # bias_line sopra: non deve mai influenzare il bias né le
+                # chiusure protettive, solo arricchire quello che si legge.
+                tech_snapshot = (
+                    "" if _in_quiet_hours(now)
+                    else await asyncio.to_thread(get_market_structure_snapshot, price)
+                )
+                tech_block = f"\n━━━━━━━━━━━━━━━━━━━━\n{tech_snapshot}" if tech_snapshot else ""
                 msg = (
                     f"⚠️ *ALERT MACRO — TRA 30 MINUTI*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1811,6 +1822,7 @@ async def check_macro_alerts(bot):
                     f"🚫 *BLACKOUT TRADING ATTIVO*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"{bias_line}"
+                    f"{tech_block}"
                 )
                 if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
                 if not _in_quiet_hours(now):
@@ -1905,6 +1917,14 @@ async def check_macro_alerts(bot):
                 else:
                     resoconto = "_Bias pre-evento non disponibile (bot riavviato nel frattempo)._"
 
+                # Struttura di mercato DOPO l'evento (vedi stesso blocco nel
+                # pre-evento sopra per il perché resta solo testo informativo).
+                tech_snapshot_post = (
+                    "" if _in_quiet_hours(now)
+                    else await asyncio.to_thread(get_market_structure_snapshot, price)
+                )
+                tech_block_post = f"\n━━━━━━━━━━━━━━━━━━━━\n{tech_snapshot_post}" if tech_snapshot_post else ""
+
                 # Stesso fix del blocco pre-evento: titolo escapato, dedup
                 # marcato solo dopo il send principale riuscito (i due send
                 # successivi — previsione statistica e news — sono già
@@ -1916,6 +1936,7 @@ async def check_macro_alerts(bot):
                     f"🚦 *Blackout terminato — trading riaperto*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"{resoconto}"
+                    f"{tech_block_post}"
                 )
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"
                 if not _in_quiet_hours(now):
@@ -1937,7 +1958,6 @@ async def check_macro_alerts(bot):
                         logger.warning(f"save_macro_event_post fallita per {group_key}: {e}")
 
                 _pre_event_bias.pop(group_key, None)
-                post_event_fired = True
 
             # Fase 5 progetto dati storici: previsione statistica reale, solo
             # per le serie validate in Fase 4 (oggi: Core CPI m/m). Silenziosa
@@ -2029,31 +2049,6 @@ async def check_macro_alerts(bot):
                                         logger.error(f"Notifica chiusura protettiva (previsione statistica) fallita per {trade_id}: {e}")
                     except Exception as e:
                         logger.debug(f"[{ev_single['title']}] Previsione statistica non disponibile: {e}")
-
-        # FIX (trovato in diretta il 2026-09-04, NFP): il digest notizie
-        # veniva rifatto (fetch + chiamata LLM) e reinviato UNA VOLTA PER
-        # OGNI evento nel ciclo POST-EVENTO sopra — con più rilasci
-        # simultanei alla stessa ora (es. NFP + Average Hourly Earnings +
-        # Unemployment Rate, tutti alle 14:30) il risultato erano 3 digest
-        # quasi identici di fila, generici (non specifici all'evento appena
-        # uscito) e persino con bias diverso da una chiamata all'altra
-        # (l'LLM ha temperature>0: stesso input, output non deterministico)
-        # — sembrava un bot rotto in loop. Ora si manda una sola volta per
-        # giro dello scheduler, non per evento.
-        #
-        # Silenzio notturno (vedi _in_quiet_hours sopra): salta del tutto
-        # il fetch+chiamata LLM, non solo il send, tra le 23:00 e le 7:30 —
-        # nessun motivo di pagare quella chiamata per un digest che non
-        # verrebbe comunque inviato.
-        if post_event_fired and not _in_quiet_hours(now):
-            price = await get_current_price_async()
-            try:
-                news = await asyncio.to_thread(get_extended_news)
-                news_analysis = await asyncio.to_thread(format_news_message, news, price)
-            except Exception:
-                news_analysis = "_Notizie non disponibili._"
-            if len(news_analysis) > 4000: news_analysis = news_analysis[:3950] + "\n_[Troncato]_"
-            await bot.send_message(chat_id=CHAT_ID, text=news_analysis, parse_mode="Markdown")
 
         # Pulizia memory leak
         if len(_sent_event_alerts) > 50:

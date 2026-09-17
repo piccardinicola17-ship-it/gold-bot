@@ -66,6 +66,16 @@ class GoldBotTestCase(unittest.TestCase):
         self._quiet_hours_patcher = mock.patch("gold_bot._in_quiet_hours", return_value=False)
         self._quiet_hours_patcher.start()
         self.addCleanup(self._quiet_hours_patcher.stop)
+        # Struttura di mercato (2026-09-17): senza questo, ogni test che
+        # chiama check_macro_alerts farebbe un vero fetch di rete (via
+        # analyzer.get_data dentro market_structure.py) — lento e instabile
+        # a seconda della connessione della macchina che gira i test. Di
+        # default "nessuna struttura disponibile" (stringa vuota, lo stesso
+        # esito che il codice reale produce se il fetch fallisce) — i test
+        # dedicati alla feature sovrascrivono questo patch esplicitamente.
+        self._market_structure_patcher = mock.patch("gold_bot.get_market_structure_snapshot", return_value="")
+        self._market_structure_patcher.start()
+        self.addCleanup(self._market_structure_patcher.stop)
 
     def tearDown(self):
         for suffix in ("", "-wal", "-shm"):
@@ -324,13 +334,19 @@ class TestStatPredictionRetriesIndependently(GoldBotTestCase):
         bot2.send_message.assert_not_called()
 
 
-class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):
-    """Bug trovato in diretta il 2026-09-04 sull'NFP: 3 eventi simultanei
-    (NFP + Average Hourly Earnings + Unemployment Rate, tutti alle 14:30)
-    generavano 3 digest notizie quasi identici di fila (uno per evento nel
-    ciclo POST-EVENTO), con bias pure diverso da una chiamata all'altra —
-    sembrava un bot rotto in loop. Il digest va mandato una sola volta per
-    giro, non una volta per evento."""
+class TestPostEventGroupedMessage(GoldBotTestCase):
+    """FIX 2026-09-13: più indicatori con stesso giorno+ora (es. NFP +
+    Average Hourly Earnings + Unemployment Rate, tutti alle 14:30)
+    devono generare UN SOLO resoconto POST-EVENTO combinato, non uno
+    scollegato per indicatore.
+
+    Il digest notizie generico che veniva mandato in coda a questo
+    resoconto è stato rimosso il 2026-09-17 su richiesta esplicita
+    dell'utente ("non me lo deve mandare più questo messaggio"): mischiava
+    notizie slegate dall'oro (crypto, cronaca) con un bias e un livello
+    "supporto" inventati dall'AI senza alcun fondamento — lo stesso
+    principio già applicato ai testi FOMC/BCE/BOJ (nessun edge genuino da
+    un ragionamento a parole non ancorato a dati veri)."""
 
     def _make_event(self, minutes_away: int, title: str) -> dict:
         ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
@@ -348,23 +364,11 @@ class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):
         with mock.patch("gold_bot.is_bot_paused", return_value=False), \
              mock.patch("analyzer.get_upcoming_events", return_value=events), \
              mock.patch("gold_bot.get_current_price_async", return_value=4400.0), \
-             mock.patch("gold_bot.get_extended_news", return_value=["headline"]), \
-             mock.patch("gold_bot.format_news_message", return_value="digest notizie"), \
              mock.patch("gold_bot.save_macro_alert_state", return_value=None):
             await gb.check_macro_alerts(bot)
         return bot
 
-    def test_single_post_event_sends_news_digest_once(self):
-        import asyncio
-        event = self._make_event(-10, "Non-Farm Employment Change")
-        bot = asyncio.run(self._run([event]))
-        digest_calls = [
-            c for c in bot.send_message.call_args_list
-            if c.kwargs.get("text") == "digest notizie"
-        ]
-        self.assertEqual(len(digest_calls), 1)
-
-    def test_three_simultaneous_post_events_send_news_digest_once_not_three_times(self):
+    def test_three_simultaneous_post_events_send_one_combined_message(self):
         import asyncio
         events = [
             self._make_event(-10, "Non-Farm Employment Change"),
@@ -372,16 +376,6 @@ class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):
             self._make_event(-10, "Unemployment Rate"),
         ]
         bot = asyncio.run(self._run(events))
-        digest_calls = [
-            c for c in bot.send_message.call_args_list
-            if c.kwargs.get("text") == "digest notizie"
-        ]
-        self.assertEqual(len(digest_calls), 1)
-        # FIX 2026-09-13: i 3 eventi condividono data+ora, quindi vengono
-        # raggruppati in UN SOLO alert POST-EVENTO combinato (non più 3
-        # resoconti separati e potenzialmente discordi — bug reale
-        # segnalato dall'utente su un caso di 4 CPI simultanei con bias
-        # diversi tra loro).
         post_evento_calls = [
             c for c in bot.send_message.call_args_list
             if "POST-EVENTO" in c.kwargs.get("text", "")
@@ -392,16 +386,16 @@ class TestPostEventNewsDigestNotDuplicated(GoldBotTestCase):
         self.assertIn("Average Hourly Earnings m/m", combined_text)
         self.assertIn("Unemployment Rate", combined_text)
 
-    def test_no_post_event_no_news_digest_sent(self):
-        """Solo eventi pre-evento (30 min prima): nessun digest, il flag
-        post_event_fired resta False."""
+    def test_no_news_digest_message_sent_anymore(self):
+        """Nessun messaggio con l'intestazione del vecchio digest notizie
+        generico deve più essere inviato, né dopo un post-evento né in
+        assenza di eventi."""
         import asyncio
-        event = self._make_event(30, "Fed Chair Speech")
-        with mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: NEUTRO\nMotivo: test"):
-            bot = asyncio.run(self._run([event]))
+        event = self._make_event(-10, "Non-Farm Employment Change")
+        bot = asyncio.run(self._run([event]))
         digest_calls = [
             c for c in bot.send_message.call_args_list
-            if c.kwargs.get("text") == "digest notizie"
+            if "NEWS XAU/USD" in c.kwargs.get("text", "")
         ]
         self.assertEqual(len(digest_calls), 0)
 
@@ -882,6 +876,90 @@ class TestInQuietHours(unittest.TestCase):
 
     def test_midday_is_not_quiet(self):
         self.assertFalse(gb._in_quiet_hours(self._at(14, 30)))
+
+
+class TestMarketStructureInMacroMessages(GoldBotTestCase):
+    """2026-09-17, richiesta esplicita dell'utente: arricchire i messaggi
+    macro con un'analisi tecnica a grafico (liquidità, FVG, order block)
+    calcolata in modo deterministico — vedi market_structure.py. Qui si
+    verifica solo il collegamento con check_macro_alerts: che il blocco
+    appaia quando disponibile, sparisca quando vuoto, e non venga mai
+    passato al prompt che genera bias/motivo (deve restare puro testo
+    aggiuntivo nel messaggio Telegram, mai un input per l'AI)."""
+
+    def _make_event(self, minutes_away: int, title: str = "Core PPI m/m") -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "0.3%",
+            "previous": "0.2%",
+        }
+
+    async def _run(self, event, price):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=price), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: BUY\nMotivo: test"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_pre_event_message_includes_structure_block_when_available(self):
+        import asyncio
+        event = self._make_event(30)
+        with mock.patch("gold_bot.get_market_structure_snapshot",
+                         return_value="📐 *Struttura di mercato (15min)*\n🧲 Liquidità sopra: $4350.00"):
+            bot = asyncio.run(self._run(event, 4320.0))
+        alert_calls = [c for c in bot.send_message.call_args_list if "ALERT MACRO" in c.kwargs.get("text", "")]
+        self.assertEqual(len(alert_calls), 1)
+        self.assertIn("Struttura di mercato", alert_calls[0].kwargs["text"])
+
+    def test_pre_event_message_omits_structure_block_when_empty(self):
+        import asyncio
+        event = self._make_event(30)
+        with mock.patch("gold_bot.get_market_structure_snapshot", return_value=""):
+            bot = asyncio.run(self._run(event, 4320.0))
+        alert_calls = [c for c in bot.send_message.call_args_list if "ALERT MACRO" in c.kwargs.get("text", "")]
+        self.assertNotIn("Struttura di mercato", alert_calls[0].kwargs["text"])
+
+    def test_post_event_message_includes_structure_block_when_available(self):
+        import asyncio
+        post_event = self._make_event(-10)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {"bias": "BUY", "price": 4378.90, "price_immediate": 4388.60}
+
+        with mock.patch("gold_bot.get_market_structure_snapshot",
+                         return_value="📐 *Struttura di mercato (15min)*\n⬜ FVG rialzista aperta: $4300.00–$4305.00"):
+            bot = asyncio.run(self._run(post_event, 4329.20))
+        post_calls = [c for c in bot.send_message.call_args_list if "POST-EVENTO" in c.kwargs.get("text", "")]
+        self.assertEqual(len(post_calls), 1)
+        self.assertIn("FVG rialzista aperta", post_calls[0].kwargs["text"])
+
+    def test_structure_snapshot_never_reaches_the_bias_prompt(self):
+        """Il blocco tecnico è testo aggiuntivo SOLO nel messaggio
+        Telegram — analyze_combined_macro_event (che genera bias/motivo)
+        non deve mai riceverlo come argomento."""
+        import asyncio
+        event = self._make_event(30)
+        with mock.patch("gold_bot.get_market_structure_snapshot",
+                         return_value="📐 *Struttura di mercato (15min)*\n🧲 Liquidità sopra: $4350.00") as mock_struct, \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: BUY\nMotivo: test") as mock_bias:
+            bot = mock.AsyncMock()
+            bot.send_message = mock.AsyncMock(return_value=None)
+            with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+                 mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+                 mock.patch("gold_bot.get_current_price_async", return_value=4320.0), \
+                 mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+                asyncio.run(gb.check_macro_alerts(bot))
+        mock_struct.assert_called_once()
+        mock_bias.assert_called_once()
+        for call_args in mock_bias.call_args_list:
+            flat_args = list(call_args.args) + list(call_args.kwargs.values())
+            self.assertNotIn("Struttura di mercato", str(flat_args))
 
 
 class TestQuietHoursSuppressesMacroAlerts(GoldBotTestCase):
