@@ -208,5 +208,57 @@ class TestGetMarketStructureSnapshot(unittest.TestCase):
         self.assertIn("Liquidità sopra", text)
 
 
+class TestPreEventTrend(unittest.TestCase):
+    """Trend pre-evento (2026-09-17): caso reale Philly Fed Manufacturing
+    Index + Unemployment Claims — l'oro era già in un forte rally per
+    tutt'altro motivo, e il confronto pre/post-evento ha "confermato" un
+    bias la cui reazione reale era invece opposta. Questo blocco mostra
+    solo il fatto oggettivo ("il prezzo si muoveva già così PRIMA della
+    notizia"), nessun bias/CONFERMATO — non c'è nulla da verificare su
+    un movimento avvenuto prima ancora che uscisse la notizia."""
+
+    def test_computes_change_from_n_bars_back(self):
+        rows = [(100, 101, 99, 100 + i) for i in range(10)]  # close sale di 1 a barra
+        df = _make_df(rows)
+        trend = ms.compute_pre_event_trend(df, current_price=115.0, bars_back=2)
+        self.assertIsNotNone(trend)
+        # close 2 barre fa (indice -3, l'ultima è indice -1) = 100+7 = 107
+        self.assertEqual(trend["reference_price"], 107)
+        self.assertEqual(trend["change"], 8.0)
+
+    def test_too_short_dataframe_returns_none(self):
+        df = _make_df([(100, 101, 99, 100)] * 3)
+        self.assertIsNone(ms.compute_pre_event_trend(df, current_price=105.0, bars_back=5))
+
+    def test_format_labels_rally_as_rialzista(self):
+        text = ms.format_pre_event_trend({"reference_price": 100.0, "change": 12.5}, lookback_minutes=30)
+        self.assertIn("+12.50$", text)
+        self.assertIn("RIALZISTA", text)
+        self.assertIn("ultimi 30 min", text)
+
+    def test_format_labels_selloff_as_ribassista(self):
+        text = ms.format_pre_event_trend({"reference_price": 100.0, "change": -15.0}, lookback_minutes=30)
+        self.assertIn("-15.00$", text)
+        self.assertIn("RIBASSISTA", text)
+
+    def test_format_labels_small_move_as_laterale(self):
+        text = ms.format_pre_event_trend({"reference_price": 100.0, "change": 0.5}, lookback_minutes=30)
+        self.assertIn("LATERALE", text)
+
+    def test_format_empty_trend_returns_empty_string(self):
+        self.assertEqual(ms.format_pre_event_trend(None, lookback_minutes=30), "")
+
+    def test_snapshot_returns_empty_string_on_data_failure(self):
+        with mock.patch("analyzer.get_data", side_effect=ValueError("no data")):
+            self.assertEqual(ms.get_pre_event_trend_snapshot(4320.0), "")
+
+    def test_snapshot_returns_formatted_text_on_success(self):
+        rows = [(100, 101, 99, 100 + i) for i in range(10)]
+        with mock.patch("analyzer.get_data", return_value=_make_df(rows)):
+            text = ms.get_pre_event_trend_snapshot(current_price=115.0, lookback_minutes=30)
+        self.assertIn("Trend pre-evento", text)
+        self.assertIn("ultimi 30 min", text)
+
+
 if __name__ == "__main__":
     unittest.main()

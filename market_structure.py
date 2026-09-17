@@ -23,6 +23,12 @@ from __future__ import annotations
 
 import pandas as pd
 
+# Stessa soglia di CONFIRM_THRESHOLD_USD in gold_bot.py (sotto, un
+# movimento è rumore non un vero trend) — duplicata qui invece che
+# importata per non creare un import circolare (gold_bot.py importa
+# questo modulo, non il contrario).
+_TREND_THRESHOLD_USD = 2.0
+
 
 def _find_swing_highs(df: pd.DataFrame, window: int = 3) -> list[tuple]:
     """Un massimo locale: il high più alto tra `window` candele prima e
@@ -198,5 +204,60 @@ def get_market_structure_snapshot(current_price: float, interval: str = "15min",
             return ""
         structure = compute_market_structure(df, current_price)
         return format_market_structure(structure, current_price)
+    except Exception:
+        return ""
+
+
+def compute_pre_event_trend(df: pd.DataFrame, current_price: float, bars_back: int) -> dict | None:
+    """Prezzo `bars_back` candele fa vs adesso — puro contesto oggettivo,
+    NESSUN bias da confermare qui (non c'è una previsione da verificare
+    su un movimento avvenuto prima ancora che uscisse la notizia).
+
+    Aggiunto il 2026-09-17 su segnalazione dell'utente (Philly Fed
+    Manufacturing Index + Unemployment Claims): l'oro era già in un
+    forte rally per tutt'altro motivo quando è uscita la notizia, e il
+    confronto puramente aritmetico pre/post-evento ha marcato
+    "CONFERMATO" un bias BUY la cui reazione REALE era invece un sell —
+    il trend preesistente ha semplicemente coperto la vera reazione.
+    Questo blocco non risolve il problema (non isola l'effetto della
+    singola notizia da un trend più ampio, non è possibile farlo con un
+    solo prezzo prima/dopo), ma lo rende visibile a chi legge, invece di
+    lasciarlo silenzioso come finora."""
+    if df is None or len(df) <= bars_back:
+        return None
+    reference_price = float(df["Close"].iloc[-1 - bars_back])
+    return {"reference_price": reference_price, "change": current_price - reference_price}
+
+
+def format_pre_event_trend(trend: dict | None, lookback_minutes: int) -> str:
+    if not trend:
+        return ""
+    change = trend["change"]
+    sign = "+" if change >= 0 else ""
+    if change > _TREND_THRESHOLD_USD:
+        direction = "RIALZISTA"
+    elif change < -_TREND_THRESHOLD_USD:
+        direction = "RIBASSISTA"
+    else:
+        direction = "LATERALE"
+    return (f"📈 Trend pre-evento (ultimi {lookback_minutes} min): "
+            f"{sign}{change:.2f}$ ({direction})")
+
+
+def get_pre_event_trend_snapshot(current_price: float, interval: str = "15min",
+                                  outputsize: int = 120, lookback_minutes: int = 30) -> str:
+    """Wrapper usato da gold_bot.py, stesso principio di
+    get_market_structure_snapshot sopra: mai far fallire l'alert
+    principale. bars_back assume candele da 15 minuti (stesso interval
+    di default) — se interval cambiasse andrebbe ricalcolato di
+    conseguenza, per ora non serve renderlo generico."""
+    try:
+        from analyzer import get_data
+        df = get_data(interval=interval, outputsize=outputsize)
+        if df is None or len(df) < 5:
+            return ""
+        bars_back = max(1, round(lookback_minutes / 15))
+        trend = compute_pre_event_trend(df, current_price, bars_back)
+        return format_pre_event_trend(trend, lookback_minutes)
     except Exception:
         return ""

@@ -76,6 +76,13 @@ class GoldBotTestCase(unittest.TestCase):
         self._market_structure_patcher = mock.patch("gold_bot.get_market_structure_snapshot", return_value="")
         self._market_structure_patcher.start()
         self.addCleanup(self._market_structure_patcher.stop)
+        # Trend pre-evento (2026-09-17): stesso principio del patch sopra,
+        # stessa fonte dati (analyzer.get_data) — default "nessun trend
+        # disponibile" per non dipendere dalla rete della macchina che gira
+        # i test.
+        self._pre_trend_patcher = mock.patch("gold_bot.get_pre_event_trend_snapshot", return_value="")
+        self._pre_trend_patcher.start()
+        self.addCleanup(self._pre_trend_patcher.stop)
 
     def tearDown(self):
         for suffix in ("", "-wal", "-shm"):
@@ -960,6 +967,91 @@ class TestMarketStructureInMacroMessages(GoldBotTestCase):
         for call_args in mock_bias.call_args_list:
             flat_args = list(call_args.args) + list(call_args.kwargs.values())
             self.assertNotIn("Struttura di mercato", str(flat_args))
+
+
+class TestPreEventTrendInMacroMessages(GoldBotTestCase):
+    """2026-09-17, caso reale (Philly Fed Manufacturing Index +
+    Unemployment Claims): l'oro era già in un forte rally per tutt'altro
+    motivo quando è uscita la notizia, e il confronto pre/post-evento ha
+    "confermato" un bias BUY la cui reazione reale era invece un sell —
+    il trend preesistente ha coperto la vera reazione. Il trend
+    pre-evento viene calcolato UNA VOLTA al momento dell'ALERT MACRO e
+    ri-mostrato IDENTICO nel POST-EVENTO (non ricalcolato, altrimenti
+    userebbe un prezzo di riferimento diverso e perderebbe senso)."""
+
+    def _make_event(self, minutes_away: int, title: str = "Core PPI m/m") -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "0.3%",
+            "previous": "0.2%",
+        }
+
+    async def _run(self, event, price):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=price), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: BUY\nMotivo: test"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_pre_event_message_includes_trend_when_available(self):
+        import asyncio
+        event = self._make_event(30)
+        with mock.patch("gold_bot.get_pre_event_trend_snapshot",
+                         return_value="📈 Trend pre-evento (ultimi 30 min): +15.00$ (RIALZISTA)"):
+            bot = asyncio.run(self._run(event, 4320.0))
+        alert_calls = [c for c in bot.send_message.call_args_list if "ALERT MACRO" in c.kwargs.get("text", "")]
+        self.assertEqual(len(alert_calls), 1)
+        self.assertIn("Trend pre-evento", alert_calls[0].kwargs["text"])
+
+    def test_pre_event_message_omits_trend_when_empty(self):
+        import asyncio
+        event = self._make_event(30)
+        with mock.patch("gold_bot.get_pre_event_trend_snapshot", return_value=""):
+            bot = asyncio.run(self._run(event, 4320.0))
+        alert_calls = [c for c in bot.send_message.call_args_list if "ALERT MACRO" in c.kwargs.get("text", "")]
+        self.assertNotIn("Trend pre-evento", alert_calls[0].kwargs["text"])
+
+    def test_post_event_message_reuses_the_same_trend_captured_at_pre_event(self):
+        """Il POST-EVENTO deve ri-mostrare lo STESSO testo calcolato al
+        momento dell'ALERT MACRO, non ricalcolarlo con un prezzo di
+        riferimento diverso e più vicino nel tempo."""
+        import asyncio
+        post_event = self._make_event(-10)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {
+            "bias": "BUY", "price": 4342.30, "price_immediate": 4370.60,
+            "pre_trend": "📈 Trend pre-evento (ultimi 30 min): +18.40$ (RIALZISTA)",
+        }
+
+        with mock.patch("gold_bot.get_pre_event_trend_snapshot") as mock_trend:
+            bot = asyncio.run(self._run(post_event, 4367.40))
+        mock_trend.assert_not_called()
+
+        post_calls = [c for c in bot.send_message.call_args_list if "POST-EVENTO" in c.kwargs.get("text", "")]
+        self.assertEqual(len(post_calls), 1)
+        self.assertIn("+18.40$ (RIALZISTA)", post_calls[0].kwargs["text"])
+
+    def test_post_event_omits_trend_block_when_none_was_captured(self):
+        """Stato pre-evento senza la chiave "pre_trend" (es. bot
+        riavviato tra pre e post-evento, o dato salvato prima di questa
+        feature) — nessun crash, semplicemente nessun blocco trend."""
+        import asyncio
+        post_event = self._make_event(-10)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {
+            "bias": "BUY", "price": 4342.30, "price_immediate": 4370.60,
+        }
+
+        bot = asyncio.run(self._run(post_event, 4367.40))
+        post_calls = [c for c in bot.send_message.call_args_list if "POST-EVENTO" in c.kwargs.get("text", "")]
+        self.assertNotIn("Trend pre-evento", post_calls[0].kwargs["text"])
 
 
 class TestQuietHoursSuppressesMacroAlerts(GoldBotTestCase):

@@ -866,6 +866,37 @@ class TestMacroEventOutcomes(TradeManagerTestCase):
             )
         self.assertEqual(len(tm.get_macro_event_outcomes(limit=2)), 2)
 
+    def test_delete_removes_the_row(self):
+        """2026-09-17, caso reale (Philly Fed Manufacturing Index +
+        Unemployment Claims): un trend già in corso prima dell'evento per
+        tutt'altro motivo ha reso "CONFERMATO" un bias la cui reazione
+        reale era invece opposta — la riga era oggettivamente fuorviante,
+        senza un valore corretto alternativo da scrivere al suo posto."""
+        tm.save_macro_event_pre(
+            "2026-09-17_14:30_USD", "Philly Fed Manufacturing Index + Unemployment Claims",
+            "USD", "MEDIUM", "2026-09-17T14:30:00+02:00", 4342.30, "BUY",
+        )
+        ok = tm.delete_macro_event_outcome("2026-09-17_14:30_USD")
+        self.assertTrue(ok)
+        self.assertEqual(tm.get_macro_event_outcomes(), [])
+
+    def test_delete_unknown_group_key_returns_false(self):
+        self.assertFalse(tm.delete_macro_event_outcome("non-esiste"))
+
+    def test_delete_does_not_touch_other_rows(self):
+        tm.save_macro_event_pre(
+            "2026-09-16_20:00_USD", "FOMC Statement", "USD", "HIGH",
+            "2026-09-16T20:00:00+02:00", 4347.10, "SELL",
+        )
+        tm.save_macro_event_pre(
+            "2026-09-17_14:30_USD", "Philly Fed Manufacturing Index + Unemployment Claims",
+            "USD", "MEDIUM", "2026-09-17T14:30:00+02:00", 4342.30, "BUY",
+        )
+        tm.delete_macro_event_outcome("2026-09-17_14:30_USD")
+        rows = tm.get_macro_event_outcomes()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["group_key"], "2026-09-16_20:00_USD")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,7 @@ from trade_manager import (
     load_broker_orders_pending, ack_broker_order, get_broker_fills,
     XAUUSD_PIP_SIZE, get_macro_event_outcomes, save_macro_event_pre,
     save_macro_event_post, get_trade_by_id, enqueue_broker_order,
+    delete_macro_event_outcome,
 )
 # XAUUSD_OZ_PER_LOT vive in risk_manager (unica fonte di verità già usata
 # per il sizing reale, vedi calculate_lot_size) — importata qui invece di
@@ -436,6 +437,26 @@ def api_macro_event_manual():
     except Exception as exc:
         logger.exception("Inserimento manuale evento macro fallito")
         return jsonify({"status": "error", "message": str(exc)}), 500
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/macro-event/delete", methods=["POST"])
+def api_macro_event_delete():
+    """Rimuove una riga dal tracciamento macro — caso reale 2026-09-17
+    (Philly Fed Manufacturing Index + Unemployment Claims): un trend già
+    in corso prima dell'evento per tutt'altro motivo ha reso
+    "CONFERMATO" un bias la cui reazione reale era in realtà opposta —
+    il confronto pre/post su una finestra larga non isola l'effetto
+    della singola notizia da un trend più ampio, quindi non c'è un
+    valore corretto da scrivere al posto di quello sbagliato (a
+    differenza di /api/correct-trade). Stesso token di tutta la
+    dashboard."""
+    payload = request.get_json(silent=True) or {}
+    group_key = str(payload.get("group_key", "")).strip()
+    if not group_key:
+        return jsonify({"status": "error", "message": "group_key mancante"}), 400
+    if not delete_macro_event_outcome(group_key):
+        return jsonify({"status": "error", "message": "group_key non trovato"}), 404
     return jsonify({"status": "ok"})
 
 

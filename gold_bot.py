@@ -28,7 +28,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from analyzer import get_news_sentiment, get_extended_news, seconds_since_last_data_success, SNIPER_CONFIGS
 from agent_orchestrator import run_pipeline, format_pipeline_report
 from news_analyst import format_news_message, analyze_macro_event, analyze_combined_macro_event, get_macro_briefing, analyze_breaking_news, get_bias_briefing, _escape_md
-from market_structure import get_market_structure_snapshot
+from market_structure import get_market_structure_snapshot, get_pre_event_trend_snapshot
 # ORB rimosso — gestito manualmente dall'utente
 from self_learning import analyze_last_trade, weekly_review, optimize_strategy_weights, format_learning_report
 from risk_manager import format_risk_report, calculate_lot_size, resume_session_manual, min_prob_for_timeframe
@@ -1698,7 +1698,7 @@ async def check_macro_alerts(bot):
                 _pre_event_bias[group_key] = {
                     "bias": bias, "price": price, "price_immediate": None,
                     "title": combined_title, "currency": event_currency,
-                    "event_dt": ev_dt.isoformat(),
+                    "event_dt": ev_dt.isoformat(), "pre_trend": "",
                 }
 
                 # Tracciamento permanente per la dashboard (2026-09-16,
@@ -1810,6 +1810,25 @@ async def check_macro_alerts(bot):
                     else await asyncio.to_thread(get_market_structure_snapshot, price)
                 )
                 tech_block = f"\n━━━━━━━━━━━━━━━━━━━━\n{tech_snapshot}" if tech_snapshot else ""
+
+                # Trend pre-evento (2026-09-17, richiesta esplicita
+                # dell'utente dopo un caso reale — Philly Fed Manufacturing
+                # Index + Unemployment Claims: l'oro era già in un forte
+                # rally per tutt'altro motivo, e il confronto pre/post ha
+                # "confermato" un bias la cui reazione reale era invece
+                # opposta). Puro contesto oggettivo, calcolato una sola
+                # volta qui e salvato in _pre_event_bias per essere
+                # ri-mostrato IDENTICO nel resoconto POST-EVENTO — se lo
+                # ricalcolassi lì userebbe un prezzo di riferimento diverso
+                # (più vicino nel tempo), perdendo il senso di "come si
+                # muoveva PRIMA che uscisse la notizia".
+                pre_trend_snapshot = (
+                    "" if _in_quiet_hours(now)
+                    else await asyncio.to_thread(get_pre_event_trend_snapshot, price)
+                )
+                pre_trend_line = f"{pre_trend_snapshot}\n" if pre_trend_snapshot else ""
+                _pre_event_bias[group_key]["pre_trend"] = pre_trend_snapshot
+
                 msg = (
                     f"⚠️ *ALERT MACRO — TRA 30 MINUTI*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1818,6 +1837,7 @@ async def check_macro_alerts(bot):
                     f"🕐 Orario: *{ev['time']} IT*\n"
                     f"{dettagli}"
                     f"💰 XAU/USD: *${_fmt(price)}*\n"
+                    f"{pre_trend_line}"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"🚫 *BLACKOUT TRADING ATTIVO*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1917,6 +1937,13 @@ async def check_macro_alerts(bot):
                 else:
                     resoconto = "_Bias pre-evento non disponibile (bot riavviato nel frattempo)._"
 
+                # Ri-mostra IDENTICO il trend pre-evento calcolato al momento
+                # dell'ALERT MACRO (vedi commento lì) — non ricalcolato qui,
+                # altrimenti userebbe un prezzo di riferimento diverso e
+                # perderebbe il senso di "come si muoveva PRIMA della notizia".
+                pre_trend_post = (pre.get("pre_trend", "") if pre else "") or ""
+                pre_trend_block = f"\n\n{pre_trend_post}" if pre_trend_post else ""
+
                 # Struttura di mercato DOPO l'evento (vedi stesso blocco nel
                 # pre-evento sopra per il perché resta solo testo informativo).
                 tech_snapshot_post = (
@@ -1936,6 +1963,7 @@ async def check_macro_alerts(bot):
                     f"🚦 *Blackout terminato — trading riaperto*\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"{resoconto}"
+                    f"{pre_trend_block}"
                     f"{tech_block_post}"
                 )
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"

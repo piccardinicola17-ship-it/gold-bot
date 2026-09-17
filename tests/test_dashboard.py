@@ -511,5 +511,66 @@ class TestMacroEventOutcomes(unittest.TestCase):
         self.assertEqual(payload["macro_events"][0]["title"], "FOMC Statement")
 
 
+class TestApiMacroEventDelete(unittest.TestCase):
+    """/api/macro-event/delete (2026-09-17): caso reale Philly Fed
+    Manufacturing Index + Unemployment Claims — un trend già in corso
+    prima dell'evento per tutt'altro motivo ha reso "CONFERMATO" un bias
+    la cui reazione reale era invece opposta. A differenza di
+    /api/correct-trade, qui non c'è un valore corretto da scrivere al
+    posto di quello sbagliato: l'unica opzione onesta è cancellare."""
+
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+        db.DB_PATH = self.tmpdb
+        self._orig_token = db.DASHBOARD_TOKEN
+        db.DASHBOARD_TOKEN = "test-token-123"
+        self.client = db.app.test_client()
+
+    def tearDown(self):
+        db.DASHBOARD_TOKEN = self._orig_token
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+    def _seed_event(self, group_key="2026-09-17_14:30_USD"):
+        tm.save_macro_event_pre(
+            group_key, "Philly Fed Manufacturing Index + Unemployment Claims",
+            "USD", "MEDIUM", "2026-09-17T14:30:00+02:00", 4342.30, "BUY",
+        )
+
+    def test_requires_token_even_from_loopback(self):
+        self._seed_event()
+        resp = self.client.post("/api/macro-event/delete", json={"group_key": "2026-09-17_14:30_USD"})
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(len(tm.get_macro_event_outcomes()), 1)
+
+    def test_deletes_the_event(self):
+        self._seed_event()
+        resp = self.client.post(
+            "/api/macro-event/delete?token=test-token-123",
+            json={"group_key": "2026-09-17_14:30_USD"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(tm.get_macro_event_outcomes(), [])
+
+    def test_missing_group_key_returns_400(self):
+        resp = self.client.post("/api/macro-event/delete?token=test-token-123", json={})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_unknown_group_key_returns_404(self):
+        resp = self.client.post(
+            "/api/macro-event/delete?token=test-token-123",
+            json={"group_key": "non-esiste"},
+        )
+        self.assertEqual(resp.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

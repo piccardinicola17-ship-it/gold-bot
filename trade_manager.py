@@ -1802,6 +1802,24 @@ def get_macro_event_outcomes(limit: int = 50) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def delete_macro_event_outcome(group_key: str) -> bool:
+    """Rimuove una riga dallo storico dashboard — caso reale 2026-09-17
+    (Philly Fed Manufacturing Index + Unemployment Claims): un forte
+    trend già in corso PRIMA dell'evento per tutt'altro motivo ha reso
+    "CONFERMATO" sia il bias evento che quello post-evento nel confronto
+    puramente aritmetico pre/post prezzo, anche se la reazione REALE alla
+    notizia era l'opposto — la riga salvata era quindi oggettivamente
+    fuorviante, non solo "un caso sfortunato". A differenza di
+    /api/correct-trade (dove si preferisce sempre correggere, mai
+    cancellare), qui non esiste un valore corretto alternativo da
+    scrivere: la misura pre/post su una finestra così larga non ha modo
+    di isolare l'effetto della singola notizia da un trend di mercato
+    più ampio, quindi l'unica opzione onesta è toglierla."""
+    with _write_lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM macro_event_outcomes WHERE group_key=?", (group_key,))
+        return cur.rowcount > 0
+
+
 def load_fred_last_seen() -> dict:
     """
     Ultima data (per serie FRED, es. 'CPILFESL') già processata dal
