@@ -229,7 +229,34 @@ ENUM_ORDER_TYPE_TIME PickSupportedExpiration(datetime &expirationOut)
    if((modes & SYMBOL_EXPIRATION_DAY) != 0)
       return ORDER_TIME_DAY;
    expirationOut = TimeCurrent() + 30 * 24 * 60 * 60;
+   if((modes & SYMBOL_EXPIRATION_SPECIFIED) != 0)
+      return ORDER_TIME_SPECIFIED;
+   if((modes & SYMBOL_EXPIRATION_SPECIFIED_DAY) != 0)
+      return ORDER_TIME_SPECIFIED_DAY;
+   // Bitmask a 0 o non riconosciuta: SPECIFIED con una scadenza reale
+   // resta il tentativo più compatibile in assoluto anche quando il
+   // broker non dichiara esplicitamente nessuna modalità.
    return ORDER_TIME_SPECIFIED;
+}
+
+//+------------------------------------------------------------------+
+//| Diagnostica (2026-09-17): dopo aver risolto l'errore "invalid      |
+//| expiration" con PickSupportedExpiration sopra, il BUY LIMIT ha     |
+//| iniziato a fallire con un errore diverso ("CTrade::OrderTypeCheck: |
+//| Invalid order type") — un secondo blocco più a valle, probabilmente|
+//| legato a quali tipi di ordine/riempimento questo simbolo accetta   |
+//| davvero su questo broker (SYMBOL_ORDER_MODE/SYMBOL_FILLING_MODE),  |
+//| non più alla scadenza. Invece di tirare a indovinare una seconda   |
+//| volta (e far ricompilare a vuoto), si stampa una volta per         |
+//| tentativo fallito la diagnostica completa del simbolo — i valori   |
+//| reali dicono con certezza cosa correggere.                         |
+//+------------------------------------------------------------------+
+void LogSymbolTradeCapabilities()
+{
+   Print("Diagnostica ", SymbolToTrade, ": SYMBOL_ORDER_MODE=", SymbolInfoInteger(SymbolToTrade, SYMBOL_ORDER_MODE),
+         " SYMBOL_EXPIRATION_MODE=", SymbolInfoInteger(SymbolToTrade, SYMBOL_EXPIRATION_MODE),
+         " SYMBOL_FILLING_MODE=", SymbolInfoInteger(SymbolToTrade, SYMBOL_FILLING_MODE),
+         " SYMBOL_TRADE_MODE=", SymbolInfoInteger(SymbolToTrade, SYMBOL_TRADE_MODE));
 }
 
 //+------------------------------------------------------------------+
@@ -319,6 +346,7 @@ void ProcessOneOrder(string obj)
       // (solo log ripetuti), decisivo se invece era un bug ormai corretto.
       Print("Errore apertura ", ot, " per ", tradeId, ": ", trade.ResultRetcodeDescription(),
             " — ordine lasciato in coda, verrà ritentato al prossimo giro.");
+      LogSymbolTradeCapabilities();
    }
 }
 
