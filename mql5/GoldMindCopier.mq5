@@ -208,6 +208,31 @@ double CalculateDynamicLot(double riskPct, double entry, double sl)
 }
 
 //+------------------------------------------------------------------+
+//| Alcuni broker (visto in produzione il 2026-09-17 su Ultima Markets|
+//| Demo) non supportano ORDER_TIME_GTC per gli ordini pending: CTrade|
+//| lo rifiuta con "Unable to place order without explicitly         |
+//| specified expiration time" / retcode "invalid expiration", e il   |
+//| BUY/SELL LIMIT/STOP non viene mai piazzato. SYMBOL_EXPIRATION_MODE|
+//| dice quali modalita' il simbolo accetta davvero su QUESTO broker: |
+//| si usa GTC solo se supportato, altrimenti DAY, altrimenti un      |
+//| orario esplicito (SPECIFIED) 30 giorni nel futuro — abbastanza    |
+//| lungo da non scadere mai prima che il bot lato server cancelli il |
+//| pending per conto proprio (vedi invalidazione pending in          |
+//| trade_manager.py, molto più stretta).                             |
+//+------------------------------------------------------------------+
+ENUM_ORDER_TYPE_TIME PickSupportedExpiration(datetime &expirationOut)
+{
+   long modes = SymbolInfoInteger(SymbolToTrade, SYMBOL_EXPIRATION_MODE);
+   expirationOut = 0;
+   if((modes & SYMBOL_EXPIRATION_GTC) != 0)
+      return ORDER_TIME_GTC;
+   if((modes & SYMBOL_EXPIRATION_DAY) != 0)
+      return ORDER_TIME_DAY;
+   expirationOut = TimeCurrent() + 30 * 24 * 60 * 60;
+   return ORDER_TIME_SPECIFIED;
+}
+
+//+------------------------------------------------------------------+
 //| Apre l'ordine corrispondente a un oggetto JSON, poi conferma.      |
 //| Dedup locale via GlobalVariable (a livello di terminale, non solo  |
 //| di questo EA) oltre alla rimozione server-side via ack: se l'ack   |
@@ -240,18 +265,21 @@ void ProcessOneOrder(string obj)
 
    double lot = RiskBasedSizing ? CalculateDynamicLot(riskPct, entry, sl) : LotSize;
 
+   datetime expiration;
+   ENUM_ORDER_TYPE_TIME typeTime = PickSupportedExpiration(expiration);
+
    if(ot == "BUY")
       sent = trade.Buy(lot, SymbolToTrade, 0.0, sl, tp1, cmt);
    else if(ot == "SELL")
       sent = trade.Sell(lot, SymbolToTrade, 0.0, sl, tp1, cmt);
    else if(ot == "BUY LIMIT")
-      sent = trade.BuyLimit(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.BuyLimit(lot, entry, SymbolToTrade, sl, tp1, typeTime, expiration, cmt);
    else if(ot == "SELL LIMIT")
-      sent = trade.SellLimit(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.SellLimit(lot, entry, SymbolToTrade, sl, tp1, typeTime, expiration, cmt);
    else if(ot == "BUY STOP")
-      sent = trade.BuyStop(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.BuyStop(lot, entry, SymbolToTrade, sl, tp1, typeTime, expiration, cmt);
    else if(ot == "SELL STOP")
-      sent = trade.SellStop(lot, entry, SymbolToTrade, sl, tp1, ORDER_TIME_GTC, 0, cmt);
+      sent = trade.SellStop(lot, entry, SymbolToTrade, sl, tp1, typeTime, expiration, cmt);
    else
    {
       Print("Tipo ordine sconosciuto: '", orderType, "' (trade_id ", tradeId, ") — scartato senza aprire nulla.");
