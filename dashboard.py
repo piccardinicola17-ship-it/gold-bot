@@ -28,7 +28,7 @@ from trade_manager import (
     load_broker_orders_pending, ack_broker_order, get_broker_fills,
     XAUUSD_PIP_SIZE, get_macro_event_outcomes, save_macro_event_pre,
     save_macro_event_post, get_trade_by_id, enqueue_broker_order,
-    delete_macro_event_outcome,
+    delete_macro_event_outcome, get_recent_decisions,
 )
 # XAUUSD_OZ_PER_LOT vive in risk_manager (unica fonte di verità già usata
 # per il sizing reale, vedi calculate_lot_size) — importata qui invece di
@@ -327,6 +327,19 @@ def api_ea_fills():
     """Storico slippage reale (entry teorica vs fill vero sul conto demo
     MT5) — vedi trade_manager.get_broker_fills."""
     return jsonify(get_broker_fills())
+
+
+@app.route("/api/decisions")
+def api_decisions():
+    """Log EXECUTE/WAIT/SKIP di ogni giro della pipeline (2026-09-17,
+    aggiunto per diagnosticare "perché pochi segnali questa settimana"
+    senza aspettare railway logs, che mostra solo il container corrente
+    — dopo un redeploy la storia precedente sparisce da lì, non dal DB.
+    Filtri opzionali via query string: ?timeframe=1h&decision=SKIP."""
+    timeframe = request.args.get("timeframe")
+    decision = request.args.get("decision")
+    limit = request.args.get("limit", 200)
+    return jsonify(get_recent_decisions(timeframe=timeframe, decision=decision, limit=limit))
 
 
 @app.route("/api/ea/requeue", methods=["POST"])

@@ -329,6 +329,61 @@ class TestApiEaAckAndFills(unittest.TestCase):
         self.assertEqual(self.client.get("/api/ea/fills").get_json(), [])
 
 
+class TestApiDecisions(unittest.TestCase):
+    """/api/decisions (2026-09-17): esposizione in lettura del log
+    EXECUTE/WAIT/SKIP di trade_manager.get_recent_decisions — aggiunto
+    per poter diagnosticare "perché pochi segnali in un periodo" senza
+    dover leggere railway logs, che mostra solo il container corrente e
+    perde la storia a ogni redeploy."""
+
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+        db.DB_PATH = self.tmpdb
+        self.client = db.app.test_client()
+
+    def tearDown(self):
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+    def test_returns_recent_decisions_most_recent_first(self):
+        tm.log_decision("1h", "BUY", "NORMAL", 60, "SKIP", "prob sotto soglia")
+        tm.log_decision("4h", "SELL", "NORMAL", 70, "EXECUTE", "setup valido")
+        resp = self.client.get("/api/decisions")
+        self.assertEqual(resp.status_code, 200)
+        rows = resp.get_json()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["decision"], "EXECUTE")
+        self.assertEqual(rows[1]["decision"], "SKIP")
+
+    def test_filters_by_timeframe(self):
+        tm.log_decision("1h", "BUY", "NORMAL", 60, "SKIP", "test")
+        tm.log_decision("4h", "SELL", "NORMAL", 70, "EXECUTE", "test")
+        rows = self.client.get("/api/decisions?timeframe=4h").get_json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["timeframe"], "4h")
+
+    def test_filters_by_decision(self):
+        tm.log_decision("1h", "BUY", "NORMAL", 60, "SKIP", "test")
+        tm.log_decision("4h", "SELL", "NORMAL", 70, "EXECUTE", "test")
+        rows = self.client.get("/api/decisions?decision=EXECUTE").get_json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["decision"], "EXECUTE")
+
+    def test_no_token_required_read_only_endpoint(self):
+        """GET è già esente da token in loopback (before_request), stesso
+        trattamento di /api/data e /api/ea/pending — non muta nulla."""
+        resp = self.client.get("/api/decisions")
+        self.assertEqual(resp.status_code, 200)
+
+
 class TestApiEaRequeue(unittest.TestCase):
     """/api/ea/requeue (2026-09-17): bug reale trovato in produzione — un
     bug nell'EA (GoldMindCopier.mq5) confermava /api/ea/ack anche quando
