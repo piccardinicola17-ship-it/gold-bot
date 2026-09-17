@@ -186,6 +186,55 @@ class TestFormatMarketStructure(unittest.TestCase):
         }
         self.assertEqual(ms.format_market_structure(structure, current_price=4320.0), "")
 
+    def _full_structure(self):
+        return {
+            "liquidity": {"above": 4350.0, "below": 4300.0},
+            "fvg_bullish": {"zone_low": 4310.0, "zone_high": 4315.0},
+            "fvg_bearish": {"zone_low": 4330.0, "zone_high": 4335.0},
+            "order_block_bullish": {"low": 4305.0, "high": 4308.0},
+            "order_block_bearish": {"low": 4340.0, "high": 4344.0},
+        }
+
+    def test_buy_bias_shows_only_bullish_aligned_zones(self):
+        """2026-09-17, richiesta esplicita dell'utente: "mi interessano
+        solo le zone che vanno nella direzione del bias evento" — BUY
+        mostra liquidità sopra/FVG rialzista/order block rialzista,
+        niente delle corrispondenti ribassiste."""
+        text = ms.format_market_structure(self._full_structure(), current_price=4320.0, bias="BUY")
+        self.assertIn("Liquidità sopra", text)
+        self.assertIn("FVG rialzista", text)
+        self.assertIn("Order block rialzista", text)
+        self.assertNotIn("Liquidità sotto", text)
+        self.assertNotIn("FVG ribassista", text)
+        self.assertNotIn("Order block ribassista", text)
+
+    def test_sell_bias_shows_only_bearish_aligned_zones(self):
+        text = ms.format_market_structure(self._full_structure(), current_price=4320.0, bias="SELL")
+        self.assertIn("Liquidità sotto", text)
+        self.assertIn("FVG ribassista", text)
+        self.assertIn("Order block ribassista", text)
+        self.assertNotIn("Liquidità sopra", text)
+        self.assertNotIn("FVG rialzista", text)
+        self.assertNotIn("Order block rialzista", text)
+
+    def test_neutro_bias_shows_everything(self):
+        text = ms.format_market_structure(self._full_structure(), current_price=4320.0, bias="NEUTRO")
+        for label in ("Liquidità sopra", "Liquidità sotto", "FVG rialzista",
+                      "FVG ribassista", "Order block rialzista", "Order block ribassista"):
+            self.assertIn(label, text)
+
+    def test_no_bias_argument_shows_everything(self):
+        """Compatibilità: senza bias esplicito (default "") il
+        comportamento resta quello di prima — nessun filtro."""
+        text = ms.format_market_structure(self._full_structure(), current_price=4320.0)
+        self.assertIn("Liquidità sopra", text)
+        self.assertIn("Liquidità sotto", text)
+
+    def test_bias_is_case_insensitive(self):
+        text = ms.format_market_structure(self._full_structure(), current_price=4320.0, bias="buy")
+        self.assertIn("Liquidità sopra", text)
+        self.assertNotIn("Liquidità sotto", text)
+
 
 class TestGetMarketStructureSnapshot(unittest.TestCase):
     def test_returns_empty_string_on_data_failure(self):
@@ -206,6 +255,19 @@ class TestGetMarketStructureSnapshot(unittest.TestCase):
             text = ms.get_market_structure_snapshot(current_price=100.0)
         self.assertIn("Struttura di mercato", text)
         self.assertIn("Liquidità sopra", text)
+
+    def test_bias_argument_filters_through_to_output(self):
+        rows = (
+            [(100, 101, 99, 100)] * 3
+            + [(100, 108, 100, 104)]
+            + [(100, 101, 99, 100)] * 3
+            + [(100, 101, 92, 98)]
+            + [(100, 101, 99, 100)] * 20
+        )
+        with mock.patch("analyzer.get_data", return_value=_make_df(rows)):
+            text = ms.get_market_structure_snapshot(current_price=100.0, bias="SELL")
+        self.assertIn("Liquidità sotto", text)
+        self.assertNotIn("Liquidità sopra", text)
 
 
 class TestPreEventTrend(unittest.TestCase):

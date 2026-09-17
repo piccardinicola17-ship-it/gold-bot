@@ -162,29 +162,42 @@ def compute_market_structure(df: pd.DataFrame, current_price: float) -> dict:
     }
 
 
-def format_market_structure(structure: dict, current_price: float) -> str:
+def format_market_structure(structure: dict, current_price: float, bias: str = "") -> str:
     """Blocco di testo pronto per Telegram — solo fatti (livelli e
     distanze), nessun giudizio o previsione: quello resta al bias
-    dell'AI, calcolato separatamente e senza vedere questo blocco."""
+    dell'AI, calcolato separatamente e senza vedere questo blocco.
+
+    `bias` (2026-09-17, richiesta esplicita dell'utente — "mi interessano
+    solo le zone che vanno nella direzione del bias evento"): con BUY
+    mostra solo liquidità sopra/FVG rialzista/order block rialzista (le
+    zone coerenti con un movimento al rialzo), con SELL solo le
+    corrispondenti ribassiste — le zone nella direzione opposta non sono
+    tolte perché "sbagliate", semplicemente non interessano quando c'è
+    già una direzione attesa. Con bias NEUTRO o non riconosciuto (nessuna
+    direzione su cui filtrare) mostra tutto, come prima."""
+    bias_upper = (bias or "").strip().upper()
+    show_bullish = bias_upper != "SELL"
+    show_bearish = bias_upper != "BUY"
+
     lines = []
     liq = structure.get("liquidity", {})
-    if liq.get("above") is not None:
+    if show_bullish and liq.get("above") is not None:
         lines.append(f"🧲 Liquidità sopra: ${liq['above']:.2f} (+{liq['above'] - current_price:.2f}$)")
-    if liq.get("below") is not None:
+    if show_bearish and liq.get("below") is not None:
         lines.append(f"🧲 Liquidità sotto: ${liq['below']:.2f} ({liq['below'] - current_price:.2f}$)")
 
     fvg_b = structure.get("fvg_bullish")
-    if fvg_b:
+    if show_bullish and fvg_b:
         lines.append(f"⬜ FVG rialzista aperta: ${fvg_b['zone_low']:.2f}–${fvg_b['zone_high']:.2f}")
     fvg_s = structure.get("fvg_bearish")
-    if fvg_s:
+    if show_bearish and fvg_s:
         lines.append(f"⬜ FVG ribassista aperta: ${fvg_s['zone_low']:.2f}–${fvg_s['zone_high']:.2f}")
 
     ob_b = structure.get("order_block_bullish")
-    if ob_b:
+    if show_bullish and ob_b:
         lines.append(f"🟩 Order block rialzista: ${ob_b['low']:.2f}–${ob_b['high']:.2f}")
     ob_s = structure.get("order_block_bearish")
-    if ob_s:
+    if show_bearish and ob_s:
         lines.append(f"🟥 Order block ribassista: ${ob_s['low']:.2f}–${ob_s['high']:.2f}")
 
     if not lines:
@@ -192,7 +205,7 @@ def format_market_structure(structure: dict, current_price: float) -> str:
     return "📐 *Struttura di mercato (15min)*\n" + "\n".join(lines)
 
 
-def get_market_structure_snapshot(current_price: float, interval: str = "15min",
+def get_market_structure_snapshot(current_price: float, bias: str = "", interval: str = "15min",
                                    outputsize: int = 120) -> str:
     """Wrapper usato da gold_bot.py: scarica i dati reali e ritorna il
     blocco di testo pronto, oppure stringa vuota se qualcosa va storto —
@@ -203,7 +216,7 @@ def get_market_structure_snapshot(current_price: float, interval: str = "15min",
         if df is None or len(df) < 20:
             return ""
         structure = compute_market_structure(df, current_price)
-        return format_market_structure(structure, current_price)
+        return format_market_structure(structure, current_price, bias)
     except Exception:
         return ""
 

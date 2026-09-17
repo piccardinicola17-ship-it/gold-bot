@@ -1807,7 +1807,7 @@ async def check_macro_alerts(bot):
                 # chiusure protettive, solo arricchire quello che si legge.
                 tech_snapshot = (
                     "" if _in_quiet_hours(now)
-                    else await asyncio.to_thread(get_market_structure_snapshot, price)
+                    else await asyncio.to_thread(get_market_structure_snapshot, price, bias)
                 )
                 tech_block = f"\n━━━━━━━━━━━━━━━━━━━━\n{tech_snapshot}" if tech_snapshot else ""
 
@@ -1945,10 +1945,14 @@ async def check_macro_alerts(bot):
                 pre_trend_block = f"\n\n{pre_trend_post}" if pre_trend_post else ""
 
                 # Struttura di mercato DOPO l'evento (vedi stesso blocco nel
-                # pre-evento sopra per il perché resta solo testo informativo).
+                # pre-evento sopra per il perché resta solo testo informativo,
+                # e sopra la definizione di format_market_structure per il
+                # perché filtrata sul bias).
                 tech_snapshot_post = (
                     "" if _in_quiet_hours(now)
-                    else await asyncio.to_thread(get_market_structure_snapshot, price)
+                    else await asyncio.to_thread(
+                        get_market_structure_snapshot, price, pre.get("bias", "") if pre else ""
+                    )
                 )
                 tech_block_post = f"\n━━━━━━━━━━━━━━━━━━━━\n{tech_snapshot_post}" if tech_snapshot_post else ""
 

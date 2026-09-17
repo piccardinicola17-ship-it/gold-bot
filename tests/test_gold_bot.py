@@ -946,6 +946,28 @@ class TestMarketStructureInMacroMessages(GoldBotTestCase):
         self.assertEqual(len(post_calls), 1)
         self.assertIn("FVG rialzista aperta", post_calls[0].kwargs["text"])
 
+    def test_pre_event_passes_the_predicted_bias_to_the_structure_snapshot(self):
+        """2026-09-17, richiesta esplicita dell'utente: "mi interessano
+        solo le zone che vanno nella direzione del bias evento" —
+        check_macro_alerts deve passare il bias appena predetto a
+        get_market_structure_snapshot, non lasciarlo al default (che
+        mostrerebbe tutte le zone, non filtrate)."""
+        import asyncio
+        event = self._make_event(30)
+        with mock.patch("gold_bot.get_market_structure_snapshot", return_value="") as mock_struct:
+            asyncio.run(self._run(event, 4320.0))
+        mock_struct.assert_called_once_with(4320.0, "BUY")
+
+    def test_post_event_passes_the_original_pre_event_bias_to_the_structure_snapshot(self):
+        import asyncio
+        post_event = self._make_event(-10)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {"bias": "SELL", "price": 4378.90, "price_immediate": 4388.60}
+
+        with mock.patch("gold_bot.get_market_structure_snapshot", return_value="") as mock_struct:
+            asyncio.run(self._run(post_event, 4329.20))
+        mock_struct.assert_called_once_with(4329.20, "SELL")
+
     def test_structure_snapshot_never_reaches_the_bias_prompt(self):
         """Il blocco tecnico è testo aggiuntivo SOLO nel messaggio
         Telegram — analyze_combined_macro_event (che genera bias/motivo)
