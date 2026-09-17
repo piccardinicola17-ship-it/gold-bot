@@ -56,6 +56,16 @@ class GoldBotTestCase(unittest.TestCase):
         gb._sent_post_event_alerts = {}
         gb._pre_event_bias = {}
         gb._sent_stat_prediction = {}
+        # Silenzio notturno (2026-09-17): senza questo, ogni test che chiama
+        # check_macro_alerts diventa dipendente dall'ora reale in cui gira
+        # la suite — se il test runner parte tra le 23:00 e le 7:30, tutti
+        # gli invii verrebbero soppressi e i test esistenti fallirebbero
+        # senza che il codice sotto test abbia nulla di sbagliato. Di
+        # default "mai in orario di silenzio" — i test dedicati alla
+        # feature sovrascrivono questo patch esplicitamente.
+        self._quiet_hours_patcher = mock.patch("gold_bot._in_quiet_hours", return_value=False)
+        self._quiet_hours_patcher.start()
+        self.addCleanup(self._quiet_hours_patcher.stop)
 
     def tearDown(self):
         for suffix in ("", "-wal", "-shm"):
@@ -844,6 +854,122 @@ class TestBiasEventoVsPostEvento(GoldBotTestCase):
             asyncio.run(self._run(post_event, 4329.20))
 
         mock_save.assert_not_called()
+
+
+class TestInQuietHours(unittest.TestCase):
+    """_in_quiet_hours: finestra 23:00-7:30 Europe/Rome (2026-09-17,
+    richiesta esplicita dell'utente dopo un alert macro su un GDP
+    neozelandese delle 00:45 — "questi eventi a mezzanotte non me ne
+    frega nulla")."""
+
+    def _at(self, hour: int, minute: int) -> datetime:
+        return gb.TIMEZONE.localize(datetime(2026, 9, 17, hour, minute))
+
+    def test_midnight_is_quiet(self):
+        self.assertTrue(gb._in_quiet_hours(self._at(0, 30)))
+
+    def test_start_boundary_is_quiet(self):
+        self.assertTrue(gb._in_quiet_hours(self._at(23, 0)))
+
+    def test_just_before_start_is_not_quiet(self):
+        self.assertFalse(gb._in_quiet_hours(self._at(22, 59)))
+
+    def test_end_boundary_is_quiet(self):
+        self.assertTrue(gb._in_quiet_hours(self._at(7, 30)))
+
+    def test_just_after_end_is_not_quiet(self):
+        self.assertFalse(gb._in_quiet_hours(self._at(7, 31)))
+
+    def test_midday_is_not_quiet(self):
+        self.assertFalse(gb._in_quiet_hours(self._at(14, 30)))
+
+
+class TestQuietHoursSuppressesMacroAlerts(GoldBotTestCase):
+    """Stessa richiesta di TestInQuietHours: tra le 23:00 e le 7:30 i
+    messaggi Telegram puramente informativi degli alert macro (ALERT
+    MACRO pre-evento, POST-EVENTO, previsione statistica, digest
+    notizie) vengono soppressi, ma il tracciamento sottostante (dedup,
+    bias, dashboard) continua a funzionare normalmente — così l'evento
+    resta comunque visibile in dashboard al mattino, e non ri-scatta un
+    resoconto tardivo appena finisce il silenzio notturno."""
+
+    def _make_event(self, minutes_away: int, title: str = "GDP q/q") -> dict:
+        ev_dt = datetime.now(gb.TIMEZONE) + timedelta(minutes=minutes_away)
+        return {
+            "date": ev_dt.strftime("%Y-%m-%d"),
+            "time": ev_dt.strftime("%H:%M"),
+            "title": title,
+            "forecast": "0.1%",
+            "previous": "0.8%",
+            "currency": "NZD",
+            "impact": "HIGH",
+        }
+
+    async def _run(self, event, price):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("analyzer.get_upcoming_events", return_value=[event]), \
+             mock.patch("gold_bot.get_current_price_async", return_value=price), \
+             mock.patch("gold_bot.analyze_combined_macro_event", return_value="Bias: SELL\nMotivo: test"), \
+             mock.patch("gold_bot.save_macro_alert_state", return_value=None), \
+             mock.patch("gold_bot._in_quiet_hours", return_value=True):
+            await gb.check_macro_alerts(bot)
+        return bot
+
+    def test_pre_event_alert_not_sent_during_quiet_hours(self):
+        import asyncio
+        event = self._make_event(30)
+        bot = asyncio.run(self._run(event, 4262.40))
+
+        bot.send_message.assert_not_called()
+
+    def test_pre_event_state_still_tracked_during_quiet_hours(self):
+        """Il dedup e il bias pre-evento devono comunque aggiornarsi:
+        altrimenti, finita la finestra di silenzio, l'evento verrebbe
+        rianalizzato o perso invece di restare semplicemente silenzioso."""
+        import asyncio
+        event = self._make_event(30)
+        group_key = f"{event['date']}_{event['time']}_NZD"
+
+        asyncio.run(self._run(event, 4262.40))
+
+        self.assertIn(group_key, gb._sent_event_alerts)
+        self.assertIn(group_key, gb._pre_event_bias)
+        self.assertEqual(gb._pre_event_bias[group_key]["bias"], "SELL")
+
+    def test_post_event_message_not_sent_but_outcome_saved_for_dashboard(self):
+        import asyncio
+        post_event = self._make_event(-10)
+        group_key = f"{post_event['date']}_{post_event['time']}_NZD"
+        gb._pre_event_bias[group_key] = {
+            "bias": "SELL", "price": 4262.40, "price_immediate": 4262.40,
+            "title": "GDP q/q", "currency": "NZD", "event_dt": datetime.now(gb.TIMEZONE).isoformat(),
+        }
+
+        with mock.patch("gold_bot.save_macro_event_post", return_value=True) as mock_save:
+            bot = asyncio.run(self._run(post_event, 4268.60))
+
+        post_calls = [c for c in bot.send_message.call_args_list if "POST-EVENTO" in c.kwargs.get("text", "")]
+        self.assertEqual(len(post_calls), 0, "nessun messaggio Telegram durante il silenzio notturno")
+        mock_save.assert_called_once()
+        self.assertIn(f"POST_{group_key}", gb._sent_post_event_alerts)
+
+    def test_protective_close_notification_still_sent_during_quiet_hours(self):
+        """Una chiusura protettiva è un'azione reale sul trade, non un
+        avviso informativo — deve arrivare subito anche di notte."""
+        import asyncio
+        data = _base_trade_data(signal="BUY", order_type="BUY", entry=4329.31, sl=4299.11)
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        event = self._make_event(30)
+        bot = asyncio.run(self._run(event, 4262.40))  # bias SELL, controtrend al BUY aperto
+
+        protect_calls = [c for c in bot.send_message.call_args_list if "CHIUSURA PROTETTIVA" in c.kwargs.get("text", "")]
+        self.assertEqual(len(protect_calls), 1, "la chiusura protettiva deve notificare anche durante il silenzio notturno")
+        row = tm.get_trade_by_id(trade_id)
+        self.assertEqual(row["result"], "CLOSED_EARLY")
 
 
 class TestRelatedMacroContext(GoldBotTestCase):

@@ -19,7 +19,7 @@ import asyncio
 import os
 import sqlite3
 import statistics
-from datetime import datetime
+from datetime import datetime, time as dt_time
 import pytz
 from telegram import Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -66,6 +66,26 @@ MIN_PROB       = 55
 # unica fonte di verità (2026-09-09: prima due copie locali identiche,
 # stesso pattern di bug già visto altrove in questo file).
 CONFIRM_THRESHOLD_USD = 2.0
+
+# Finestra di silenzio notturno (2026-09-17, richiesta esplicita
+# dell'utente dopo un alert macro su un GDP neozelandese delle 00:45:
+# "questi eventi a mezzanotte non me ne frega nulla") — sopprime SOLO i
+# push Telegram puramente informativi degli alert macro/breaking-news
+# (ALERT MACRO, POST-EVENTO, previsione statistica, digest notizie) tra
+# le 23:00 e le 7:30. Non tocca: il tracciamento sottostante (bias,
+# stato per il confronto successivo, storico dashboard — continuano a
+# scrivere silenziosamente, così l'evento resta comunque visibile in
+# dashboard al mattino), le chiusure protettive pre-evento (un'azione
+# reale sul trade, non rumore: l'utente deve saperlo subito) e la
+# generazione dei segnali di trading vera e propria (auto_check_all_
+# timeframes), che gira indipendentemente 24/5.
+QUIET_HOURS_START = dt_time(23, 0)
+QUIET_HOURS_END   = dt_time(7, 30)
+
+
+def _in_quiet_hours(now: datetime) -> bool:
+    t = now.time()
+    return t >= QUIET_HOURS_START or t <= QUIET_HOURS_END
 # ─────────────────────────────────────────────
 
 
@@ -1793,7 +1813,8 @@ async def check_macro_alerts(bot):
                     f"{bias_line}"
                 )
                 if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
-                await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+                if not _in_quiet_hours(now):
+                    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
                 _sent_event_alerts[group_key] = True
 
             # SNAPSHOT IMMEDIATA (per verificare "bias evento" nel post-evento)
@@ -1897,7 +1918,8 @@ async def check_macro_alerts(bot):
                     f"{resoconto}"
                 )
                 if len(msg_post) > 4000: msg_post = msg_post[:3950] + "\n_[Troncato]_"
-                await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
+                if not _in_quiet_hours(now):
+                    await bot.send_message(chat_id=CHAT_ID, text=msg_post, parse_mode="Markdown")
                 _sent_post_event_alerts[post_key] = True
 
                 # Tracciamento permanente per la dashboard, simmetrico al
@@ -1946,9 +1968,10 @@ async def check_macro_alerts(bot):
                             predict_reaction, ev_single["title"], ev_single.get("forecast", "N/A")
                         )
                         if prediction:
-                            await bot.send_message(
-                                chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
-                            )
+                            if not _in_quiet_hours(now):
+                                await bot.send_message(
+                                    chat_id=CHAT_ID, text=format_prediction(prediction), parse_mode="Markdown"
+                                )
                             _sent_stat_prediction[stat_key] = True
 
                             # Chiusura protettiva basata sulla previsione statistica
@@ -2017,7 +2040,12 @@ async def check_macro_alerts(bot):
         # (l'LLM ha temperature>0: stesso input, output non deterministico)
         # — sembrava un bot rotto in loop. Ora si manda una sola volta per
         # giro dello scheduler, non per evento.
-        if post_event_fired:
+        #
+        # Silenzio notturno (vedi _in_quiet_hours sopra): salta del tutto
+        # il fetch+chiamata LLM, non solo il send, tra le 23:00 e le 7:30 —
+        # nessun motivo di pagare quella chiamata per un digest che non
+        # verrebbe comunque inviato.
+        if post_event_fired and not _in_quiet_hours(now):
             price = await get_current_price_async()
             try:
                 news = await asyncio.to_thread(get_extended_news)
