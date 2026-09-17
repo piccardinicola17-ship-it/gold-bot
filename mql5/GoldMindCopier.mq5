@@ -30,7 +30,7 @@ input int    PollSeconds      = 5;            // ogni quanto controllare nuovi s
 input bool   RiskBasedSizing  = true;         // true: lotto calcolato da risk_pct sul saldo REALE del conto; false: usa sempre LotSize
 input double LotSize          = 0.01;         // lotto fisso di riserva (usato se RiskBasedSizing=false o se il calcolo dinamico fallisce)
 input double MaxLotSize       = 1.0;          // tetto di sicurezza: mai superato, qualunque cosa dica il calcolo dinamico
-input string SymbolToTrade    = "XAUUSD";     // simbolo oro su questo broker
+input string SymbolToTrade    = "XAUUSD+";    // simbolo oro su questo broker — verificare il nome ESATTO in Market Watch (alcuni broker usano suffissi come "+", ".m", "-ECN": un nome sbagliato fa restituire 0 a ogni SymbolInfo*, causando errori che sembrano di tutt'altro tipo — scadenza, tipo ordine, lotto — vedi diagnostica 2026-09-17)
 
 //+------------------------------------------------------------------+
 int OnInit()
