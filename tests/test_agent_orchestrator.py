@@ -487,6 +487,68 @@ class TestRunPipelineLogsDecision(unittest.IsolatedAsyncioTestCase):
         mock_log.assert_called_once()
 
 
+class TestRunPipelinePreservesSpecificSkipReason(unittest.IsolatedAsyncioTestCase):
+    """Bug reale trovato il 2026-09-17 indagando "perché pochi segnali
+    questa settimana" con l'utente: agent_structure_analyst ha diversi
+    return anticipati con un motivo preciso (regime bloccato per il TF,
+    direzione bloccata per regime, mancato allineamento col trend 4h —
+    "Regola 6") — ma nessuno di quei rami tocca state.structure_ok, che
+    resta al default False. Il vecchio early-exit di run_pipeline
+    controllava SOLO structure_ok, quindi sovrascriveva SEMPRE il motivo
+    già scritto con il generico "Nessun setup (signal, prob=X%)",
+    nascondendo la vera causa in decisions_log — impossibile poi capire
+    dal log se un SKIP veniva da un blocco di regime/direzione/
+    allineamento o da un vero "nessuna struttura valida"."""
+
+    async def _stub_agent(self, state):
+        from agent_orchestrator import AgentResult
+        return AgentResult(success=True, data={})
+
+    async def test_htf_misalignment_reason_survives_the_early_exit(self):
+        async def fake_structure_analyst(state):
+            from agent_orchestrator import AgentResult
+            # Simula esattamente la Regola 6 dentro agent_structure_analyst:
+            # un return anticipato con un motivo specifico, structure_ok
+            # mai toccato (resta al default False).
+            state.signal = "SELL"
+            state.final_decision  = "SKIP"
+            state.decision_reason = "SELL su 15min non allineato col trend 4h (regime 4h: TRENDING UP)"
+            return AgentResult(success=True, data={"decision": "SKIP"})
+
+        with patch("agent_orchestrator.agent_data_collector", self._stub_agent), \
+             patch("agent_orchestrator.agent_structure_analyst", fake_structure_analyst), \
+             patch("agent_orchestrator.agent_news", self._stub_agent), \
+             patch("agent_orchestrator.agent_risk", self._stub_agent), \
+             patch("agent_orchestrator.agent_decision_maker", self._stub_agent), \
+             patch("trade_manager.log_decision") as mock_log:
+            state = await run_pipeline(timeframe="15min")
+
+        self.assertEqual(state.final_decision, "SKIP")
+        self.assertIn("non allineato col trend 4h", state.decision_reason)
+        self.assertNotIn("Nessun setup", state.decision_reason)
+        mock_log.assert_called_once_with(
+            timeframe="15min", signal="SELL", regime=state.regime, prob=state.prob,
+            decision="SKIP", reason="SELL su 15min non allineato col trend 4h (regime 4h: TRENDING UP)",
+        )
+
+    async def test_generic_reason_still_applied_when_none_was_set(self):
+        """Quando invece si arriva in fondo ad agent_structure_analyst
+        senza incontrare nessun blocco specifico (structure_ok False per
+        prob/entry/sl/tp2/rr non validi), decision_reason resta "" e il
+        messaggio generico deve ancora essere applicato — nessuna
+        regressione sul caso "vero nessun setup"."""
+        with patch("agent_orchestrator.agent_data_collector", self._stub_agent), \
+             patch("agent_orchestrator.agent_structure_analyst", self._stub_agent), \
+             patch("agent_orchestrator.agent_news", self._stub_agent), \
+             patch("agent_orchestrator.agent_risk", self._stub_agent), \
+             patch("agent_orchestrator.agent_decision_maker", self._stub_agent), \
+             patch("trade_manager.log_decision"):
+            state = await run_pipeline(timeframe="4h")
+
+        self.assertEqual(state.final_decision, "SKIP")
+        self.assertIn("Nessun setup", state.decision_reason)
+
+
 class TestStrategyFingerprint(unittest.TestCase):
     """get_strategy_fingerprint() (Fase A, 2026-09-04): impronta calcolata
     dai valori reali di configurazione, non un numero di versione mantenuto

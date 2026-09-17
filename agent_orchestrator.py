@@ -748,10 +748,28 @@ async def run_pipeline(timeframe: str = "5min") -> TradingState:
             logger.exception(f"Eccezione in agente {name}")
 
         # Early exit: se non c'è setup, non serve andare oltre StructureAnalyst
+        #
+        # BUG REALE (trovato il 2026-09-17 indagando "perché pochi segnali
+        # questa settimana"): agent_structure_analyst ha diversi return
+        # anticipati con un motivo preciso (regime bloccato per il TF,
+        # direzione bloccata per regime, mancato allineamento col trend
+        # 4h — "Regola 6") — ma NESSUNO di quei rami tocca
+        # state.structure_ok, che resta al default False. Questo blocco
+        # qui sotto controllava SOLO structure_ok, quindi sovrascriveva
+        # SEMPRE il motivo specifico già scritto con il generico "Nessun
+        # setup (signal, prob=X%)" — anche quando la vera causa era tutta
+        # un'altra (es. "SELL su 15min non allineato col trend 4h").
+        # decision_reason resta "" (default) SOLO se si arriva alla fine
+        # di agent_structure_analyst senza incontrare nessuno di quei
+        # rami — è il segnale giusto per capire se il motivo generico va
+        # davvero applicato o se ne esiste già uno più preciso da
+        # preservare. Stesso pattern "doppio meccanismo che diverge" già
+        # visto altrove in questo codebase.
         if name == "StructureAnalyst" and not state.structure_ok:
             state.add_log("🚀 Pipeline", "⏭️ Early exit — nessun setup")
-            state.final_decision  = "SKIP"
-            state.decision_reason = f"Nessun setup ({state.signal}, prob={state.prob}%)"
+            if not state.decision_reason:
+                state.final_decision  = "SKIP"
+                state.decision_reason = f"Nessun setup ({state.signal}, prob={state.prob}%)"
             break
 
     state.add_log("🚀 Pipeline", f"Fine — Decisione: {state.final_decision}")
