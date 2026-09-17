@@ -329,6 +329,89 @@ class TestApiEaAckAndFills(unittest.TestCase):
         self.assertEqual(self.client.get("/api/ea/fills").get_json(), [])
 
 
+class TestApiEaRequeue(unittest.TestCase):
+    """/api/ea/requeue (2026-09-17): bug reale trovato in produzione — un
+    bug nell'EA (GoldMindCopier.mq5) confermava /api/ea/ack anche quando
+    l'apertura dell'ordine falliva (scadenza pending non supportata dal
+    broker), quindi un BUY LIMIT spariva per sempre dalla coda senza mai
+    arrivare sul conto MT5, pur restando regolarmente OPEN nella
+    simulazione paper. Questo endpoint rimette a mano in coda un trade
+    del genere prendendo i dati direttamente dal trade già registrato."""
+
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+        db.DB_PATH = self.tmpdb
+        self._orig_token = db.DASHBOARD_TOKEN
+        db.DASHBOARD_TOKEN = "test-token-123"
+        self._orig_bridge = tm.EA_BRIDGE_ENABLED
+        tm.EA_BRIDGE_ENABLED = True
+        self.client = db.app.test_client()
+
+    def tearDown(self):
+        db.DASHBOARD_TOKEN = self._orig_token
+        tm.EA_BRIDGE_ENABLED = self._orig_bridge
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+    def _open_pending_limit_trade(self, entry=4284.60) -> str:
+        data = {
+            "signal": "BUY", "order_type": "BUY LIMIT", "entry": entry, "sl": 4248.99,
+            "tp1": 4320.21, "tp2": 4355.81, "tp3": 4398.54, "prob": 68, "regime": "NORMAL",
+            "timeframe": "4h", "price": entry, "risk_pct": 1.0, "strategies": {},
+            "data_timestamp": "2026-09-17T08:00:00", "price_basis": 0.0, "early_be_level": 0,
+        }
+        data["setup_key"] = tm.build_setup_key(data)
+        return tm.open_trade(data)
+
+    def test_requires_token_even_from_loopback(self):
+        trade_id = self._open_pending_limit_trade()
+        tm.ack_broker_order(trade_id)  # simula il bug reale: già tolto dalla coda
+        resp = self.client.post("/api/ea/requeue", json={"trade_id": trade_id})
+        self.assertEqual(resp.status_code, 401)
+        self.assertNotIn(trade_id, tm.load_broker_orders_pending())
+
+    def test_requeues_an_open_trade_with_its_real_data(self):
+        trade_id = self._open_pending_limit_trade(entry=4284.60)
+        tm.ack_broker_order(trade_id)  # simula il bug reale: già tolto dalla coda
+        self.assertNotIn(trade_id, tm.load_broker_orders_pending())
+
+        resp = self.client.post("/api/ea/requeue?token=test-token-123", json={"trade_id": trade_id})
+        self.assertEqual(resp.status_code, 200)
+
+        pending = tm.load_broker_orders_pending()
+        self.assertIn(trade_id, pending)
+        self.assertEqual(pending[trade_id]["order_type"], "BUY LIMIT")
+        self.assertAlmostEqual(pending[trade_id]["entry"], 4284.60, places=2)
+
+    def test_unknown_trade_id_returns_404(self):
+        resp = self.client.post(
+            "/api/ea/requeue?token=test-token-123", json={"trade_id": "non-esiste"},
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_missing_trade_id_returns_400(self):
+        resp = self.client.post("/api/ea/requeue?token=test-token-123", json={})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_closed_trade_cannot_be_requeued(self):
+        trade_id = self._open_pending_limit_trade()
+        tm.ack_broker_order(trade_id)
+        tm.activate_trade(trade_id)
+        tm.close_trade(trade_id, "WIN_TP1", 4320.21, "TP1 raggiunto")
+
+        resp = self.client.post("/api/ea/requeue?token=test-token-123", json={"trade_id": trade_id})
+        self.assertEqual(resp.status_code, 400)
+        self.assertNotIn(trade_id, tm.load_broker_orders_pending())
+
+
 class TestMacroEventOutcomes(unittest.TestCase):
     """Tracciamento eventi macro in dashboard (2026-09-16, richiesta
     esplicita: "aggiungi nella dashboard gli eventi che si verificano a

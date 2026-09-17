@@ -301,12 +301,25 @@ void ProcessOneOrder(string obj)
             " entry=", entry, " sl=", sl, " tp=", tp1,
             (fillPrice > 0 ? " fill=" + DoubleToString(fillPrice, 2) : ""), " (", tradeId, ")");
       GlobalVariableSet(seenVar, 1);
+      AckOrder(tradeId, fillPrice);
    }
    else
    {
-      Print("Errore apertura ", ot, " per ", tradeId, ": ", trade.ResultRetcodeDescription());
+      // BUG REALE (2026-09-17): prima si chiamava AckOrder anche qui, in
+      // ogni caso — un ordine che falliva ad aprirsi (es. il bug della
+      // scadenza dei pending, vedi PickSupportedExpiration) veniva
+      // comunque tolto per sempre dalla coda /api/ea/pending: il server
+      // pensava fosse stato gestito, l'EA non lo riproponeva mai più al
+      // giro successivo, e quel trade non arrivava MAI sul conto MT5,
+      // silenziosamente. ack_broker_order() lato server documenta già
+      // questo esattamente ("con successo o con un errore che non ha
+      // senso ritentare") ma qui non veniva rispettato. Ora un fallimento
+      // NON conferma nulla: l'ordine resta in coda e viene ritentato al
+      // prossimo poll (PollSeconds) — innocuo se il problema persiste
+      // (solo log ripetuti), decisivo se invece era un bug ormai corretto.
+      Print("Errore apertura ", ot, " per ", tradeId, ": ", trade.ResultRetcodeDescription(),
+            " — ordine lasciato in coda, verrà ritentato al prossimo giro.");
    }
-   AckOrder(tradeId, fillPrice);
 }
 
 //+------------------------------------------------------------------+

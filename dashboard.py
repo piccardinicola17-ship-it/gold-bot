@@ -27,7 +27,7 @@ from trade_manager import (
     is_decisive_win, amend_closed_trade, RESULT_PNL, DB_PATH, _connect,
     load_broker_orders_pending, ack_broker_order, get_broker_fills,
     XAUUSD_PIP_SIZE, get_macro_event_outcomes, save_macro_event_pre,
-    save_macro_event_post,
+    save_macro_event_post, get_trade_by_id, enqueue_broker_order,
 )
 # XAUUSD_OZ_PER_LOT vive in risk_manager (unica fonte di verità già usata
 # per il sizing reale, vedi calculate_lot_size) — importata qui invece di
@@ -326,6 +326,33 @@ def api_ea_fills():
     """Storico slippage reale (entry teorica vs fill vero sul conto demo
     MT5) — vedi trade_manager.get_broker_fills."""
     return jsonify(get_broker_fills())
+
+
+@app.route("/api/ea/requeue", methods=["POST"])
+def api_ea_requeue():
+    """Rimette in coda per l'EA un trade già aperto lato bot (paper) ma
+    mai arrivato sul conto MT5 reale — caso reale 2026-09-17: un bug
+    nell'EA (GoldMindCopier.mq5, PickSupportedExpiration) confermava
+    /api/ea/ack anche quando l'apertura falliva, quindi un BUY LIMIT
+    spariva per sempre dalla coda senza mai essere piazzato sul broker,
+    pur restando regolarmente aperto/pending nella simulazione paper.
+    Il bug nell'EA è corretto (non confermerà più un fallimento), ma un
+    ordine già tolto dalla coda PRIMA della correzione non si ripresenta
+    da solo — questo endpoint lo re-inserisce a mano, prendendo entry/
+    sl/tp/risk_pct dal trade già registrato. Stesso token di tutta la
+    dashboard, stesso principio di /api/correct-trade: non cancella
+    nulla, resta sempre tracciabile."""
+    payload = request.get_json(silent=True) or {}
+    trade_id = str(payload.get("trade_id", "")).strip()
+    if not trade_id:
+        return jsonify({"status": "error", "message": "trade_id mancante"}), 400
+    trade = get_trade_by_id(trade_id)
+    if not trade:
+        return jsonify({"status": "error", "message": "trade non trovato"}), 404
+    if trade.get("status") != "OPEN":
+        return jsonify({"status": "error", "message": "il trade non è più OPEN, non ha senso rimetterlo in coda"}), 400
+    enqueue_broker_order(trade_id, trade)
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/correct-trade", methods=["POST"])
