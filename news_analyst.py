@@ -371,20 +371,24 @@ def get_macro_briefing(events: list, current_price: float = 0) -> str:
     return result[:4000] if len(result) > 4000 else result
 
 
-def get_weekly_smc_narrative(ctx: dict, current_price: float) -> str:
+def get_weekly_smc_narrative(ctx: dict, current_price: float, timeframe_label: str = "4H") -> str:
     """
     Spiegazione discorsiva di cosa potrebbe fare il prezzo (rimbalzo su una
     zona, liquidazione di un livello, imbalance da colmare, possibile swing
-    e in che direzione) per l'analisi weekend.
+    e in che direzione) per l'analisi weekend — e, dal 2026-09-17, anche per
+    l'analisi giornaliera nel report mattutino (`timeframe_label="1H"`,
+    stessa funzione, così il paragrafo cita il timeframe giusto invece di
+    dire sempre "4H" a prescindere dai dati passati).
 
     Stesso principio di analyze_macro_event: all'LLM vengono dati SOLO fatti
     gi\u00e0 calcolati da analyzer.py (struttura BOS/CHoCH, order block, fair
     value gap, liquidit\u00e0 EQH/EQL, zona premium/discount, regime) \u2014 il suo
     compito \u00e8 interpretarli in prosa, MAI inventare nuovi prezzi o livelli
     che non gli sono stati passati nel contesto. `ctx` \u00e8 il dict prodotto da
-    weekly_chart.compute_smc_context(), calcolato sulla stessa serie 4h
-    usata per il grafico e le "zone chiave" nel testo, quindi non pu\u00f2 mai
-    raccontare una storia diversa dai numeri gi\u00e0 mostrati.
+    weekly_chart.compute_smc_context(), calcolato sulla stessa serie
+    (4h o 1h a seconda del chiamante) usata per il grafico e le "zone
+    chiave" nel testo, quindi non pu\u00f2 mai raccontare una storia diversa
+    dai numeri gi\u00e0 mostrati.
     """
     structure  = ctx["structure"]
     ob         = ctx["order_blocks"]
@@ -394,7 +398,7 @@ def get_weekly_smc_narrative(ctx: dict, current_price: float) -> str:
 
     lines = [
         f"Prezzo attuale: {current_price:,.2f}",
-        f"Struttura di mercato (4H): {structure.get('structure', 'NEUTRAL')}"
+        f"Struttura di mercato ({timeframe_label}): {structure.get('structure', 'NEUTRAL')}"
         + (f" | BOS: {structure['bos']}" if structure.get("bos") else "")
         + (f" | CHoCH: {structure['choch']}" if structure.get("choch") else ""),
         f"Ultimo swing high: {structure.get('last_high', 'N/D')} (precedente: {structure.get('prev_high', 'N/D')})",

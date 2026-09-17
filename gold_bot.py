@@ -1374,8 +1374,8 @@ async def _build_weekend_outlook() -> tuple:
         chart_path = await asyncio.to_thread(render_weekly_outlook_chart, df_4h, zones, bias_dir)
         zone_txt = (
             "\n\n🎯 *Zone chiave (4H):*\n"
-            f"🔴 Resistenza: {zones['resistance']:,.2f} (max settimana {zones['week_high']:,.2f})\n"
-            f"🟢 Supporto: {zones['support']:,.2f} (min settimana {zones['week_low']:,.2f})\n"
+            f"🔴 Resistenza: {zones['resistance']:,.2f} (max settimana {zones['period_high']:,.2f})\n"
+            f"🟢 Supporto: {zones['support']:,.2f} (min settimana {zones['period_low']:,.2f})\n"
             f"⚪ Prezzo attuale: {zones['current_price']:,.2f} | Pivot: {zones['pivot']:,.2f}"
         )
     except Exception as e:
@@ -1404,6 +1404,60 @@ async def _build_weekend_outlook() -> tuple:
         + events_txt
     )
     return msg, chart_path
+
+
+async def _build_daily_outlook() -> tuple:
+    """
+    Analisi tecnica giornaliera (1H) per il report mattutino — stesso
+    meccanismo di _build_weekend_outlook sopra (2026-09-17, richiesta
+    esplicita dell'utente: "la foto per l'analisi giornaliera e
+    l'analisi giornaliera, come facciamo per quella settimanale"), ma:
+    - timeframe 1h invece di 4h (finestra ~24h invece di ~7 giorni,
+      coerente con un'analisi "di oggi" non "della settimana");
+    - NIENTE voto multi-timeframe (quello serve a elencare setup per
+      ogni TF in vista della riapertura lunedì — qui basta spiegare la
+      struttura tecnica attuale, non proporre trade per timeframe).
+
+    Il bias per la freccia del grafico e per il "perché" viene dalla
+    struttura BOS/CHoCH già calcolata (stesso dato usato nel testo della
+    narrativa, mai un secondo calcolo indipendente che potrebbe
+    raccontare una direzione diversa).
+
+    Ritorna (zone_txt, narrative_txt, chart_path) — stringhe vuote/None
+    se qualcosa fallisce, MAI un'eccezione: il report mattutino deve
+    arrivare comunque anche senza questa parte.
+    """
+    zone_txt = ""
+    narrative_txt = ""
+    chart_path = None
+    try:
+        from analyzer import get_data
+        from weekly_chart import compute_weekly_zones, render_weekly_outlook_chart, compute_smc_context
+        df_1h = await asyncio.to_thread(get_data, "1h", 96)
+        zones = compute_weekly_zones(df_1h, lookback_bars=24)  # ~24h su candele 1h
+        smc_ctx = await asyncio.to_thread(compute_smc_context, df_1h)
+        bias_dir = {"BULLISH": "BUY", "BEARISH": "SELL"}.get(smc_ctx["structure"]["structure"], "NEUTRAL")
+        chart_path = await asyncio.to_thread(
+            render_weekly_outlook_chart, df_1h, zones, bias_dir,
+            title="GOLD DAILY OUTLOOK — XAU/USD (1H)",
+        )
+        zone_txt = (
+            "\n\n🎯 *Zone chiave (1H):*\n"
+            f"🔴 Resistenza: {zones['resistance']:,.2f} (max 24h {zones['period_high']:,.2f})\n"
+            f"🟢 Supporto: {zones['support']:,.2f} (min 24h {zones['period_low']:,.2f})\n"
+            f"⚪ Pivot: {zones['pivot']:,.2f}"
+        )
+        try:
+            from news_analyst import get_weekly_smc_narrative
+            narrative = await asyncio.to_thread(
+                get_weekly_smc_narrative, smc_ctx, zones["current_price"], "1H"
+            )
+            narrative_txt = f"\n\n🧠 *Perché ({bias_dir}):*\n{_escape_md(narrative)}"
+        except Exception as e:
+            logger.error(f"Errore narrativa SMC giornaliera: {e}")
+    except Exception as e:
+        logger.error(f"Errore generazione grafico/zone giornaliere: {e}")
+    return zone_txt, narrative_txt, chart_path
 
 
 async def _send_chart_then_message(bot_or_message, chart_path: str, msg: str, *, is_update_reply: bool):
@@ -2136,6 +2190,12 @@ async def send_morning_report(bot: Bot):
         # report mattutino unico non arriva.
         bias_txt = _escape_md(await asyncio.to_thread(get_bias_briefing, news, price))
 
+        # Analisi tecnica giornaliera con grafico (2026-09-17, richiesta
+        # esplicita: "la foto per l'analisi giornaliera e l'analisi
+        # giornaliera, come facciamo per quella settimanale") — vedi
+        # _build_daily_outlook per il perché è 1H e senza voto multi-TF.
+        zone_txt, narrative_txt, chart_path = await _build_daily_outlook()
+
         ny_time = _ny_open_time_it()
         msg = (
             f"🌅 *BUONGIORNO — {today}*\n"
@@ -2145,6 +2205,8 @@ async def send_morning_report(bot: Bot):
             f"{events_txt}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"{bias_txt}\n"
+            f"{zone_txt}"
+            f"{narrative_txt}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"⏰ *KILL ZONES OGGI:*\n"
             f"• 🇬🇧 Londra: 09:00–11:00\n"
@@ -2155,10 +2217,21 @@ async def send_morning_report(bot: Bot):
             f"_Buon trading! 📈_"
         )
         if len(msg) > 4000: msg = msg[:3950] + "\n_[Troncato]_"
-        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
+        await _send_chart_then_message(bot, chart_path, msg, is_update_reply=False)
         logger.info("Report mattutino inviato")
     except Exception as e:
         logger.error(f"Errore report mattutino: {e}")
+
+
+async def cmd_morning(update, context: ContextTypes.DEFAULT_TYPE):
+    """Anteprima manuale del report mattutino, stesso principio di
+    cmd_weekend — utile per testarlo senza aspettare le 8:30."""
+    if not is_authorized(update): return
+    await update.message.reply_text("⏳ Report mattutino in corso... (1-2 min)")
+    try:
+        await send_morning_report(update.get_bot())
+    except Exception as e:
+        await update.message.reply_text(f"❌ Errore: {e}")
 
 
 async def send_daily_report(bot: Bot):
@@ -2543,6 +2616,7 @@ async def main():
     app.add_handler(CommandHandler("review",    cmd_review))
     app.add_handler(CommandHandler("learn",     cmd_learn))
     app.add_handler(CommandHandler("weekend",   cmd_weekend))
+    app.add_handler(CommandHandler("mattina",   cmd_morning))
     app.add_handler(CommandHandler("pausa",     cmd_pausa))
     app.add_handler(CommandHandler("riattiva",  cmd_riattiva))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text))

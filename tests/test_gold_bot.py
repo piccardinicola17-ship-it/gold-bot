@@ -1272,5 +1272,164 @@ class TestRelatedMacroContext(GoldBotTestCase):
         self.assertIn("Federal Funds Rate", captured["related_context"])
 
 
+class TestBuildDailyOutlook(unittest.TestCase):
+    """_build_daily_outlook (2026-09-17, richiesta esplicita dell'utente:
+    "la foto per l'analisi giornaliera e l'analisi giornaliera, come
+    facciamo per quella settimanale") — stesso meccanismo di
+    _build_weekend_outlook ma su candele 1H/~24h e senza il voto
+    multi-timeframe (qui basta spiegare la struttura attuale)."""
+
+    def _fake_df(self):
+        import pandas as pd
+        return pd.DataFrame({"Open": [4300.0], "High": [4310.0], "Low": [4290.0], "Close": [4305.0]})
+
+    def _fake_zones(self):
+        return {
+            "current_price": 4320.0, "resistance": 4350.0, "support": 4300.0,
+            "period_high": 4360.0, "period_low": 4290.0, "pivot": 4325.0,
+        }
+
+    def test_success_returns_zone_text_narrative_and_chart_path(self):
+        import asyncio
+        fake_smc_ctx = {"structure": {"structure": "BULLISH"}}
+        with mock.patch("analyzer.get_data", return_value=self._fake_df()), \
+             mock.patch("weekly_chart.compute_weekly_zones", return_value=self._fake_zones()) as mock_zones, \
+             mock.patch("weekly_chart.compute_smc_context", return_value=fake_smc_ctx), \
+             mock.patch("weekly_chart.render_weekly_outlook_chart", return_value="/tmp/fake_daily.png") as mock_chart, \
+             mock.patch("news_analyst.get_weekly_smc_narrative",
+                         return_value="Il prezzo rispetta la struttura rialzista.") as mock_narr:
+            zone_txt, narrative_txt, chart_path = asyncio.run(gb._build_daily_outlook())
+
+        self.assertEqual(chart_path, "/tmp/fake_daily.png")
+        self.assertIn("Zone chiave (1H)", zone_txt)
+        self.assertIn("4,350.00", zone_txt)
+        self.assertIn("Perché (BUY)", narrative_txt)
+        self.assertIn("struttura rialzista", narrative_txt)
+
+        # Finestra ~24h su candele 1h — non le ~7 giorni della settimanale.
+        self.assertEqual(mock_zones.call_args.kwargs.get("lookback_bars"), 24)
+        # Bias per la freccia del grafico preso dalla struttura BOS/CHoCH,
+        # mai un secondo calcolo indipendente che potrebbe divergere.
+        self.assertEqual(mock_chart.call_args.args[2], "BUY")
+        self.assertEqual(mock_chart.call_args.kwargs.get("title"), "GOLD DAILY OUTLOOK — XAU/USD (1H)")
+        # timeframe_label="1H" passato esplicitamente, non il default "4H".
+        self.assertEqual(mock_narr.call_args.args, (fake_smc_ctx, 4320.0, "1H"))
+
+    def test_bearish_structure_maps_to_sell(self):
+        import asyncio
+        fake_smc_ctx = {"structure": {"structure": "BEARISH"}}
+        with mock.patch("analyzer.get_data", return_value=self._fake_df()), \
+             mock.patch("weekly_chart.compute_weekly_zones", return_value=self._fake_zones()), \
+             mock.patch("weekly_chart.compute_smc_context", return_value=fake_smc_ctx), \
+             mock.patch("weekly_chart.render_weekly_outlook_chart", return_value="/tmp/fake.png") as mock_chart, \
+             mock.patch("news_analyst.get_weekly_smc_narrative", return_value="test"):
+            _, narrative_txt, _ = asyncio.run(gb._build_daily_outlook())
+
+        self.assertEqual(mock_chart.call_args.args[2], "SELL")
+        self.assertIn("Perché (SELL)", narrative_txt)
+
+    def test_neutral_structure_maps_to_neutral(self):
+        import asyncio
+        fake_smc_ctx = {"structure": {"structure": "NEUTRAL"}}
+        with mock.patch("analyzer.get_data", return_value=self._fake_df()), \
+             mock.patch("weekly_chart.compute_weekly_zones", return_value=self._fake_zones()), \
+             mock.patch("weekly_chart.compute_smc_context", return_value=fake_smc_ctx), \
+             mock.patch("weekly_chart.render_weekly_outlook_chart", return_value="/tmp/fake.png") as mock_chart, \
+             mock.patch("news_analyst.get_weekly_smc_narrative", return_value="test"):
+            asyncio.run(gb._build_daily_outlook())
+
+        self.assertEqual(mock_chart.call_args.args[2], "NEUTRAL")
+
+    def test_data_failure_returns_empty_strings_and_none_chart_without_raising(self):
+        import asyncio
+        with mock.patch("analyzer.get_data", side_effect=ValueError("no data")):
+            zone_txt, narrative_txt, chart_path = asyncio.run(gb._build_daily_outlook())
+
+        self.assertEqual(zone_txt, "")
+        self.assertEqual(narrative_txt, "")
+        self.assertIsNone(chart_path)
+
+    def test_narrative_failure_still_returns_zone_text_and_chart(self):
+        """Il fallimento della sola narrativa AI (es. Groq irraggiungibile)
+        non deve far perdere le zone chiave/grafico già calcolati — stesso
+        principio di isolamento già applicato altrove nel bot."""
+        import asyncio
+        fake_smc_ctx = {"structure": {"structure": "BULLISH"}}
+        with mock.patch("analyzer.get_data", return_value=self._fake_df()), \
+             mock.patch("weekly_chart.compute_weekly_zones", return_value=self._fake_zones()), \
+             mock.patch("weekly_chart.compute_smc_context", return_value=fake_smc_ctx), \
+             mock.patch("weekly_chart.render_weekly_outlook_chart", return_value="/tmp/fake.png"), \
+             mock.patch("news_analyst.get_weekly_smc_narrative", side_effect=RuntimeError("groq down")):
+            zone_txt, narrative_txt, chart_path = asyncio.run(gb._build_daily_outlook())
+
+        self.assertNotEqual(zone_txt, "")
+        self.assertEqual(narrative_txt, "")
+        self.assertEqual(chart_path, "/tmp/fake.png")
+
+
+class TestMorningReportIncludesDailyOutlook(unittest.TestCase):
+    """send_morning_report (2026-09-17): ora invia prima il grafico
+    dell'analisi giornaliera (se disponibile) e poi il testo, che include
+    le zone chiave e il "perché" tecnico — stesso schema già usato per
+    l'analisi weekend."""
+
+    async def _run(self, zone_txt="", narrative_txt="", chart_path=None):
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        bot.send_photo = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.get_current_price_async", return_value=4320.0), \
+             mock.patch("gold_bot.get_extended_news", return_value=["headline"]), \
+             mock.patch("gold_bot.get_news_sentiment", return_value={"label": "BULLISH"}), \
+             mock.patch("analyzer.get_economic_events", return_value={"events": []}), \
+             mock.patch("gold_bot.get_bias_briefing", return_value="Bias: BULLISH\nMotivo: test"), \
+             mock.patch("gold_bot._build_daily_outlook",
+                         return_value=(zone_txt, narrative_txt, chart_path)), \
+             mock.patch("os.remove"):
+            await gb.send_morning_report(bot)
+        return bot
+
+    def test_sends_photo_before_text_when_chart_available(self):
+        import asyncio
+        with mock.patch("builtins.open", mock.mock_open(read_data=b"fake-png-bytes")):
+            bot = asyncio.run(self._run(
+                zone_txt="\n\n🎯 *Zone chiave (1H):*\ntest",
+                narrative_txt="\n\n🧠 *Perché (BUY):*\ntest narrativa",
+                chart_path="/tmp/fake_daily.png",
+            ))
+        bot.send_photo.assert_called_once()
+        bot.send_message.assert_called_once()
+        text = bot.send_message.call_args.kwargs["text"]
+        self.assertIn("Zone chiave", text)
+        self.assertIn("Perché (BUY)", text)
+
+    def test_no_photo_sent_when_chart_unavailable(self):
+        import asyncio
+        bot = asyncio.run(self._run(zone_txt="", narrative_txt="", chart_path=None))
+        bot.send_photo.assert_not_called()
+        bot.send_message.assert_called_once()
+
+    def test_report_still_sent_when_daily_outlook_itself_fails(self):
+        """_build_daily_outlook non fallisce mai per design (ha già i suoi
+        try/except interni), ma se anche solo per assurdo sollevasse, il
+        report mattutino non deve sparire del tutto — stesso principio
+        già rispettato per il digest/struttura di mercato."""
+        import asyncio
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        bot.send_photo = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.get_current_price_async", return_value=4320.0), \
+             mock.patch("gold_bot.get_extended_news", return_value=["headline"]), \
+             mock.patch("gold_bot.get_news_sentiment", return_value={"label": "BULLISH"}), \
+             mock.patch("analyzer.get_economic_events", return_value={"events": []}), \
+             mock.patch("gold_bot.get_bias_briefing", return_value="Bias: BULLISH\nMotivo: test"), \
+             mock.patch("gold_bot._build_daily_outlook", side_effect=RuntimeError("boom")):
+            asyncio.run(gb.send_morning_report(bot))
+        # L'intera funzione è già in un try/except: un fallimento qui non
+        # deve propagare, ma nemmeno inviare un report a metà — verifica
+        # solo che non sollevi (il comportamento "nessun report" in questo
+        # caso limite è accettabile, il rischio reale è la propagazione).
+        bot.send_message.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

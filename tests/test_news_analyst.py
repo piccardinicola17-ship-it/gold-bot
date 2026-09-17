@@ -322,5 +322,51 @@ class TestAnalyzeCombinedMacroEventCurrency(unittest.TestCase):
         self.assertNotIn("Valuta:", captured["user"])
 
 
+class TestWeeklySmcNarrativeTimeframeLabel(unittest.TestCase):
+    """2026-09-17: get_weekly_smc_narrative ora prende timeframe_label
+    (default "4H", invariato per l'analisi weekend) per riusarla anche
+    per l'analisi giornaliera del report mattutino su candele 1H — prima
+    diceva sempre "4H" nel contesto a prescindere dai dati passati."""
+
+    def _ctx(self):
+        return {
+            "structure": {"structure": "BULLISH", "bos": None, "choch": None,
+                          "last_high": 4350.0, "last_low": 4300.0,
+                          "prev_high": 4340.0, "prev_low": 4290.0},
+            "order_blocks": {},
+            "fvg": {},
+            "liquidity": {},
+            "premium_discount": "DISCOUNT",
+            "mitigation": {},
+            "regime": "TRENDING",
+            "adx": 28,
+        }
+
+    def test_default_label_is_4h(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=260):
+            captured["user"] = user
+            return "narrativa di prova"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.get_weekly_smc_narrative(self._ctx(), current_price=4320.0)
+
+        self.assertIn("Struttura di mercato (4H):", captured["user"])
+
+    def test_custom_label_is_used_for_daily_analysis(self):
+        captured = {}
+
+        def fake_call_groq(system, user, max_tokens=260):
+            captured["user"] = user
+            return "narrativa di prova"
+
+        with mock.patch.object(na, "_call_groq", fake_call_groq):
+            na.get_weekly_smc_narrative(self._ctx(), current_price=4320.0, timeframe_label="1H")
+
+        self.assertIn("Struttura di mercato (1H):", captured["user"])
+        self.assertNotIn("Struttura di mercato (4H):", captured["user"])
+
+
 if __name__ == "__main__":
     unittest.main()

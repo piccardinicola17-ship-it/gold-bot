@@ -1,11 +1,17 @@
 """
 weekly_chart.py — genera l'immagine con le zone chiave (supporto,
-resistenza, prezzo attuale, trend) per l'analisi weekend della domenica.
+resistenza, prezzo attuale, trend) per l'analisi weekend della domenica
+E per l'analisi giornaliera nel report mattutino (2026-09-17, richiesta
+esplicita dell'utente: "come facciamo per quella settimanale") — stesso
+identico meccanismo, solo timeframe e finestra diversi (4h/~7gg per la
+settimanale, 1h/~24h per la giornaliera), per non duplicare la stessa
+logica di zone/grafico in due file quasi identici.
 
 compute_weekly_zones() è l'UNICA fonte dei livelli: sia il testo del
-messaggio (gold_bot._build_weekend_outlook) sia il grafico qui sotto
-leggono dallo stesso dict, quindi non possono mai raccontare due cose
-diverse (vedi memoria "pattern bug: doppio meccanismo che diverge").
+messaggio (gold_bot._build_weekend_outlook/_build_daily_outlook) sia il
+grafico qui sotto leggono dallo stesso dict, quindi non possono mai
+raccontare due cose diverse (vedi memoria "pattern bug: doppio
+meccanismo che diverge").
 """
 import os
 import tempfile
@@ -19,16 +25,20 @@ import pandas as pd
 import analyzer
 
 
-def compute_weekly_zones(df: pd.DataFrame) -> dict:
-    """Zone chiave calcolate sulle candele 4h passate (ultime ~15gg)."""
+def compute_weekly_zones(df: pd.DataFrame, lookback_bars: int = 42) -> dict:
+    """Zone chiave calcolate sulle candele passate. lookback_bars=42
+    (default) è ~7 giorni di candele 4h per la vista settimanale; la
+    vista giornaliera passa un lookback più corto (es. 24 su candele 1h
+    = ~24h) — period_high/period_low restano generici apposta, il nome
+    "settimana" non è più sempre corretto."""
     sr = analyzer.get_support_resistance(df)
-    week = df.tail(42)  # ~7 giorni di candele 4h
+    period = df.tail(lookback_bars)
     return {
         "current_price": round(float(df["Close"].iloc[-1]), 2),
         "resistance":     sr["r_near"],
         "support":        sr["s_near"],
-        "week_high":      round(float(week["High"].max()), 2),
-        "week_low":       round(float(week["Low"].min()), 2),
+        "period_high":    round(float(period["High"].max()), 2),
+        "period_low":     round(float(period["Low"].min()), 2),
         "pivot":          sr["pivot"],
     }
 
@@ -37,9 +47,10 @@ def compute_smc_context(df: pd.DataFrame) -> dict:
     """
     Fatti tecnici Smart Money Concepts (struttura BOS/CHoCH, order block,
     fair value gap, liquidità EQH/EQL, zona premium/discount, regime) sulle
-    stesse candele 4h usate per il grafico e le zone chiave — nessun nuovo
-    calcolo indipendente, solo le funzioni SMC già validate in analyzer.py
-    (le stesse che decidono gli order type dei segnali live).
+    stesse candele usate per il grafico e le zone chiave (4h per la vista
+    settimanale, 1h per quella giornaliera) — nessun nuovo calcolo
+    indipendente, solo le funzioni SMC già validate in analyzer.py (le
+    stesse che decidono gli order type dei segnali live).
 
     Passato a news_analyst.get_weekly_smc_narrative() perché lo trasformi
     in una spiegazione discorsiva senza inventare numeri: qui ci sono SOLO
@@ -64,13 +75,16 @@ def compute_smc_context(df: pd.DataFrame) -> dict:
     }
 
 
-def render_weekly_outlook_chart(df: pd.DataFrame, zones: dict, bias: str) -> str:
+def render_weekly_outlook_chart(df: pd.DataFrame, zones: dict, bias: str,
+                                 title: str = "GOLD WEEKLY OUTLOOK — XAU/USD (4H)") -> str:
     """
-    Disegna le candele 4h delle ultime ~2 settimane con le zone di
+    Disegna le candele delle ultime ~60 barre con le zone di
     supporto/resistenza, il prezzo attuale, una linea di trend e una
     freccia per lo scenario più probabile (bias prevalente in grassetto,
     scenario opposto più sfumato) — stesso spirito dei recap settimanali
     dei canali Telegram di trading, ma generato dal bot con i suoi numeri.
+    `title` permette di riusare la stessa funzione per la vista
+    giornaliera (2026-09-17) con un titolo/timeframe corretti nel grafico.
 
     Ritorna il path del PNG temporaneo: il chiamante deve rimuoverlo dopo
     l'invio su Telegram.
@@ -82,7 +96,7 @@ def render_weekly_outlook_chart(df: pd.DataFrame, zones: dict, bias: str) -> str
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
 
-    span = max(zones["week_high"] - zones["week_low"], 1.0)
+    span = max(zones["period_high"] - zones["period_low"], 1.0)
     up = (plot_df["Close"] >= plot_df["Open"]).values
     for i in range(len(plot_df)):
         row = plot_df.iloc[i]
@@ -93,8 +107,8 @@ def render_weekly_outlook_chart(df: pd.DataFrame, zones: dict, bias: str) -> str
         ax.add_patch(plt.Rectangle((i - 0.3, y0), 0.6, h, color=color, zorder=3))
 
     # Zone supporto/resistenza (bande) — stessi valori del testo
-    ax.axhspan(zones["resistance"], zones["week_high"], color="#ef5350", alpha=0.12, zorder=1)
-    ax.axhspan(zones["week_low"], zones["support"], color="#26a69a", alpha=0.12, zorder=1)
+    ax.axhspan(zones["resistance"], zones["period_high"], color="#ef5350", alpha=0.12, zorder=1)
+    ax.axhspan(zones["period_low"], zones["support"], color="#26a69a", alpha=0.12, zorder=1)
     ax.axhline(zones["current_price"], color="#37474f", linestyle=":", linewidth=1.2, zorder=2)
 
     # Linea di trend (regressione lineare sulle chiusure mostrate)
@@ -115,8 +129,8 @@ def render_weekly_outlook_chart(df: pd.DataFrame, zones: dict, bias: str) -> str
     # Ylim esplicito: gli endpoint delle frecce non entrano nell'autoscale
     # di matplotlib (annotate() non aggiorna i datalim), quindi senza
     # forzarlo lo scenario ribassista può finire tagliato fuori dal grafico.
-    y_min = min(zones["week_low"], bearish_target, float(plot_df["Low"].min()))
-    y_max = max(zones["week_high"], bullish_target, float(plot_df["High"].max()))
+    y_min = min(zones["period_low"], bearish_target, float(plot_df["Low"].min()))
+    y_max = max(zones["period_high"], bullish_target, float(plot_df["High"].max()))
     pad = (y_max - y_min) * 0.06
     ax.set_ylim(y_min - pad, y_max + pad)
 
@@ -144,7 +158,7 @@ def render_weekly_outlook_chart(df: pd.DataFrame, zones: dict, bias: str) -> str
     label(zones["support"], "Supporto", "#2e7d32")
     label(zones["current_price"], "Prezzo attuale", "#37474f")
 
-    ax.set_title("GOLD WEEKLY OUTLOOK — XAU/USD (4H)", fontsize=13, fontweight="bold", pad=14)
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=14)
     ax.set_xticks([])
     ax.grid(axis="y", color="#e0e0e0", linewidth=0.6, zorder=0)
     for spine in ("top", "right"):
