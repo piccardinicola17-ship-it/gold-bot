@@ -29,6 +29,7 @@ from trade_manager import (
     XAUUSD_PIP_SIZE, get_macro_event_outcomes, save_macro_event_pre,
     save_macro_event_post, get_trade_by_id, enqueue_broker_order,
     delete_macro_event_outcome, get_recent_decisions,
+    load_broker_orders_cancel, ack_broker_cancel,
 )
 # XAUUSD_OZ_PER_LOT vive in risk_manager (unica fonte di verità già usata
 # per il sizing reale, vedi calculate_lot_size) — importata qui invece di
@@ -327,6 +328,32 @@ def api_ea_fills():
     """Storico slippage reale (entry teorica vs fill vero sul conto demo
     MT5) — vedi trade_manager.get_broker_fills."""
     return jsonify(get_broker_fills())
+
+
+@app.route("/api/ea/cancellations")
+def api_ea_cancellations():
+    """Ordini pending da cancellare sul conto demo MT5 — interrogato
+    dall'EA (mql5/GoldMindCopier.mq5) ogni pochi secondi, stesso principio
+    di /api/ea/pending ma per la direzione opposta (annullamento invece di
+    apertura). BUG REALE segnalato dall'utente il 2026-09-18: un BUY LIMIT
+    cancellato lato bot restava aperto su MT5 — l'EA prima non aveva
+    NESSUN modo di saperlo. Array JSON, stesso motivo di /api/ea/pending
+    (MQL5 non ha un parser JSON nativo)."""
+    return jsonify(list(load_broker_orders_cancel().values()))
+
+
+@app.route("/api/ea/ack-cancel", methods=["POST"])
+def api_ea_ack_cancel():
+    """L'EA chiama questo endpoint subito dopo aver cancellato (o non
+    trovato, es. mai piazzato) l'ordine pending sul broker, così da non
+    riceverlo di nuovo al prossimo polling — stesso principio di
+    /api/ea/ack per le aperture."""
+    payload = request.get_json(silent=True) or {}
+    trade_id = str(payload.get("trade_id", "")).strip()
+    if not trade_id:
+        return jsonify({"error": "trade_id mancante"}), 400
+    ack_broker_cancel(trade_id)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/decisions")

@@ -710,6 +710,68 @@ class TestEaBridgeQueue(TradeManagerTestCase):
         self.assertNotIn("lot_size", order)
 
 
+class TestBrokerCancelQueue(TradeManagerTestCase):
+    """BUG REALE segnalato dall'utente il 2026-09-18: un BUY LIMIT
+    cancellato lato bot restava aperto sul conto MT5 reale — l'EA
+    (mql5/GoldMindCopier.mq5) è "solo apertura" per design, close_trade()
+    non ha mai comunicato una cancellazione al broker. Coda simmetrica a
+    broker_orders_pending."""
+
+    def setUp(self):
+        super().setUp()
+        self._orig_enabled = tm.EA_BRIDGE_ENABLED
+        tm.EA_BRIDGE_ENABLED = True
+
+    def tearDown(self):
+        tm.EA_BRIDGE_ENABLED = self._orig_enabled
+        super().tearDown()
+
+    def test_cancelling_a_pending_order_enqueues_a_broker_cancel(self):
+        data = _base_trade_data(order_type="BUY LIMIT")
+        trade_id = tm.open_trade(data)
+
+        self.assertTrue(tm.close_trade(trade_id, "CANCELLED", 4300.00, "Pending scaduto"))
+
+        cancels = tm.load_broker_orders_cancel()
+        self.assertIn(trade_id, cancels)
+        self.assertEqual(cancels[trade_id]["trade_id"], trade_id)
+
+    def test_ack_removes_the_cancel_from_the_queue(self):
+        data = _base_trade_data(order_type="BUY LIMIT")
+        trade_id = tm.open_trade(data)
+        tm.close_trade(trade_id, "CANCELLED", 4300.00, "Pending scaduto")
+
+        tm.ack_broker_cancel(trade_id)
+
+        self.assertNotIn(trade_id, tm.load_broker_orders_cancel())
+
+    def test_ack_of_unknown_trade_id_is_a_harmless_no_op(self):
+        tm.ack_broker_cancel("does-not-exist")  # non deve sollevare
+        self.assertEqual(tm.load_broker_orders_cancel(), {})
+
+    def test_disabled_bridge_enqueues_no_cancel(self):
+        tm.EA_BRIDGE_ENABLED = False
+        data = _base_trade_data(order_type="BUY LIMIT")
+        trade_id = tm.open_trade(data)  # no-op sul lato apertura, coerente
+
+        self.assertTrue(tm.close_trade(trade_id, "CANCELLED", 4300.00, "Pending scaduto"))
+
+        self.assertEqual(tm.load_broker_orders_cancel(), {})
+
+    def test_a_win_or_loss_close_does_not_enqueue_a_cancel(self):
+        """Un ordine che ha raggiunto TP/SL era già stato riempito
+        (attivato) — nessun ordine pending gemello resta sul broker da
+        cancellare, solo una posizione già aperta che l'EA per design non
+        tocca mai."""
+        data = _base_trade_data(order_type="BUY LIMIT")
+        trade_id = tm.open_trade(data)
+        tm.activate_trade(trade_id)
+
+        self.assertTrue(tm.close_trade(trade_id, "WIN_TP1", 4360.00))
+
+        self.assertEqual(tm.load_broker_orders_cancel(), {})
+
+
 class TestBrokerFillSlippage(TradeManagerTestCase):
     """Tracking slippage (2026-09-15): entry teorica (dalla coda pending)
     vs fill reale riportato dall'EA su un ordine a mercato."""

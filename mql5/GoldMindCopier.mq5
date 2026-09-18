@@ -7,8 +7,12 @@
 //| corrispondente con lo stesso entry/SL/TP, poi conferma con         |
 //| /api/ea/ack cosi' il server non lo ripropone al giro successivo.   |
 //|                                                                    |
-//| Non modifica ne' chiude mai posizioni esistenti (proprie o altrui) |
-//| — apre solo ordini nuovi. GoldMind continua a fare la propria      |
+//| Non modifica ne' chiude mai una POSIZIONE già aperta/riempita      |
+//| (propria o altrui) — l'unica eccezione (dal 2026-09-18, bug reale  |
+//| segnalato dall'utente: un BUY LIMIT cancellato lato bot restava    |
+//| aperto su MT5) e' cancellare un ordine PENDING (mai riempito, MAI  |
+//| una posizione) quando GoldMind lo invalida — vedi /api/ea/         |
+//| cancellations sotto. GoldMind continua a fare la propria           |
 //| simulazione paper esattamente come prima: questo EA e' un          |
 //| consumatore in piu' dello stesso segnale, non sostituisce nulla.   |
 //|                                                                    |
@@ -55,6 +59,7 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    CheckForNewSignals();
+   CheckForCancellations();
 }
 
 //+------------------------------------------------------------------+
@@ -368,4 +373,139 @@ void AckOrder(string tradeId, double fillPrice = 0.0)
    int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 5000, post, result, headers);
    if(res == -1)
       Print("Ack fallito per ", tradeId, ": errore ", GetLastError());
+}
+
+//+------------------------------------------------------------------+
+//| Cancellazioni (2026-09-18, bug reale segnalato dall'utente: un     |
+//| BUY LIMIT cancellato lato bot restava aperto su MT5 — l'EA sopra   |
+//| non aveva NESSUN modo di saperlo, essendo "solo apertura" per      |
+//| design). Legge /api/ea/cancellations ogni PollSeconds secondi,     |
+//| cerca tra gli ordini PENDING (mai una posizione già riempita, che  |
+//| resta fuori scope) quello col commento "GoldMind <trade_id>" e lo  |
+//| cancella con OrderDelete — stesso schema di CheckForNewSignals,    |
+//| direzione opposta.                                                 |
+//+------------------------------------------------------------------+
+void CheckForCancellations()
+{
+   string url = ServerUrl + "/api/ea/cancellations?token=" + ApiToken;
+   char post[];
+   char result[];
+   string headers;
+
+   ResetLastError();
+   int res = WebRequest("GET", url, "", 5000, post, result, headers);
+   if(res == -1)
+   {
+      int err = GetLastError();
+      if(err != 4060) // gia' segnalato da CheckForNewSignals allo stesso giro
+         Print("WebRequest cancellazioni fallita, errore ", err);
+      return;
+   }
+   if(res != 200)
+      return; // gia' segnalato da CheckForNewSignals allo stesso giro
+
+   string body = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+   ProcessCancellationsJson(body);
+}
+
+//+------------------------------------------------------------------+
+//| Stesso spezzamento sulle graffe bilanciate di ProcessOrdersJson,   |
+//| duplicato invece di condiviso: MQL5 rende scomodo passare un       |
+//| puntatore a funzione qui, e i due schemi JSON sono comunque         |
+//| diversi (un oggetto con un solo campo contro molti) — vedi anche    |
+//| JsonStringValue/JsonNumberValue sopra, stesso principio del resto  |
+//| di questo file.                                                    |
+//+------------------------------------------------------------------+
+void ProcessCancellationsJson(string body)
+{
+   string trimmed = body;
+   StringTrimLeft(trimmed);
+   StringTrimRight(trimmed);
+   if(StringLen(trimmed) < 2)
+      return; // "[]" o risposta vuota
+
+   int depth = 0;
+   int objStart = -1;
+   for(int i = 0; i < StringLen(trimmed); i++)
+   {
+      ushort ch = StringGetCharacter(trimmed, i);
+      if(ch == '{')
+      {
+         if(depth == 0) objStart = i;
+         depth++;
+      }
+      else if(ch == '}')
+      {
+         depth--;
+         if(depth == 0 && objStart >= 0)
+         {
+            string obj = StringSubstr(trimmed, objStart, i - objStart + 1);
+            ProcessOneCancellation(obj);
+            objStart = -1;
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Cerca un ordine PENDING (mai una posizione) col commento           |
+//| "GoldMind <tradeId>" e lo cancella. Se non lo trova (mai piazzato,  |
+//| gia' scaduto sul broker, o gia' cancellato in un giro precedente   |
+//| con ack fallito) conferma comunque subito: non c'e' nulla da        |
+//| ritentare. Se lo trova ma OrderDelete fallisce, NON conferma —      |
+//| resta in coda e viene ritentato al prossimo giro, stesso principio |
+//| di ProcessOneOrder per le aperture.                                 |
+//+------------------------------------------------------------------+
+void ProcessOneCancellation(string obj)
+{
+   string tradeId = JsonStringValue(obj, "trade_id");
+   if(tradeId == "")
+      return;
+
+   string wantedComment = "GoldMind " + tradeId;
+   ulong ticket = 0;
+   for(int i = 0; i < OrdersTotal(); i++)
+   {
+      ulong t = OrderGetTicket(i);
+      if(t > 0 && OrderGetString(ORDER_COMMENT) == wantedComment)
+      {
+         ticket = t;
+         break;
+      }
+   }
+
+   if(ticket == 0)
+   {
+      AckCancel(tradeId); // mai piazzato o gia' sparito — niente da cancellare
+      return;
+   }
+
+   if(trade.OrderDelete(ticket))
+   {
+      Print("Pending cancellato su MT5: ticket=", ticket, " (", tradeId, ")");
+      AckCancel(tradeId);
+   }
+   else
+   {
+      Print("Errore cancellazione ticket=", ticket, " per ", tradeId, ": ",
+            trade.ResultRetcodeDescription(), " — resta in coda, verrà ritentato al prossimo giro.");
+   }
+}
+
+//+------------------------------------------------------------------+
+void AckCancel(string tradeId)
+{
+   string url  = ServerUrl + "/api/ea/ack-cancel?token=" + ApiToken;
+   string json = "{\"trade_id\":\"" + tradeId + "\"}";
+
+   char post[];
+   int len = StringToCharArray(json, post) - 1;
+   ArrayResize(post, len);
+
+   char result[];
+   string headers;
+   ResetLastError();
+   int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 5000, post, result, headers);
+   if(res == -1)
+      Print("Ack-cancel fallito per ", tradeId, ": errore ", GetLastError());
 }

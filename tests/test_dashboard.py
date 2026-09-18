@@ -329,6 +329,69 @@ class TestApiEaAckAndFills(unittest.TestCase):
         self.assertEqual(self.client.get("/api/ea/fills").get_json(), [])
 
 
+class TestApiEaCancellations(unittest.TestCase):
+    """/api/ea/cancellations e /api/ea/ack-cancel (2026-09-18) — BUG REALE
+    segnalato dall'utente: un BUY LIMIT cancellato lato bot restava aperto
+    sul conto MT5 reale, l'EA non aveva nessun modo di saperlo."""
+
+    def setUp(self):
+        self.tmpdb = tempfile.mktemp(suffix=".db")
+        tm.DB_PATH = self.tmpdb
+        self.tmp_active_file = tempfile.mktemp(suffix=".json")
+        tm.ACTIVE_FILE = self.tmp_active_file
+        tm.init_db()
+        db.DB_PATH = self.tmpdb
+        self._orig_token = db.DASHBOARD_TOKEN
+        db.DASHBOARD_TOKEN = "test-token-123"
+        self._orig_bridge = tm.EA_BRIDGE_ENABLED
+        tm.EA_BRIDGE_ENABLED = True
+        self.client = db.app.test_client()
+
+    def tearDown(self):
+        db.DASHBOARD_TOKEN = self._orig_token
+        tm.EA_BRIDGE_ENABLED = self._orig_bridge
+        for suffix in ("", "-wal", "-shm"):
+            path = self.tmpdb + suffix
+            if os.path.exists(path):
+                os.remove(path)
+        if os.path.exists(self.tmp_active_file):
+            os.remove(self.tmp_active_file)
+
+    def _open_pending_trade(self) -> str:
+        data = {
+            "signal": "BUY", "order_type": "BUY LIMIT", "entry": 4300.0, "sl": 4270.0,
+            "tp1": 4340.0, "tp2": 4360.0, "tp3": 4390.0, "prob": 70, "regime": "NORMAL",
+            "timeframe": "1h", "price": 4300.0, "risk_pct": 1.0, "strategies": {},
+            "data_timestamp": "2026-09-18T09:00:00", "price_basis": 0.0, "early_be_level": 0,
+        }
+        data["setup_key"] = tm.build_setup_key(data)
+        return tm.open_trade(data)
+
+    def test_cancelled_pending_order_appears_in_cancellations_queue(self):
+        trade_id = self._open_pending_trade()
+        tm.close_trade(trade_id, "CANCELLED", 4310.0, "Pending scaduto")
+
+        rows = self.client.get("/api/ea/cancellations").get_json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["trade_id"], trade_id)
+
+    def test_ack_cancel_removes_it_from_the_queue(self):
+        trade_id = self._open_pending_trade()
+        tm.close_trade(trade_id, "CANCELLED", 4310.0, "Pending scaduto")
+
+        resp = self.client.post("/api/ea/ack-cancel?token=test-token-123", json={"trade_id": trade_id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.client.get("/api/ea/cancellations").get_json(), [])
+
+    def test_ack_cancel_without_token_is_rejected(self):
+        resp = self.client.post("/api/ea/ack-cancel", json={"trade_id": "whatever"})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_ack_cancel_without_trade_id_is_rejected(self):
+        resp = self.client.post("/api/ea/ack-cancel?token=test-token-123", json={})
+        self.assertEqual(resp.status_code, 400)
+
+
 class TestApiDecisions(unittest.TestCase):
     """/api/decisions (2026-09-17): esposizione in lettura del log
     EXECUTE/WAIT/SKIP di trade_manager.get_recent_decisions — aggiunto

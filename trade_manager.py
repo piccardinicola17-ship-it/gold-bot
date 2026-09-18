@@ -928,8 +928,16 @@ def close_trade(trade_id: str, result: str, exit_price: float, notes: str = "") 
                 logger.warning("close_trade: riga sparita tra SELECT e DELETE per %s", trade_id)
                 return False
             timeframe = row["timeframe"]
+            order_type = row["order_type"]
         mark_cancelled_on_timeframe(timeframe)
         _sync_active_snapshot()
+        # Solo un ordine PENDING può avere un ordine pending gemello sul
+        # broker da cancellare — un CANCELLED su un ordine a mercato non
+        # dovrebbe mai accadere in pratica (entrambi i chiamanti verificano
+        # già "non ancora riempito" prima di passare qui), ma il controllo
+        # resta comunque per sicurezza, stesso principio del resto del file.
+        if is_pending_order(order_type):
+            enqueue_broker_cancel(trade_id)
         logger.info("Trade cancellato ed eliminato: %s [%s]", trade_id, timeframe)
         return True
 
@@ -1677,6 +1685,53 @@ def enqueue_broker_order(trade_id: str, data: dict) -> None:
 
 def load_broker_orders_pending() -> dict:
     return _load_state_json("broker_orders_pending")
+
+
+# BUG REALE segnalato dall'utente il 2026-09-18: un BUY LIMIT cancellato
+# lato bot (pending scaduto/invalidato, mai riempito) restava aperto sul
+# conto MT5 reale — l'EA (mql5/GoldMindCopier.mq5) è per design "solo
+# apertura" (vedi il suo commento in testa: "non modifica né chiude mai
+# posizioni esistenti"), quindi una cancellazione qui non è MAI stata
+# comunicata al broker. Coda simmetrica a broker_orders_pending, stesso
+# principio: enqueue_broker_cancel() qui, l'EA la legge da /api/ea/
+# cancellations e cancella SOLO l'ordine pending corrispondente (mai
+# tocca una posizione già aperta/riempita — quella resta fuori scope,
+# stessa cautela dell'apertura).
+EA_BRIDGE_CANCEL_TTL_HOURS = 12
+
+
+def enqueue_broker_cancel(trade_id: str) -> None:
+    """Accoda l'annullamento perché l'EA cancelli l'ordine pending
+    corrispondente sul broker (se mai arrivato a essere piazzato). No-op
+    se EA_BRIDGE_ENABLED non è attivo — stesso guard di enqueue_broker_
+    order, per lo stesso motivo (nessun effetto collaterale quando il
+    bridge è spento)."""
+    if not EA_BRIDGE_ENABLED:
+        return
+    cancels = _load_state_json("broker_orders_cancel")
+    cutoff = (datetime.now(TIMEZONE) - timedelta(hours=EA_BRIDGE_CANCEL_TTL_HOURS)).isoformat()
+    cancels = {
+        tid: c for tid, c in cancels.items()
+        if c.get("created_at", "") >= cutoff
+    }
+    cancels[trade_id] = {
+        "trade_id": trade_id,
+        "created_at": datetime.now(TIMEZONE).isoformat(),
+    }
+    _save_state_json("broker_orders_cancel", cancels)
+
+
+def load_broker_orders_cancel() -> dict:
+    return _load_state_json("broker_orders_cancel")
+
+
+def ack_broker_cancel(trade_id: str) -> None:
+    """Rimuove l'annullamento dalla coda — l'EA lo chiama dopo aver
+    cancellato (o non trovato, es. mai piazzato) l'ordine sul broker."""
+    cancels = _load_state_json("broker_orders_cancel")
+    if trade_id in cancels:
+        cancels.pop(trade_id, None)
+        _save_state_json("broker_orders_cancel", cancels)
 
 
 def ack_broker_order(trade_id: str, fill_price: float | None = None) -> None:
