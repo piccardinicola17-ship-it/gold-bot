@@ -130,6 +130,127 @@ class TestNewSourceBaselineDoesNotSpam(unittest.TestCase):
         self.assertEqual(alerts[0]["title"], "Fresh alert")
 
 
+class TestFetchArticleText(unittest.TestCase):
+    """2026-09-18, richiesta esplicita dell'utente: "Di cosa parla: non
+    disponibile" non va bene quando il link porta a un testo leggibile.
+    fetch_article_text() recupera il comunicato/discorso completo (HTML o
+    PDF) quando l'RSS non include un estratto — vedi gold_bot.
+    check_breaking_news_job, che lo usa prima di chiamare l'AI."""
+
+    def test_empty_url_returns_empty_string(self):
+        self.assertEqual(bn.fetch_article_text(""), "")
+
+    def test_html_content_is_stripped_to_plain_text(self):
+        class FakeResponse:
+            headers = {"Content-Type": "text/html; charset=utf-8"}
+            text = ("<html><head><style>.x{color:red}</style></head>"
+                     "<body><p>Real content here.</p></body></html>")
+            def raise_for_status(self): pass
+
+        with patch.object(bn.requests, "get", return_value=FakeResponse()):
+            text = bn.fetch_article_text("https://example.com/page")
+        self.assertIn("Real content here.", text)
+        self.assertNotIn("color:red", text)
+
+    def test_main_tag_isolates_article_from_navigation(self):
+        """Bug reale verificato dal vivo su ecb.europa.eu il 2026-09-18:
+        senza isolare <main>, uno stripping grezzo su tutta la pagina
+        restituiva migliaia di caratteri di menu di navigazione PRIMA del
+        vero comunicato, che finiva tagliato fuori da max_chars."""
+        class FakeResponse:
+            headers = {"Content-Type": "text/html"}
+            text = (
+                "<html><header><nav><ul><li>Menu item one</li>"
+                "<li>Menu item two</li></ul></nav></header>"
+                "<main><p>The real press release content.</p></main>"
+                "<footer>Footer links</footer></html>"
+            )
+            def raise_for_status(self): pass
+
+        with patch.object(bn.requests, "get", return_value=FakeResponse()):
+            text = bn.fetch_article_text("https://example.com/page", max_chars=50)
+        self.assertIn("The real press release content.", text)
+        self.assertNotIn("Menu item", text)
+
+    def test_fed_article_div_isolates_article_from_navigation(self):
+        """Il sito della Fed non usa <main> ma un <div id="article"> fisso
+        (verificato dal vivo su comunicati e discorsi reali)."""
+        class FakeResponse:
+            headers = {"Content-Type": "text/html"}
+            text = (
+                "<html><nav>Lots of Fed navigation links here</nav>"
+                '<div id="content"><div id="article">'
+                "<p>The real speech content.</p>"
+                '</div><div id="lastUpdate">Last update</div></div></html>'
+            )
+            def raise_for_status(self): pass
+
+        with patch.object(bn.requests, "get", return_value=FakeResponse()):
+            text = bn.fetch_article_text("https://example.com/page", max_chars=50)
+        self.assertIn("The real speech content.", text)
+        self.assertNotIn("navigation links", text)
+
+    def test_unrecognized_layout_falls_back_to_whole_page(self):
+        """Nessuno dei due marcatori conosciuti: meglio l'intera pagina
+        (rumorosa) che stringa vuota — stesso principio del resto del
+        modulo (mai bloccare per un sito non ancora visto)."""
+        class FakeResponse:
+            headers = {"Content-Type": "text/html"}
+            text = "<html><body><p>Plain unrecognized page content.</p></body></html>"
+            def raise_for_status(self): pass
+
+        with patch.object(bn.requests, "get", return_value=FakeResponse()):
+            text = bn.fetch_article_text("https://example.com/page")
+        self.assertIn("Plain unrecognized page content.", text)
+
+    def test_pdf_content_is_extracted_via_pypdf(self):
+        """BoJ pubblica le decisioni di politica monetaria SOLO come PDF
+        (verificato: ogni link whatsnew.xml punta a un .pdf) — senza
+        supporto PDF, ogni alert BoJ resterebbe perennemente "non
+        disponibile"."""
+        class FakePage:
+            def extract_text(self):
+                return "Policy statement text."
+
+        class FakeReader:
+            def __init__(self, *a, **k):
+                self.pages = [FakePage()]
+
+        class FakeResponse:
+            headers = {"Content-Type": "application/pdf"}
+            content = b"%PDF-fake"
+            def raise_for_status(self): pass
+
+        with patch.object(bn.requests, "get", return_value=FakeResponse()), \
+             patch.object(bn, "PdfReader", FakeReader):
+            text = bn.fetch_article_text("https://example.com/doc.pdf")
+        self.assertIn("Policy statement text.", text)
+
+    def test_unsupported_content_type_returns_empty(self):
+        class FakeResponse:
+            headers = {"Content-Type": "application/json"}
+            def raise_for_status(self): pass
+
+        with patch.object(bn.requests, "get", return_value=FakeResponse()):
+            text = bn.fetch_article_text("https://example.com/data.json")
+        self.assertEqual(text, "")
+
+    def test_network_failure_returns_empty_string_not_exception(self):
+        with patch.object(bn.requests, "get", side_effect=Exception("timeout")):
+            text = bn.fetch_article_text("https://example.com/page")
+        self.assertEqual(text, "")
+
+    def test_truncates_to_max_chars(self):
+        class FakeResponse:
+            headers = {"Content-Type": "text/html"}
+            text = "<p>" + ("x" * 5000) + "</p>"
+            def raise_for_status(self): pass
+
+        with patch.object(bn.requests, "get", return_value=FakeResponse()):
+            text = bn.fetch_article_text("https://example.com/long", max_chars=100)
+        self.assertEqual(len(text), 100)
+
+
 class TestFormatBreakingAlert(unittest.TestCase):
     def test_shock_detected_line_included(self):
         alert = {

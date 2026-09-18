@@ -846,6 +846,49 @@ class TestBiasEventoVsPostEvento(GoldBotTestCase):
 
         mock_save.assert_not_called()
 
+    def test_neutro_pre_event_bias_shows_the_explanation_only_once(self):
+        """Richiesta esplicita dell'utente (2026-09-18): con bias pre-evento
+        NEUTRO, _confirm_bias() ritorna SEMPRE lo stesso avviso statico
+        ("nessuna previsione da verificare") qualunque sia la variazione —
+        a differenza di CONFERMATO/NON CONFERMATO (che possono davvero
+        differire tra le due finestre, vedi test sopra), ripeterlo identico
+        sia nel blocco "Bias evento" sia in "Bias post-evento" non aggiunge
+        nessuna informazione."""
+        import asyncio
+        post_event = self._make_event(-11)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {
+            "bias": "NEUTRO", "price": 4362.50, "price_immediate": 4364.60,
+        }
+
+        bot = asyncio.run(self._run(post_event, 4373.40))
+
+        post_calls = [c for c in bot.send_message.call_args_list if "POST-EVENTO" in c.kwargs.get("text", "")]
+        self.assertEqual(len(post_calls), 1)
+        text = post_calls[0].kwargs["text"]
+        self.assertEqual(
+            text.count("nessuna previsione da verificare"), 1,
+            "la spiegazione del bias NEUTRO deve comparire una sola volta, non in entrambi i blocchi",
+        )
+
+    def test_neutro_explanation_still_shown_when_immediate_snapshot_missing(self):
+        """Se il blocco 'Bias evento' prende il ramo 'snapshot non
+        disponibile' (status_evento resta None), la spiegazione NEUTRO non è
+        ancora comparsa da nessuna parte — il blocco 'Bias post-evento' deve
+        comunque mostrarla, non sopprimerla per errore."""
+        import asyncio
+        post_event = self._make_event(-11)
+        group_key = f"{post_event['date']}_{post_event['time']}_USD"
+        gb._pre_event_bias[group_key] = {
+            "bias": "NEUTRO", "price": 4362.50, "price_immediate": None,
+        }
+
+        bot = asyncio.run(self._run(post_event, 4373.40))
+
+        post_calls = [c for c in bot.send_message.call_args_list if "POST-EVENTO" in c.kwargs.get("text", "")]
+        text = post_calls[0].kwargs["text"]
+        self.assertEqual(text.count("nessuna previsione da verificare"), 1)
+
 
 class TestMarketStructureInMacroMessages(GoldBotTestCase):
     """2026-09-17, richiesta esplicita dell'utente: arricchire i messaggi
@@ -1325,6 +1368,7 @@ class TestCheckBreakingNewsJobMultiCentralBank(GoldBotTestCase):
         bot.send_message = mock.AsyncMock(return_value=None)
         with mock.patch("gold_bot.is_bot_paused", return_value=False), \
              mock.patch("breaking_news.check_breaking_news", return_value=(alerts, {})), \
+             mock.patch("breaking_news.fetch_article_text", return_value=""), \
              mock.patch("gold_bot.get_current_price_async", return_value=4300.0), \
              mock.patch("gold_bot.analyze_breaking_news", return_value="Cos'è: X\nDi cosa parla: Y\nPer l'oro: NEUTRO — Z"):
             await gb.check_breaking_news_job(bot)
@@ -1350,6 +1394,77 @@ class TestCheckBreakingNewsJobMultiCentralBank(GoldBotTestCase):
         import asyncio
         bot = asyncio.run(self._run([self._alert("ecb_press", label="HAWKISH")]))
         bot.send_message.assert_called_once()
+
+
+class TestCheckBreakingNewsJobFetchesFullArticleText(GoldBotTestCase):
+    """2026-09-18, richiesta esplicita dell'utente: "Di cosa parla: non
+    disponibile" non va bene quando il link porta a un testo leggibile.
+    check_breaking_news_job deve provare a recuperare il testo completo
+    (breaking_news.fetch_article_text) PRIMA di chiedere la spiegazione
+    AI, ma solo quando il riassunto RSS è troppo corto (stessa soglia di
+    news_analyst.analyze_breaking_news: 40 caratteri) — altrimenti è un
+    fetch di rete sprecato."""
+
+    def _alert(self, summary="", link="https://example.com/x"):
+        return {
+            "source": "fed_speech", "title": "A speech", "summary": summary, "link": link,
+            "classification": {"label": "N/D", "xau_bias": "N/D", "matched": []},
+            "geopolitical": None,
+        }
+
+    async def _run(self, alert):
+        tm.save_breaking_news_seen({})
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        captured = {}
+
+        def fake_analyze(source_label, title, summary, xau_bias, price):
+            captured["summary"] = summary
+            return "Cos'è: X\nDi cosa parla: Y\nPer l'oro: NEUTRO — Z"
+
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("breaking_news.check_breaking_news", return_value=([alert], {})), \
+             mock.patch("breaking_news.fetch_article_text", return_value="Full real article text here.") as mock_fetch, \
+             mock.patch("gold_bot.get_current_price_async", return_value=4300.0), \
+             mock.patch("gold_bot.analyze_breaking_news", side_effect=fake_analyze):
+            await gb.check_breaking_news_job(bot)
+        return mock_fetch, captured
+
+    def test_short_summary_triggers_full_text_fetch(self):
+        import asyncio
+        mock_fetch, captured = asyncio.run(self._run(self._alert(summary="")))
+        mock_fetch.assert_called_once_with("https://example.com/x")
+        self.assertEqual(captured["summary"], "Full real article text here.")
+
+    def test_already_long_summary_skips_the_fetch(self):
+        """L'RSS a volte include già abbastanza contenuto (es. BoE) — non
+        serve un fetch di rete in più."""
+        import asyncio
+        real_summary = "A" * 100
+        mock_fetch, captured = asyncio.run(self._run(self._alert(summary=real_summary)))
+        mock_fetch.assert_not_called()
+        self.assertEqual(captured["summary"], real_summary)
+
+    def test_failed_fetch_falls_back_to_original_short_summary(self):
+        import asyncio
+        alert = self._alert(summary="")
+        tm.save_breaking_news_seen({})
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        captured = {}
+
+        def fake_analyze(source_label, title, summary, xau_bias, price):
+            captured["summary"] = summary
+            return "ok"
+
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("breaking_news.check_breaking_news", return_value=([alert], {})), \
+             mock.patch("breaking_news.fetch_article_text", return_value=""), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4300.0), \
+             mock.patch("gold_bot.analyze_breaking_news", side_effect=fake_analyze):
+            asyncio.run(gb.check_breaking_news_job(bot))
+
+        self.assertEqual(captured["summary"], "")
 
 
 if __name__ == "__main__":

@@ -49,20 +49,33 @@ Fonti scartate dopo verifica dal vivo (non per pigrizia):
 - BCE rss/speeches.html separato — 404, i discorsi sono già dentro
   rss/press.html (vedi sopra), niente da aggiungere.
 
-Nessuna nuova dipendenza: XML delle RSS con xml.etree (stdlib) — niente
-beautifulsoup4/feedparser.
+XML delle RSS con xml.etree (stdlib) — niente beautifulsoup4/feedparser.
+
+fetch_article_text() (2026-09-18, richiesta esplicita dell'utente: "di
+cosa parla: non disponibile" non è una risposta accettabile quando il
+link porta a un testo leggibile) recupera il comunicato/discorso completo
+dal link RSS quando il feed non include un estratto reale — caso comune
+per i discorsi Fed e per BCE/BoJ (description sempre vuota, verificato).
+Per l'HTML: stripping tag via regex, stesso approccio già usato sopra per
+le description RSS. Per i PDF (BoJ pubblica le decisioni di politica
+monetaria SOLO come PDF, verificato: ogni link whatsnew.xml punta a un
+.pdf) serve un parser reale — è l'UNICA nuova dipendenza di questo
+modulo: pypdf (pure Python, nessun binario nativo), verificato dal vivo
+che estrae testo leggibile dai comunicati BoJ reali.
 """
 
 from __future__ import annotations
 
 import hashlib
 import html
+import io
 import logging
 import re
 from datetime import datetime
 from xml.etree import ElementTree
 
 import requests
+from pypdf import PdfReader
 
 from news_analyst import _escape_md
 
@@ -190,6 +203,77 @@ def _fetch_rss(url: str) -> list[dict]:
 def _item_id(source: str, item: dict) -> str:
     basis = f"{source}|{item.get('link') or item.get('title', '')}"
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:24]
+
+
+def fetch_article_text(url: str, max_chars: int = 3000) -> str:
+    """Recupera il testo leggibile completo del comunicato/discorso dal suo
+    link, per quando l'RSS non include un estratto reale (vedi docstring
+    del modulo). Ritorna "" (mai un'eccezione) se il link manca, la pagina
+    non è raggiungibile, o il contenuto non è testo estraibile — il
+    chiamante (news_analyst.analyze_breaking_news) tratta "" esattamente
+    come un estratto assente, stesso percorso onesto già in produzione.
+
+    Gestisce due casi, in base al Content-Type reale della risposta (non
+    all'estensione dell'URL, che su alcuni siti è assente o fuorviante):
+    - text/html: vedi _extract_html_article() — non basta uno stripping tag
+      grezzo su tutta la pagina, verificato dal vivo su ecb.europa.eu:
+      restituiva migliaia di caratteri di menu di navigazione (voci in 20
+      lingue) PRIMA del vero comunicato, che finiva tagliato fuori da
+      max_chars senza mai comparire.
+    - application/pdf: pypdf, solo le prime pagine (il succo di un
+      comunicato di politica monetaria è sempre nell'apertura — pagine
+      successive sono spesso tabelle/note tecniche che non aggiungono
+      nulla per una sintesi breve, e limitano il tempo di parsing).
+    Qualunque altro Content-Type: "" (niente da estrarre).
+    """
+    if not url:
+        return ""
+    try:
+        r = requests.get(url, headers={"User-Agent": _USER_AGENT}, timeout=_HTTP_TIMEOUT)
+        r.raise_for_status()
+        content_type = r.headers.get("Content-Type", "").lower()
+
+        if "pdf" in content_type:
+            reader = PdfReader(io.BytesIO(r.content))
+            text = " ".join((page.extract_text() or "") for page in reader.pages[:5])
+        elif "html" in content_type:
+            text = _extract_html_article(r.text)
+        else:
+            return ""
+
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:max_chars]
+    except Exception as e:
+        logger.debug(f"breaking_news: fetch testo completo fallito per {url}: {e}")
+        return ""
+
+
+def _strip_tags(fragment: str) -> str:
+    fragment = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", fragment, flags=re.DOTALL | re.IGNORECASE)
+    return html.unescape(re.sub("<[^>]+>", " ", fragment))
+
+
+def _extract_html_article(html_text: str) -> str:
+    """Isola il contenuto vero della pagina, scartando header/nav/footer —
+    verificato dal vivo il 2026-09-18 su comunicati reali BCE, Fed e BoE:
+
+    1. Tag semantico <main> (HTML5): usato da BCE e BoE, contiene SOLO il
+       corpo dell'articolo.
+    2. Fed non usa <main> ma un <div id="article"> fisso in entrambi i
+       template verificati (comunicati e discorsi) — catturato fino al
+       prossimo `<div id="`, che nella pratica è sempre il blocco
+       successivo della pagina (non annidato dentro "article").
+    3. Se nessuno dei due matcha (sito non ancora verificato), fallback
+       sull'intera pagina — rumoroso ma meglio di stringa vuota, stesso
+       principio del resto di questo modulo (mai bloccare per un sito non
+       ancora visto)."""
+    m = re.search(r"<main[^>]*>(.*?)</main>", html_text, re.IGNORECASE | re.DOTALL)
+    if m:
+        return _strip_tags(m.group(1))
+    m = re.search(r'<div[^>]+id="article"[^>]*>(.*?)<div[^>]+id="', html_text, re.IGNORECASE | re.DOTALL)
+    if m:
+        return _strip_tags(m.group(1))
+    return _strip_tags(html_text)
 
 
 # ─────────────────────────────────────────────────────────────

@@ -307,19 +307,29 @@ def analyze_breaking_news(source_label: str, title: str, summary: str = "",
     # L'RSS dei discorsi Fed quasi mai include un estratto reale del testo,
     # solo il titolo (spesso generico, es. "The Economic Outlook and Some
     # Comments on My Policy Communication" — zero contenuto hawkish/dovish
-    # leggibile). Senza questo segnale esplicito l'LLM, forzato a compilare
-    # comunque le 3 righe, inventava un "Per l'oro: BUY/SELL" plausibile ma
-    # non fondato su nulla di reale — bug osservato in produzione il
-    # 2026-09-03 (discorso Waller, bias SELL dato dal solo titolo mentre
-    # l'oro saliva). Ora l'assenza di contenuto è dichiarata esplicitamente,
-    # non semplicemente omessa.
+    # leggibile). Il chiamante (gold_bot.check_breaking_news_job) prova
+    # PRIMA a recuperare il testo completo dal link (breaking_news.
+    # fetch_article_text — HTML o PDF, vedi quel modulo) quando l'RSS non
+    # basta: questo "summary" è quindi quasi sempre contenuto reale, non
+    # solo il titolo. Il ramo sotto resta come rete di sicurezza per i casi
+    # residui (link non raggiungibile, pagina senza testo estraibile).
+    # Senza questo segnale esplicito l'LLM, forzato a compilare comunque le
+    # 3 righe, inventava un "Per l'oro: BUY/SELL" plausibile ma non fondato
+    # su nulla di reale — bug osservato in produzione il 2026-09-03
+    # (discorso Waller, bias SELL dato dal solo titolo mentre l'oro
+    # saliva). L'assenza di contenuto va dichiarata esplicitamente, non
+    # semplicemente omessa — e il messaggio finale deve dire ALL'UTENTE
+    # perché (non solo "dati insufficienti", che non spiega nulla: richiesta
+    # esplicita dell'utente il 2026-09-18).
     has_content = bool(summary and len(summary.strip()) >= 40)
     if has_content:
         context.append(f"Estratto: {summary[:400]}")
     else:
         context.append(
-            "Estratto: NON DISPONIBILE — hai SOLO il titolo, nessun testo del "
-            "discorso/comunicato. Non indovinare il contenuto dal titolo."
+            "Estratto: NON DISPONIBILE — il recupero automatico del testo "
+            "completo dal link non è riuscito (pagina non raggiungibile o "
+            "senza testo estraibile), hai SOLO il titolo. Non indovinare il "
+            "contenuto dal titolo."
         )
     if xau_bias and xau_bias != "N/D":
         context.append(f"Tono da screening a parole chiave: {xau_bias}")
@@ -341,9 +351,10 @@ def analyze_breaking_news(source_label: str, title: str, summary: str = "",
             "REGOLA FONDAMENTALE: se l'estratto è marcato NON DISPONIBILE, NON "
             "hai contenuto reale su cui basarti — un titolo da solo non dice "
             "nulla sul tono del discorso. In quel caso rispondi 'Di cosa parla: "
-            "contenuto non disponibile, solo titolo' e 'Per l'oro: NEUTRO — dati "
-            "insufficienti, leggi la fonte'. Non inventare un bias plausibile "
-            "dal solo titolo."
+            "il recupero automatico del testo non è riuscito, apri il link qui "
+            "sotto per leggerlo' e 'Per l'oro: NEUTRO — nessun contenuto "
+            "verificabile qui, non trarre conclusioni senza leggere la fonte'. "
+            "Non inventare un bias plausibile dal solo titolo."
         ),
         user="\n".join(context),
         max_tokens=140,

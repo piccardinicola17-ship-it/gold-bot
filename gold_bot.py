@@ -1572,10 +1572,25 @@ async def check_breaking_news_job(bot):
                 "boe_speech": "Discorso di un membro Bank of England",
                 "treasury": "Comunicato Treasury",
             }.get(alert["source"], alert["source"])
+            # Recupera il testo completo dal link quando l'RSS non include
+            # un estratto reale (caso comune per i discorsi Fed e per BCE/
+            # BoJ — description sempre vuota, vedi breaking_news.py) prima
+            # di chiedere la spiegazione AI. Richiesta esplicita dell'utente
+            # (2026-09-18): "Di cosa parla: non disponibile" non va bene
+            # quando il link porta a un testo leggibile — soglia identica a
+            # quella con cui news_analyst.analyze_breaking_news() decide se
+            # un estratto è "reale" (>=40 caratteri), per non fare un fetch
+            # di rete inutile quando l'RSS ha già abbastanza contenuto.
+            summary_for_ai = alert.get("summary", "")
+            if len(summary_for_ai.strip()) < 40 and alert.get("link"):
+                fetched = await asyncio.to_thread(breaking_news.fetch_article_text, alert["link"])
+                if fetched:
+                    summary_for_ai = fetched
+
             try:
                 ai_analysis = await asyncio.to_thread(
                     analyze_breaking_news,
-                    source_label, alert["title"], alert.get("summary", ""),
+                    source_label, alert["title"], summary_for_ai,
                     alert.get("classification", {}).get("xau_bias", "N/D"), price,
                 )
             except Exception:
@@ -1972,9 +1987,24 @@ async def check_macro_alerts(bot):
 
                     change_post = price - pre["price"]
                     esito_post, segno_post, status_post = _confirm_bias(pre_bias, change_post)
+                    # Se il bias pre-evento era NEUTRO, _confirm_bias() ritorna
+                    # SEMPRE lo stesso avviso statico ("nessuna previsione da
+                    # verificare"), qualunque sia la variazione — a differenza
+                    # di CONFERMATO/NON CONFERMATO, che possono davvero
+                    # differire tra le due finestre (vedi test sopra).
+                    # Mostrarlo due volte (qui e nel blocco "Bias evento") è
+                    # pura ripetizione, non nuova informazione — richiesta
+                    # esplicita dell'utente il 2026-09-18. Va omesso qui solo
+                    # se è già comparso sopra (status_evento è None quando
+                    # blocco_evento ha preso il ramo "snapshot non
+                    # disponibile", che non lo mostra affatto).
+                    esito_post_line = (
+                        "" if status_post == "NEUTRO" and status_evento == "NEUTRO"
+                        else f"{esito_post}\n"
+                    )
                     blocco_post = (
                         f"🕒 Bias post-evento: *{pre_bias}* (era ${pre['price']})\n"
-                        f"{esito_post}\n"
+                        f"{esito_post_line}"
                         f"📐 Variazione a ~{minutes_elapsed} min: *{segno_post}{change_post:.2f}$*"
                     )
 
