@@ -1512,16 +1512,21 @@ _sent_stat_prediction = {}
 
 async def check_breaking_news_job(bot):
     """
-    Controlla ogni 10 minuti comunicati Fed non programmati (press release +
-    discorsi) — cosa che il calendario eventi (check_macro_alerts) non copre
-    perché tratta solo eventi SCHEDULATI. Vedi breaking_news.py per le fonti
-    usate e perché il Treasury è stato escluso.
+    Controlla ogni 2 minuti comunicati/discorsi non programmati delle
+    principali banche centrali (Fed, BCE, BoJ, BoE dal 2026-09-18) — cosa
+    che il calendario eventi (check_macro_alerts) non copre perché tratta
+    solo eventi SCHEDULATI. Vedi breaking_news.py per le fonti usate e
+    perché Treasury/BLS sono stati esclusi.
 
-    Le press release vengono filtrate: molte sono azioni amministrative di
-    routine (approvazioni bancarie, azioni disciplinari) senza alcuna
-    rilevanza per l'oro — si notificano solo se il classificatore rileva un
-    tono hawkish/dovish. I discorsi vengono sempre notificati: sono meno
-    frequenti e tipicamente più rilevanti per il mercato.
+    I comunicati "press"/"news" vengono filtrati: molti sono azioni
+    amministrative di routine (approvazioni bancarie, minute di gruppi di
+    lavoro tecnici) senza alcuna rilevanza per l'oro — si notificano solo
+    se il classificatore rileva un tono hawkish/dovish. I discorsi vengono
+    sempre notificati: sono meno frequenti e tipicamente più rilevanti per
+    il mercato. Il feed BCE mescola comunicati/discorsi/interviste in
+    un'unica fonte (non separabile a monte) — trattato come "press" per
+    coerenza col resto (filtra i NEUTRO), essendo comunque molto meno
+    rumoroso delle press release amministrative di Fed/BoE nella pratica.
     """
     if is_bot_paused():
         return
@@ -1545,8 +1550,13 @@ async def check_breaking_news_job(bot):
 
         pending = await asyncio.to_thread(load_breaking_news_pending)
 
+        # Sorgenti "press"/"news": molto rumore amministrativo, si notifica
+        # solo se il classificatore hawkish/dovish rileva qualcosa. I
+        # discorsi (sources che finiscono in "_speech") sono più rari e
+        # sempre notificati (vedi docstring sopra).
+        _NOISY_PRESS_SOURCES = {"fed_press", "ecb_press", "boj_press", "boe_news"}
         for alert in alerts:
-            if alert["source"] == "fed_press" and alert["classification"]["label"] == "NEUTRO":
+            if alert["source"] in _NOISY_PRESS_SOURCES and alert["classification"]["label"] == "NEUTRO":
                 continue
             try:
                 price = await get_current_price_async()
@@ -1556,6 +1566,10 @@ async def check_breaking_news_job(bot):
             source_label = {
                 "fed_press": "Comunicato Fed",
                 "fed_speech": "Discorso di un membro Fed",
+                "ecb_press": "Comunicato/discorso BCE",
+                "boj_press": "Comunicato Bank of Japan",
+                "boe_news": "Comunicato Bank of England",
+                "boe_speech": "Discorso di un membro Bank of England",
                 "treasury": "Comunicato Treasury",
             }.get(alert["source"], alert["source"])
             try:

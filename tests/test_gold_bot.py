@@ -1305,5 +1305,52 @@ class TestMorningReportIncludesDailyOutlook(unittest.TestCase):
         bot.send_message.assert_not_called()
 
 
+class TestCheckBreakingNewsJobMultiCentralBank(GoldBotTestCase):
+    """2026-09-18, estensione richiesta esplicita dell'utente ("aggiornato
+    a 360 gradi"): breaking_news.py ora copre anche BCE/BoJ/BoE oltre alla
+    Fed. Verifica che check_breaking_news_job() applichi lo stesso filtro
+    anti-rumore (salta i NEUTRO delle fonti "press"/"news", notifica sempre
+    i discorsi) anche alle nuove fonti, e non solo a fed_press come prima."""
+
+    def _alert(self, source, label="NEUTRO", title="Some title"):
+        return {
+            "source": source, "title": title, "summary": "", "link": "https://example.com/x",
+            "classification": {"label": label, "xau_bias": "N/D", "matched": []},
+            "geopolitical": None,
+        }
+
+    async def _run(self, alerts):
+        tm.save_breaking_news_seen({})  # evita il primo-avvio (nessuna notifica)
+        bot = mock.AsyncMock()
+        bot.send_message = mock.AsyncMock(return_value=None)
+        with mock.patch("gold_bot.is_bot_paused", return_value=False), \
+             mock.patch("breaking_news.check_breaking_news", return_value=(alerts, {})), \
+             mock.patch("gold_bot.get_current_price_async", return_value=4300.0), \
+             mock.patch("gold_bot.analyze_breaking_news", return_value="Cos'è: X\nDi cosa parla: Y\nPer l'oro: NEUTRO — Z"):
+            await gb.check_breaking_news_job(bot)
+        return bot
+
+    def test_neutral_ecb_boj_boe_press_are_skipped(self):
+        import asyncio
+        alerts = [
+            self._alert("ecb_press"), self._alert("boj_press"), self._alert("boe_news"),
+        ]
+        bot = asyncio.run(self._run(alerts))
+        bot.send_message.assert_not_called()
+
+    def test_neutral_boe_speech_is_still_sent(self):
+        """A differenza di boe_news/ecb_press/boj_press, i discorsi sono
+        rari e sempre notificati anche se NEUTRO — stesso trattamento già
+        riservato a fed_speech."""
+        import asyncio
+        bot = asyncio.run(self._run([self._alert("boe_speech")]))
+        bot.send_message.assert_called_once()
+
+    def test_hawkish_ecb_press_is_sent(self):
+        import asyncio
+        bot = asyncio.run(self._run([self._alert("ecb_press", label="HAWKISH")]))
+        bot.send_message.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

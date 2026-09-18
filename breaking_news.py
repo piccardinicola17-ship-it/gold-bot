@@ -1,12 +1,12 @@
 """
-breaking_news.py — Rilevamento notizie NON programmate (Fed, Treasury, geopolitica).
+breaking_news.py — Rilevamento notizie NON programmate (banche centrali, fiscali, geopolitica).
 
 Le notizie SCHEDULATE (CPI, NFP, FOMC, ecc.) sono già coperte da
 analyzer.get_upcoming_events() (calendario FairEconomy) e da
 check_macro_alerts() in gold_bot.py. Questo modulo copre invece un buco
-reale: un comunicato Fed o Treasury non programmato, o una notizia ad alto
-impatto imprevista — oggi il bot non se ne accorge finché non si riflette
-già nel prezzo.
+reale: un comunicato/discorso non programmato di una banca centrale, o una
+notizia ad alto impatto imprevista — oggi il bot non se ne accorge finché
+non si riflette già nel prezzo.
 
 Origine: adattato dal progetto "XAU News Intelligence Master" (29 moduli)
 condiviso dall'utente. La maggior parte di quel progetto richiede dati
@@ -16,9 +16,23 @@ la parte verificata realistica: fonti gratuite reali (testate dal vivo),
 classificazione a parole chiave (non è "AI", è uno screening grezzo — va
 trattato come tale, non come segnale definitivo).
 
-Fonti usate (verificate attive il 1 settembre 2026):
-- Fed press releases RSS (ufficiale, gratis, nessuna chiave)
-- Fed speeches RSS (ufficiale, gratis, nessuna chiave)
+Fonti usate (Fed verificata il 1 settembre 2026, BCE/BoJ/BoE aggiunte e
+verificate dal vivo il 2026-09-18 su richiesta esplicita dell'utente —
+"voglio essere aggiornato a 360 gradi"):
+- Fed press releases RSS + Fed speeches RSS (ufficiali, gratis)
+- BCE: un solo feed che copre già comunicati/discorsi/interviste insieme
+  (rss/press.html — la description del feed stesso lo dichiara)
+- BoJ: whatsnew.xml versione inglese (decisioni di politica monetaria,
+  modifiche agli strumenti operativi)
+- BoE: rss/news (comunicati, minute, trascrizioni) + rss/speeches separato
+
+NON disponibile da nessuna di queste fonti ufficiali: la foto del
+governatore/membro citato nello screenshot di esempio dell'utente. Quella
+foto è aggiunta manualmente dal servizio aggregatore (es. Volatility
+Now/@financialjuice) — nessun feed RSS ufficiale di banca centrale la
+include (verificato: nessun tag <enclosure>/<media:content> in nessuna
+delle fonti sopra). Per non rischiare di allegare la foto sbagliata,
+questo modulo non ne invia nessuna.
 
 Fonti scartate dopo verifica dal vivo (non per pigrizia):
 - BLS ICS calendar (bls.gov) — risponde 403 anche con user-agent da browser
@@ -32,6 +46,8 @@ Fonti scartate dopo verifica dal vivo (non per pigrizia):
   classificatori fiscale/geopolitico restano comunque disponibili qui
   sotto, pronti per essere applicati ad altre fonti testuali in futuro
   (es. titoli NewsAPI già scaricati altrove nel bot).
+- BCE rss/speeches.html separato — 404, i discorsi sono già dentro
+  rss/press.html (vedi sopra), niente da aggiungere.
 
 Nessuna nuova dipendenza: XML delle RSS con xml.etree (stdlib) — niente
 beautifulsoup4/feedparser.
@@ -54,6 +70,10 @@ logger = logging.getLogger(__name__)
 
 FED_PRESS_RSS = "https://www.federalreserve.gov/feeds/press_all.xml"
 FED_SPEECHES_RSS = "https://www.federalreserve.gov/feeds/speeches.xml"
+ECB_PRESS_RSS = "https://www.ecb.europa.eu/rss/press.html"
+BOJ_WHATSNEW_RSS = "https://www.boj.or.jp/en/rss/whatsnew.xml"
+BOE_NEWS_RSS = "https://www.bankofengland.co.uk/rss/news"
+BOE_SPEECHES_RSS = "https://www.bankofengland.co.uk/rss/speeches"
 
 _HTTP_TIMEOUT = 10
 _USER_AGENT = "Mozilla/5.0 (compatible; GoldMindBot/1.0)"
@@ -62,9 +82,14 @@ _USER_AGENT = "Mozilla/5.0 (compatible; GoldMindBot/1.0)"
 # Classificatori a parole chiave — screening grezzo, non "AI".
 # Punteggio positivo = hawkish/rischio-safe-haven UP per l'oro;
 # negativo = dovish/de-escalation, tipicamente ribassista per l'oro.
+#
+# Vocabolario generico di politica monetaria in inglese (non specifico
+# Fed): usato anche per BCE/BoJ/BoE, il cui linguaggio ufficiale in
+# inglese ricorre alle stesse espressioni ("rate cuts", "restrictive
+# stance", "inflation has eased", ...).
 # ─────────────────────────────────────────────────────────────
 
-FED_HAWKISH = {
+HAWKISH_PHRASES = {
     "higher for longer": 1.0,
     "further tightening": 1.0,
     "additional rate increases": 0.9,
@@ -74,7 +99,7 @@ FED_HAWKISH = {
     "restrictive stance": 0.5,
     "vigilant": 0.4,
 }
-FED_DOVISH = {
+DOVISH_PHRASES = {
     "appropriate to reduce": -1.0,
     "rate cuts": -0.7,
     "policy is restrictive": -0.4,
@@ -100,12 +125,12 @@ GEO_DEESCALATION = (
 )
 
 
-def classify_fed_text(text: str) -> dict:
+def classify_monetary_policy_text(text: str) -> dict:
     """Screening hawkish/dovish grezzo a parole chiave. Non sostituisce una lettura umana."""
     t = (text or "").lower()
     hits = []
     score = 0.0
-    for phrase, weight in {**FED_HAWKISH, **FED_DOVISH}.items():
+    for phrase, weight in {**HAWKISH_PHRASES, **DOVISH_PHRASES}.items():
         if phrase in t:
             score += weight
             hits.append(phrase)
@@ -190,8 +215,12 @@ def check_breaking_news(seen_ids: dict) -> tuple[list[dict], dict]:
     new_seen = dict.fromkeys(seen_ids)  # accetta anche un set (es. nei test)
 
     sources = [
-        ("fed_press", FED_PRESS_RSS, _fetch_rss, classify_fed_text),
-        ("fed_speech", FED_SPEECHES_RSS, _fetch_rss, classify_fed_text),
+        ("fed_press", FED_PRESS_RSS, _fetch_rss, classify_monetary_policy_text),
+        ("fed_speech", FED_SPEECHES_RSS, _fetch_rss, classify_monetary_policy_text),
+        ("ecb_press", ECB_PRESS_RSS, _fetch_rss, classify_monetary_policy_text),
+        ("boj_press", BOJ_WHATSNEW_RSS, _fetch_rss, classify_monetary_policy_text),
+        ("boe_news", BOE_NEWS_RSS, _fetch_rss, classify_monetary_policy_text),
+        ("boe_speech", BOE_SPEECHES_RSS, _fetch_rss, classify_monetary_policy_text),
     ]
 
     for name, url, fetch_fn, classify_fn in sources:
@@ -241,6 +270,10 @@ def format_breaking_alert(alert: dict, current_price: float = 0, ai_analysis: st
     source_label = {
         "fed_press": "🏛 FED — Comunicato",
         "fed_speech": "🎙 FED — Discorso",
+        "ecb_press": "🏦 BCE — Comunicato/Discorso",
+        "boj_press": "🗾 BoJ — Comunicato",
+        "boe_news": "🏛 BoE — Comunicato",
+        "boe_speech": "🎙 BoE — Discorso",
         "treasury": "💵 TREASURY — Comunicato",
     }.get(alert["source"], alert["source"])
 

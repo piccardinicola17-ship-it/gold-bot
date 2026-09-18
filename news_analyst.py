@@ -293,12 +293,14 @@ def analyze_combined_macro_event(events: list, current_price: float = 0, related
 def analyze_breaking_news(source_label: str, title: str, summary: str = "",
                            xau_bias: str = "N/D", current_price: float = 0) -> str:
     """
-    Spiegazione breve di un breaking alert Fed (comunicato o discorso) per chi
-    non ha tempo di leggere la fonte: cos'è, di cosa parla, cosa implica per
-    XAU/USD accanto al prezzo attuale. Stesso principio di analyze_macro_event:
-    MAI cifre/pip/livelli inventati — solo lettura qualitativa, e onestà
-    quando il contenuto non ha nulla a che fare con politica monetaria
-    (es. discorsi Fed su temi non di mercato, come inclusione finanziaria).
+    Spiegazione breve di un breaking alert di banca centrale (Fed, BCE, BoJ,
+    BoE dal 2026-09-18 — comunicato o discorso) per chi non ha tempo di
+    leggere la fonte: cos'è, di cosa parla, cosa implica per XAU/USD e per i
+    mercati correlati (dollaro, rendimenti) accanto al prezzo attuale. Stesso
+    principio di analyze_macro_event: MAI cifre/pip/livelli inventati — solo
+    lettura qualitativa, e onestà quando il contenuto non ha nulla a che fare
+    con politica monetaria (es. discorsi su temi non di mercato, come
+    inclusione finanziaria).
     """
     price_txt = f"${current_price:,.2f}" if current_price > 0 else "N/D"
     context = [f"Tipo: {source_label}", f"Titolo: {title}"]
@@ -326,13 +328,16 @@ def analyze_breaking_news(source_label: str, title: str, summary: str = "",
     return _call_groq(
         system=(
             "Sei un analista che spiega in italiano, in modo brevissimo, una "
-            "comunicazione ufficiale della Fed a un trader XAU/USD che non ha "
+            "comunicazione ufficiale di una banca centrale (Fed, BCE, BoJ o "
+            "BoE — il 'Tipo' indica quale) a un trader XAU/USD che non ha "
             "tempo di leggerla. Rispondi in ESATTAMENTE questo formato, 3 righe:\n"
             "Cos'è: <tipo di comunicazione in poche parole>\n"
             "Di cosa parla: <una frase, max 20 parole, il succo reale del contenuto>\n"
-            "Per l'oro: BUY|SELL|NEUTRO — <motivo, max 15 parole, MAI cifre precise, "
-            "pip o livelli di prezzo: se il contenuto non riguarda politica "
-            "monetaria/inflazione/tassi, dillo onestamente e usa NEUTRO>\n"
+            "Per l'oro: BUY|SELL|NEUTRO — <motivo, max 20 parole, puoi citare "
+            "l'effetto atteso su dollaro/rendimenti se pertinente, MAI cifre "
+            "precise, pip o livelli di prezzo: se il contenuto non riguarda "
+            "politica monetaria/inflazione/tassi, dillo onestamente e usa "
+            "NEUTRO>\n"
             "REGOLA FONDAMENTALE: se l'estratto è marcato NON DISPONIBILE, NON "
             "hai contenuto reale su cui basarti — un titolo da solo non dice "
             "nulla sul tono del discorso. In quel caso rispondi 'Di cosa parla: "

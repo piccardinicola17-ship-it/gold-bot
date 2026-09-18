@@ -4,19 +4,19 @@ from unittest.mock import patch
 import breaking_news as bn
 
 
-class TestClassifyFedText(unittest.TestCase):
+class TestClassifyMonetaryPolicyText(unittest.TestCase):
     def test_hawkish_phrase_detected(self):
-        r = bn.classify_fed_text("The committee sees upside risks to inflation and favors a restrictive stance.")
+        r = bn.classify_monetary_policy_text("The committee sees upside risks to inflation and favors a restrictive stance.")
         self.assertEqual(r["label"], "HAWKISH")
         self.assertEqual(r["xau_bias"], "SELL")
 
     def test_dovish_phrase_detected(self):
-        r = bn.classify_fed_text("It is now appropriate to reduce the target range given inflation has eased.")
+        r = bn.classify_monetary_policy_text("It is now appropriate to reduce the target range given inflation has eased.")
         self.assertEqual(r["label"], "DOVISH")
         self.assertEqual(r["xau_bias"], "BUY")
 
     def test_neutral_text(self):
-        r = bn.classify_fed_text("The board approved routine administrative matters.")
+        r = bn.classify_monetary_policy_text("The board approved routine administrative matters.")
         self.assertEqual(r["label"], "NEUTRO")
         self.assertEqual(r["xau_bias"], "N/D")
 
@@ -52,36 +52,32 @@ class TestCheckBreakingNewsFiscalWiring(unittest.TestCase):
     def _fake_items(self, title):
         return [{"title": title, "link": "https://example.com/1", "pub_date": "", "summary": ""}]
 
+    def _first_source_only(self, title):
+        """side_effect robusto al numero di fonti in check_breaking_news():
+        il primo fetch (qualunque fonte sia) ritorna l'item finto, tutti i
+        successivi ritornano vuoto — evita che aggiungere/rimuovere fonti
+        (es. BCE/BoJ/BoE il 2026-09-18) rompa questi test per StopIteration."""
+        import itertools
+        return itertools.chain([self._fake_items(title)], itertools.repeat([]))
+
     def test_fiscal_shock_surfaces_in_alert_classification(self):
-        with patch.object(bn, "_fetch_rss", side_effect=[
-            self._fake_items("Treasury warns on government shutdown risk"),
-            [],
-        ]):
+        with patch.object(bn, "_fetch_rss", side_effect=self._first_source_only("Treasury warns on government shutdown risk")):
             alerts, seen = bn.check_breaking_news(set())
         self.assertEqual(len(alerts), 1)
         self.assertTrue(alerts[0]["classification"].get("shock_detected"))
         self.assertIn("government shutdown", alerts[0]["classification"]["matched"])
 
     def test_no_fiscal_keywords_no_shock_flag(self):
-        with patch.object(bn, "_fetch_rss", side_effect=[
-            self._fake_items("Fed chair speaks on labor market conditions"),
-            [],
-        ]):
+        with patch.object(bn, "_fetch_rss", side_effect=self._first_source_only("Fed chair speaks on labor market conditions")):
             alerts, seen = bn.check_breaking_news(set())
         self.assertEqual(len(alerts), 1)
         self.assertNotIn("shock_detected", alerts[0]["classification"])
 
     def test_seen_ids_dedup_across_calls(self):
-        with patch.object(bn, "_fetch_rss", side_effect=[
-            self._fake_items("Same headline twice"),
-            [],
-        ]):
+        with patch.object(bn, "_fetch_rss", side_effect=self._first_source_only("Same headline twice")):
             alerts1, seen1 = bn.check_breaking_news(set())
         self.assertEqual(len(alerts1), 1)
-        with patch.object(bn, "_fetch_rss", side_effect=[
-            self._fake_items("Same headline twice"),
-            [],
-        ]):
+        with patch.object(bn, "_fetch_rss", side_effect=self._first_source_only("Same headline twice")):
             alerts2, seen2 = bn.check_breaking_news(seen1)
         self.assertEqual(len(alerts2), 0)
 
