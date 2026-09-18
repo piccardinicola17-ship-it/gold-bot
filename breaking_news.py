@@ -230,11 +230,29 @@ def check_breaking_news(seen_ids: dict) -> tuple[list[dict], dict]:
             logger.debug(f"breaking_news: fetch fallito per {name}: {e}")
             continue
 
+        # BUG REALE (2026-09-18): quando BCE/BoJ/BoE sono state aggiunte a
+        # questa lista, is_first_run in gold_bot.py era già False (Fed
+        # girava da mesi) — il loro storico recente (fino a 20 item ciascuna)
+        # è stato quindi trattato come "breaking" invece che come baseline,
+        # inviando 20 messaggi Telegram in sequenza al primo giro dopo il
+        # deploy. is_first_run è un flag GLOBALE, non per-fonte: non
+        # protegge una fonte aggiunta dopo che le altre hanno già uno
+        # storico. Fix: baseline esplicita per singola fonte, marcata dentro
+        # seen_ids stesso (stesso dict, nessuno storage nuovo) — la prima
+        # volta che una fonte compare, i suoi item si salvano come visti ma
+        # non generano alert.
+        baseline_marker = f"__baseline_{name}__"
+        source_is_new = baseline_marker not in seen_ids
+        if source_is_new:
+            new_seen[baseline_marker] = True
+
         for item in items[:20]:  # solo i più recenti, evita di rimasticare tutto lo storico
             item_id = _item_id(name, item)
             if item_id in seen_ids:
                 continue
             new_seen[item_id] = True
+            if source_is_new:
+                continue
 
             text = f"{item.get('title','')} {item.get('summary','')}"
             classification = classify_fn(text)
